@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base parent: Material3 dark-only (we never go light; matches design system). -->
+    <style name="Theme.WaThemer" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/seed_background</item>
+        <item name="android:statusBarColor">@color/seed_background</item>
+        <item name="android:navigationBarColor">@color/seed_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+    </style>
+</resources>

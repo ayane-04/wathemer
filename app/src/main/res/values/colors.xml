@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App background; referenced by themes.xml (window / status bar / nav bar) -->
+    <color name="seed_background">#FF0A0A0A</color>
+
+    <!-- Adaptive icon background -->
+    <color name="ic_launcher_background">#FFF2F1F0</color>
+</resources>

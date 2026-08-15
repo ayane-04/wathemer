@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed/Xposed scope. WhatsApp only; no Android system framework. -->
+    <string-array name="xposed_scope">
+        <item>com.whatsapp</item>
+    </string-array>
+</resources>

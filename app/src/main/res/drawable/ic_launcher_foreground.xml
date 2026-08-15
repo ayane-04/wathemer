@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The W mark: a stroked polyline, symmetric by construction (legs span 28..80 about the
+     viewport centre 54), in the app accent #FFC95548 on the near-black launcher background. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M28,34 L42,76 L54,52 L66,76 L80,34"
+        android:strokeColor="#FFC95548"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

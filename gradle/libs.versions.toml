@@ -1,0 +1,39 @@
+[versions]
+agp = "8.13.2"
+kotlin = "2.2.21"
+
+xposed-legacy = "82"
+
+activity-compose = "1.10.1"
+compose-bom = "2025.10.01"
+material = "1.13.0"
+core-ktx = "1.15.0"
+
+# UCrop is published on JitPack only; settings.gradle.kts declares the repo.
+ucrop = "2.2.10"
+
+[libraries]
+# Xposed (compileOnly; provided at runtime by LSPosed)
+libxposed-legacy = { group = "de.robv.android.xposed", name = "api", version.ref = "xposed-legacy" }
+
+# AndroidX core
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
+
+# Compose (BOM-managed)
+compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
+compose-ui = { group = "androidx.compose.ui", name = "ui" }
+compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+
+# Material (XML themes only; Compose UI uses Material3 above)
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+
+# UCrop: image crop activity used by the wallpaper picker. JitPack.
+ucrop = { module = "com.github.yalantis:ucrop", version.ref = "ucrop" }
+
+[plugins]
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+kotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlinCompose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

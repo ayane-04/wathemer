@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WaThemer</string>
+    <!-- Shown by LSPosed in the modules list. -->
+    <string name="app_desc">Theme WhatsApp: colours, chat bubbles and shapes, wallpaper, fonts, icons, system bars, and a Liquid Glass mode. Everything is off until you turn it on.</string>
+</resources>
