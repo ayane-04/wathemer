@@ -31,7 +31,7 @@ object ComposeBarColors {
         }
     }
 
-    fun install(app: Application, classLoader: ClassLoader) {
+    fun install(app: Application) {
         xprefs.reload()
         val barBg     = xprefs.getInt(Prefs.COMPOSE_BAR_BG, 0)
         val entryText = xprefs.getInt(Prefs.COMPOSE_ENTRY_TEXT, 0)

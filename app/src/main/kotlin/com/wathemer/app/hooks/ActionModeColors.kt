@@ -32,7 +32,7 @@ object ActionModeColors {
         }
     }
 
-    fun install(app: Application, classLoader: ClassLoader) {
+    fun install(app: Application) {
         xprefs.reload()
         val bg          = xprefs.getInt(Prefs.OVR_ACTION_MODE_BG, 0)
         val icons       = xprefs.getInt(Prefs.OVR_ACTION_MODE_ICONS, 0)

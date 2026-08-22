@@ -117,7 +117,7 @@ class GlassBubblePane(context: Context) : View(context) {
         } catch (t: Throwable) {
             if (!loggedCollectThrow) {
                 loggedCollectThrow = true
-                Log.w("wtLiquid.Bubble", "pre-draw collect threw, frame skipped", t)
+                Log.w("WaThemer.Bubble", "pre-draw collect threw, frame skipped", t)
             }
         }
         true
@@ -145,7 +145,7 @@ class GlassBubblePane(context: Context) : View(context) {
             if (!loggedEmpty) {
                 loggedEmpty = true
                 Log.i(
-                    "wtLiquid.Bubble",
+                    "WaThemer.Bubble",
                     "pane drew with NOTHING: enabled=${params.enabled} rects=${shown.size}",
                 )
             }
@@ -164,14 +164,14 @@ class GlassBubblePane(context: Context) : View(context) {
         } catch (e: Throwable) {
             if (!loggedThrow) {
                 loggedThrow = true
-                Log.w("wtLiquid.Bubble", "backdrop lambdas threw, frame skipped", e)
+                Log.w("WaThemer.Bubble", "backdrop lambdas threw, frame skipped", e)
             }
             return
         }
         if (!loggedFirst) {
             loggedFirst = true
             Log.i(
-                "wtLiquid.Bubble",
+                "WaThemer.Bubble",
                 "pane drawing ${shown.size} bubbles, size=${width}x$height " +
                     "backdrop=${bmp?.width}x${bmp?.height} place=${place != null}",
             )
@@ -206,7 +206,7 @@ class GlassBubblePane(context: Context) : View(context) {
             }.onFailure {
                 if (!loggedThrow) {
                     loggedThrow = true
-                    Log.w("wtLiquid.Bubble", "painter threw, bubble skipped", it)
+                    Log.w("WaThemer.Bubble", "painter threw, bubble skipped", it)
                 }
             }
         }

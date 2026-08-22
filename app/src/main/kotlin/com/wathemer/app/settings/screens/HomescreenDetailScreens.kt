@@ -1,3 +1,4 @@
+// Per-element override pages under Homescreen; every group is its own tap-to-enter sub-page.
 package com.wathemer.app.settings.screens
 
 import androidx.compose.foundation.layout.Arrangement
@@ -29,14 +30,11 @@ import com.wathemer.app.settings.preview.LocalThemeSnapshot
 import com.wathemer.app.settings.preview.WaPreview
 import com.wathemer.app.settings.preview.WaPreviewKind
 
-/** Per-element override pages under Homescreen; every group is its own tap-to-enter sub-page. */
-
 /* ── Shared scaffolding ─────────────────────────────────────────────────── */
 
 @Composable
 private fun OverrideScreenScaffold(
     nav: NavController,
-    prefs: Prefs,
     title: String,
     subtitle: String,
     preview: @Composable () -> Unit,
@@ -107,7 +105,7 @@ private fun PrefsOverrideRow(
 @Composable
 fun HomescreenChatListScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Chat list",
         subtitle = "Home · Chat list",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -128,7 +126,7 @@ fun HomescreenChatListScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenChatListRowsScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Rows",
         subtitle = "Home · Chat list · Rows",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -143,7 +141,7 @@ fun HomescreenChatListRowsScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenChatListSearchScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Search bar",
         subtitle = "Home · Chat list · Search bar",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -160,7 +158,7 @@ fun HomescreenChatListSearchScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenTabBarScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Bottom navigation",
         subtitle = "Home · Tab bar",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -181,7 +179,7 @@ fun HomescreenTabBarScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenTabBarBarScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Bar",
         subtitle = "Home · Tab bar · Bar",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -194,7 +192,7 @@ fun HomescreenTabBarBarScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenTabBarItemsScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Tab items",
         subtitle = "Home · Tab bar · Tab items",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -211,7 +209,7 @@ fun HomescreenTabBarItemsScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenHeaderScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Header",
         subtitle = "Home · Header",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -228,7 +226,7 @@ fun HomescreenHeaderScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenFabScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "FAB",
         subtitle = "Home · FAB",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -249,7 +247,7 @@ fun HomescreenFabScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenFabMainScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Main FAB",
         subtitle = "Home · FAB · Main",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },
@@ -262,7 +260,7 @@ fun HomescreenFabMainScreen(nav: NavController, prefs: Prefs) {
 @Composable
 fun HomescreenFabMiniFabScreen(nav: NavController, prefs: Prefs) {
     OverrideScreenScaffold(
-        nav = nav, prefs = prefs,
+        nav = nav,
         title = "Meta AI mini-fab",
         subtitle = "Home · FAB · Meta AI",
         preview = { WaPreview(WaPreviewKind.HomeFull, prefs) },

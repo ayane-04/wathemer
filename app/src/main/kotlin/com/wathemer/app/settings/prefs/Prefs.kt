@@ -157,17 +157,17 @@ class Prefs(
 
     /** Backdrop blur radius in dp (4..40). The screen blur behind every glass surface. */
     var glassBlur: Int
-        get() = sp.getInt(KEY_GLASS_BLUR, 16)
+        get() = sp.getInt(KEY_GLASS_BLUR, 12)
         set(value) { commitInt(KEY_GLASS_BLUR, value.coerceIn(4, 40)) }
 
     /** Tint alpha 0..80. How much white the glass adds over what shows through. */
     var glassTint: Int
-        get() = sp.getInt(KEY_GLASS_TINT, 12)
+        get() = sp.getInt(KEY_GLASS_TINT, 10)
         set(value) { commitInt(KEY_GLASS_TINT, value.coerceIn(0, 80)) }
 
     /** Refraction amplitude ceiling in dp (0..60). 0 disables the lensing at the edges. */
     var glassDisplace: Int
-        get() = sp.getInt(KEY_GLASS_DISPLACE, 25)
+        get() = sp.getInt(KEY_GLASS_DISPLACE, 20)
         set(value) { commitInt(KEY_GLASS_DISPLACE, value.coerceIn(0, 60)) }
 
     /** Bevel band as a percent of the surface's smaller side (5..40). Capped by corner radius. */
@@ -179,6 +179,26 @@ class Prefs(
     var glassRadius: Int
         get() = sp.getInt(KEY_GLASS_RADIUS, 20)
         set(value) { commitInt(KEY_GLASS_RADIUS, value.coerceIn(0, 40)) }
+
+    /** Transmitted-backdrop gamma as a percent (30..100). Below 100 lifts the darks; 100 is off and reads flattest. */
+    var glassGamma: Int
+        get() = sp.getInt(KEY_GLASS_GAMMA, 70)
+        set(value) { commitInt(KEY_GLASS_GAMMA, value.coerceIn(30, 100)) }
+
+    /** Rim highlight strength 0..100, the alpha of the edge stroke. 0 is off and draws nothing. */
+    var glassRim: Int
+        get() = sp.getInt(KEY_GLASS_RIM, 10)
+        set(value) { commitInt(KEY_GLASS_RIM, value.coerceIn(0, 100)) }
+
+    /** Rim stroke width in dp (1..4). Thin is the point; wide stops reading as an edge. */
+    var glassRimWidth: Int
+        get() = sp.getInt(KEY_GLASS_RIM_WIDTH, 2)
+        set(value) { commitInt(KEY_GLASS_RIM_WIDTH, value.coerceIn(1, 4)) }
+
+    /** Rim gradient angle in degrees (0..360); decides which side of every surface lights up. */
+    var glassRimAngle: Int
+        get() = sp.getInt(KEY_GLASS_RIM_ANGLE, 85)
+        set(value) { commitInt(KEY_GLASS_RIM_ANGLE, value.coerceIn(0, 360)) }
 
     /** Grouped-message merging on glass bubbles: continuations flatten the top corner on the sender's side. */
     var glassBubbleMerge: Boolean
@@ -235,6 +255,9 @@ class Prefs(
         get() = sp.getBoolean(KEY_SYSTEM_BAR_AUTO_ICONS, true)
         set(value) { commitBoolean(KEY_SYSTEM_BAR_AUTO_ICONS, value) }
 
+    /** True when the key is actually stored. A getter cannot tell you: it answers with a default, and an unset global means "substitute nothing". */
+    fun isSet(key: String): Boolean = sp.contains(key)
+
     /** Override token by key; 0 means not overridden, which callers read as "use global". */
     fun getOverride(key: String): Int = sp.getInt(key, 0)
 
@@ -289,6 +312,30 @@ class Prefs(
         commitChecked("applyPresetFull", ok)
         markWorldReadable()
         if (ok) Log.i(TAG, "applyPresetFull: globals set + ${ALL_COLOR_OVERRIDE_KEYS.size} colour overrides cleared (primary=#%08x bg=#%08x text=#%08x)".format(primary, background, text))
+    }
+
+    /** Write a whole theme in one commit: [clear] is removed, then [values] written. Keys outside [THEME_WRITABLE_KEYS] are refused, so a shared file cannot reach any other setting. */
+    fun applyThemeWrite(clear: Collection<String>, values: Map<String, Any>): Boolean {
+        val rejected = (clear + values.keys).filterNot { it in THEME_WRITABLE_KEYS }
+        if (rejected.isNotEmpty()) Log.w(TAG, "applyThemeWrite: refused ${rejected.size} key(s) outside the theme set: $rejected")
+        val ok = sp.edit().apply {
+            // Skip a key that is also being written, so the outcome cannot depend on editor ordering.
+            clear.forEach { if (it in THEME_WRITABLE_KEYS && it !in values) remove(it) }
+            for ((k, v) in values) {
+                if (k !in THEME_WRITABLE_KEYS) continue
+                when (v) {
+                    is Int -> putInt(k, v)
+                    is Boolean -> putBoolean(k, v)
+                    is String -> putString(k, v)
+                    // Dropping an unexpected type beats writing a wrong one under a key a hook reads.
+                    else -> Log.w(TAG, "applyThemeWrite: $k carries ${v.javaClass.simpleName}, not a pref type")
+                }
+            }
+        }.commit()
+        commitChecked("applyThemeWrite", ok)
+        markWorldReadable()
+        if (ok) Log.i(TAG, "applyThemeWrite: cleared ${clear.size}, wrote ${values.size}")
+        return ok
     }
 
     /** Logs failed commits: after a reinstall the store can belong to the old UID and writes silently vanish. */
@@ -480,6 +527,10 @@ class Prefs(
         const val KEY_GLASS_DISPLACE = "glass_displace"
         const val KEY_GLASS_BEVEL    = "glass_bevel"
         const val KEY_GLASS_RADIUS   = "glass_radius"
+        const val KEY_GLASS_GAMMA    = "glass_gamma"
+        const val KEY_GLASS_RIM      = "glass_rim"
+        const val KEY_GLASS_RIM_WIDTH = "glass_rim_width"
+        const val KEY_GLASS_RIM_ANGLE = "glass_rim_angle"
         const val KEY_GLASS_BUBBLE_MERGE = "glass_bubble_merge"
 
         /** Every colour override key, the one list [applyPresetFull] clears. Every new colour key must be added here; structural keys stay out so presets keep them. */
@@ -514,6 +565,28 @@ class Prefs(
             // System bars (colours only, enabled / AUTO_ICONS toggles excluded by design)
             OVR_STATUS_BAR_BG,
         )
+
+        /** The colour keys a theme file carries. Derived from the override list, so a new colour key joins it by itself. */
+        val THEME_COLOR_KEYS: List<String> =
+            listOf(KEY_PRIMARY, KEY_BACKGROUND, KEY_TEXT, KEY_UNREAD_ACCENT, KEY_UNREAD_COUNT_TEXT) +
+                ALL_COLOR_OVERRIDE_KEYS
+
+        /** The on/off keys a theme file carries. Glass is out by choice, and so is anything true of one device only. */
+        val THEME_FLAG_KEYS: List<String> = listOf(
+            KEY_IOS_ICON_PACK, KEY_CHATLIST_DIVIDER, KEY_EFFECT_SNOW,
+            KEY_SYSTEM_BARS_ENABLED, KEY_SYSTEM_BAR_AUTO_ICONS, KEY_FONT_MAP_MONOSPACE,
+        )
+
+        /** Every key an imported theme may touch. A key missing here is unreachable from a theme file, which is the whole guarantee. */
+        val THEME_WRITABLE_KEYS: Set<String> = (
+            THEME_COLOR_KEYS + THEME_FLAG_KEYS + listOf(
+                BUBBLE_STYLE_INCOMING, BUBBLE_STYLE_OUTGOING,
+                KEY_WALLPAPER_ENABLED, KEY_WALLPAPER_PATH, KEY_WALLPAPER_DIM, KEY_WALLPAPER_BLUR,
+                KEY_CUSTOM_FONT, KEY_FONT_USER_FILE, KEY_FONT_USER_NAME, KEY_FONT_USER_STAMP,
+                // Here only so a theme with no wallpaper can switch glass off; no theme file ever names it.
+                KEY_GLASS_ENABLED,
+            )
+            ).toSet()
 
         /** WA's own dark-mode colours, mostly UI display fallbacks. Not settings-only: SystemBars and WallpaperImage read them hook-side, so grep before repurposing. */
         const val DEFAULT_PRIMARY = 0xFF00A884.toInt()      // WA standard tint (teal-green)

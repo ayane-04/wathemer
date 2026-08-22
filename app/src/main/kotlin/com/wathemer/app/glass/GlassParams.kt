@@ -74,7 +74,7 @@ class GlassParams(var density: Float) {
         set(v) { set(field, v.coerceIn(0L, 2000L)) { field = it } }
 
     // ── Refraction tier (API 33+) ──────────────────────────────────────────────────
-    // Live glass at downsample 4 measured 0-1 ms at P90; there is room to bend the source.
+    // Live glass at downsample 4 leaves headroom to bend the source.
 
     /** Off falls back to the frosted tier even on API 33+, for A/B against the shader. */
     var refractionEnabled: Boolean = true
@@ -92,7 +92,7 @@ class GlassParams(var density: Float) {
     var depthRatio: Float = 0.35f
         set(v) { set(field, v.coerceIn(0f, 8f)) { field = it } }
 
-    /** Soft ceiling on refraction displacement in px; unbounded measured 241 px on the chat-list card. */
+    /** Soft ceiling on refraction displacement in px; unbounded it smears on a large panel. */
     var maxDisplacePx: Float = 45f
         set(v) { set(field, v.coerceIn(0f, 400f)) { field = it } }
 
@@ -158,7 +158,7 @@ class GlassParams(var density: Float) {
         set(v) { set(field, v.coerceIn(0L, 2000L)) { field = it } }
 
     // ── Micro distortion (light pass only) ─────────────────────────────────────────
-    // Perturbs the normal only; the window must stay 4t(1-t), zero at both band ends (1-t jittered 4.4 luma).
+    // Perturbs the normal only; the window must stay 4t(1-t), zero at both band ends (1-t outlines the rim).
 
     /** Normal-tilt amplitude; off by default. Rim outlining is the window's fault, not the amplitude's. */
     var microAmp: Float = 0f
@@ -189,7 +189,34 @@ class GlassParams(var density: Float) {
     var light3Y: Float = -0.38f
         set(v) { set(field, v.coerceIn(-4f, 4f)) { field = it } }
 
-    /** Gamma on the transmitted backdrop; a contrast multiply pivots mid-grey, and the mean here is 2.7/255. */
-    var transGamma: Float = 0.7f
+    /** Gamma on the transmitted backdrop; a contrast multiply pivots mid-grey, wrong for a dark backdrop. */
+    var transGamma: Float = defaultTransGamma
         set(v) { set(field, v.coerceIn(0.3f, 1f)) { field = it } }
+
+    // ── Rim stroke ─────────────────────────────────────────────────────────────────
+    // A hard line on the silhouette. The light pass only ever makes a wide soft lobe.
+
+    /** Stroke width in px; 0 is off and costs nothing. */
+    var rimStrokePx: Float = defaultRimStrokePx
+        set(v) { set(field, v.coerceIn(0f, 24f)) { field = it } }
+
+    /** Gradient axis in degrees, clockwise from +x. Decides which side of the rim lights up. */
+    var rimStrokeAngle: Float = defaultRimStrokeAngle
+        set(v) { set(field, v) { field = it } }
+
+    /** Off for full-bleed panels, whose bounds are the screen's. */
+    var rimEnabled: Boolean = true
+        set(v) { set(field, v) { field = it } }
+
+    /** Bright stop of the rim gradient; the opposite stop is the same hue at zero alpha. */
+    var rimStrokeColor: Int = defaultRimStrokeColor
+        set(v) { set(field, v) { field = it } }
+
+    /** Install-time globals, so the hook sets them once rather than at every construction site. */
+    companion object {
+        @JvmStatic var defaultTransGamma: Float = 0.7f
+        @JvmStatic var defaultRimStrokePx: Float = 0f
+        @JvmStatic var defaultRimStrokeAngle: Float = 85f
+        @JvmStatic var defaultRimStrokeColor: Int = Color.WHITE
+    }
 }

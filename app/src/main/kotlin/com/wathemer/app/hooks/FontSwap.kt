@@ -15,7 +15,6 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
-import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.io.File
 
 object FontSwap {
@@ -41,7 +40,7 @@ object FontSwap {
         XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply { makeWorldReadable(); reload() }
     }
 
-    fun install(lpparam: XC_LoadPackage.LoadPackageParam) {
+    fun install() {
         xprefs.reload()
         val choice = (xprefs.getString(Prefs.KEY_CUSTOM_FONT, "") ?: "").trim()
         if (choice.isBlank()) {

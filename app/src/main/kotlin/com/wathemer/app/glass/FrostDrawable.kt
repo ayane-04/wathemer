@@ -22,14 +22,12 @@ class FrostDrawable(
      * supplies the blur. No InsetDrawable here: setBackground folds its padding in and it runs away.
      */
     private val small: Bitmap?,
-    /** Unused on purpose: the matrix uses the bitmap's real size, never a divide by this. */
-    private val shrink: Int,
     private var radius: Float,
     private var tint: Int,
     /** A 1px-ish rim, echoing the Fresnel highlight the GlassView panes draw. 0 disables it. */
     private val strokeWidth: Float = 0f,
     private val strokeColor: Int = 0,
-    /** Fill the full bounds; the Calls tab discs pad 45 but their ripple fills all 159. */
+    /** Fill the full bounds; the Calls tab discs' own ripple ignores their padding. */
     private val ignorePadding: Boolean = false,
 ) : Drawable() {
 
@@ -67,7 +65,7 @@ class FrostDrawable(
         val dm = view.resources.displayMetrics
 
         // Matrix, not an integer src rect: the bitmap is not screen-sized and rounding jumped layouts.
-        // Screen, not window, position: in a dialog getLocationInWindow sampled 540px below itself.
+        // Screen, not window, position: in a dialog getLocationInWindow sampled well below itself.
         if (small != null) {
             view.getLocationOnScreen(loc)
             matrix.reset()
@@ -78,7 +76,7 @@ class FrostDrawable(
             matrix.postTranslate(-loc[0].toFloat(), -loc[1].toFloat())
         }
 
-        // Inset by the view's padding: a chip's touch target is taller than its visible pill (137 vs 87px).
+        // Inset by the view's padding: a chip's touch target is taller than its visible pill.
         if (ignorePadding) {
             clip.set(b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat())
         } else {
@@ -118,9 +116,6 @@ class FrostDrawable(
 
         /** Rebuild at 1/4 before use: one bilinear step from 1/20 to full size leaves visible facets. */
         private const val SMOOTH_FRACTION = 4
-
-        /** Kept for callers; the draw path derives its scale from the bitmap, not from this. */
-        const val SHRINK = SMOOTH_FRACTION
 
         /** Build the shared blurred copy by progressive halving; one big jump leaves blocky facets. */
         fun shrinkOf(source: Bitmap): Bitmap? = runCatching {

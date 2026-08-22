@@ -20,11 +20,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -110,8 +112,12 @@ fun ColorPickerSheet(
         dragHandle = null,
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
     ) {
+        // Scrolls: the square SV area alone is as tall as the sheet is wide, so the body can outgrow the screen.
         Column(
-            modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 20.dp),
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .verticalScroll(rememberScrollState())
+                .padding(start = 18.dp, end = 18.dp, top = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // Drag handle
@@ -215,22 +221,28 @@ fun ColorPickerSheet(
                 },
             )
 
-            // Actions
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(1.dp, rule),
-                ) { Text("Cancel", color = Color.White, fontWeight = FontWeight.SemiBold) }
-                Button(
-                    onClick = { onApply(currentArgb) },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = currentColor,
-                        contentColor = if (luminance(currentArgb) > 0.5f) Color.Black else Color.White,
-                    ),
-                ) { Text("Apply colour", fontWeight = FontWeight.Bold) }
-            }
+        }
+
+        // Outside the scroll: these stay reachable however tall the body gets.
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 20.dp),
+        ) {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f),
+                border = BorderStroke(1.dp, rule),
+            ) { Text("Cancel", color = Color.White, fontWeight = FontWeight.SemiBold) }
+            Button(
+                onClick = { onApply(currentArgb) },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = currentColor,
+                    contentColor = if (luminance(currentArgb) > 0.5f) Color.Black else Color.White,
+                ),
+            ) { Text("Apply colour", fontWeight = FontWeight.Bold) }
         }
     }
 }
@@ -595,4 +607,3 @@ private fun luminance(argb: Int): Float {
     val b = AndroidColor.blue(argb) / 255f
     return 0.2126f * r + 0.7152f * g + 0.0722f * b
 }
-

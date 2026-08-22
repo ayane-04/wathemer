@@ -12,7 +12,7 @@ import androidx.annotation.RequiresApi
  */
 object GlassShader {
 
-    private const val TAG = "wtLiquid.Shader"
+    private const val TAG = "WaThemer.Shader"
 
     /** Shared prelude (SDF, gradient, lens profile), included in both programs so geometry cannot drift. */
     private val COMMON = """

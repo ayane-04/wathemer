@@ -174,7 +174,6 @@ fun GlobalColorsScreen(
 @Composable
 private fun GlobalSubScreenScaffold(
     nav: NavController,
-    prefs: Prefs,
     title: String,
     subtitle: String,
     preview: @Composable () -> Unit,
@@ -209,7 +208,7 @@ fun GlobalColorsTokensScreen(nav: NavController, prefs: Prefs) {
     var picking by remember { mutableStateOf<CoreToken?>(null) }
     val recents = remember(snapshot.value) { prefs.recents }
     GlobalSubScreenScaffold(
-        nav, prefs, title = "Colours", subtitle = "Global · Colours",
+        nav, title = "Colours", subtitle = "Global · Colours",
         preview = { WaPreview(WaPreviewTab.Home, prefs) },
     ) {
         TokenRow(icon = "◐", name = "Accent",     color = primary,    onClick = { picking = CoreToken.PRIMARY })
@@ -249,7 +248,7 @@ fun GlobalColorsUnreadScreen(nav: NavController, prefs: Prefs) {
     val effAcc = if (unreadAccent != 0) unreadAccent else prefs.primary
     val effCnt = if (unreadCountText != 0) unreadCountText else prefs.text
     GlobalSubScreenScaffold(
-        nav, prefs, title = "Unread badges", subtitle = "Global · Unread badges",
+        nav, title = "Unread badges", subtitle = "Global · Unread badges",
         preview = { WaPreview(WaPreviewTab.Home, prefs) },
     ) {
         TokenRow(icon = "●", name = "Unread accent",     color = effAcc, onClick = { picking = UnreadToken.ACCENT })
@@ -285,7 +284,7 @@ fun GlobalColorsToolbarScreen(nav: NavController, prefs: Prefs) {
     var amTitle       by remember { mutableIntStateOf(prefs.getOverride(Prefs.OVR_ACTION_MODE_TITLE)) }
     var amCloseRipple by remember { mutableIntStateOf(prefs.getOverride(Prefs.OVR_ACTION_MODE_CLOSE_RIPPLE)) }
     GlobalSubScreenScaffold(
-        nav, prefs, title = "Selection mode", subtitle = "Global · Selection",
+        nav, title = "Selection mode", subtitle = "Global · Selection",
         preview = { WaPreview(WaPreviewTab.Selection, prefs) },
     ) {
         SectionHeader(title = "Selection mode", subtitle = "The long-press toolbar that appears when selecting chat rows or messages. Shared across Home and Conversation.")
@@ -354,7 +353,7 @@ fun StatusBarScreen(nav: NavController, prefs: Prefs) {
     // Shown when the override is 0; must match the SystemBars cascade: status, then home toolbar bg, then accent.
     val statusFallback = prefs.getOverride(Prefs.OVR_TOOLBAR_BG).takeIf { it != 0 } ?: prefs.primary
     GlobalSubScreenScaffold(
-        nav, prefs, title = "Status bar", subtitle = "Global · Status bar",
+        nav, title = "Status bar", subtitle = "Global · Status bar",
         preview = { WaPreview(WaPreviewTab.Home, prefs) },
     ) {
         ToggleItem(
@@ -446,4 +445,3 @@ private val PRESETS = listOf(
 /** Foreground that reads over [accent]. The dark branch does fire; do not "fix" this to always return [text]. */
 private fun onAccentFor(accent: Int, text: Int): Int =
     if (lumaArgb(accent) > 0.55f) 0xFF101010.toInt() else text
-

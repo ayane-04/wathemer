@@ -2,7 +2,6 @@
 package com.wathemer.app.hooks
 
 import android.app.Activity
-import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -31,7 +30,7 @@ object EffectsOverlays {
     /** Attach guard, one snow layer per window; the wt_ prefix keeps the wallpaper machinery's hands off it. */
     private const val SNOW_TAG = "wt_effect_snow"
 
-    fun install(app: Application) {
+    fun install() {
         val xprefs = XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
             makeWorldReadable()
             reload()

@@ -47,6 +47,9 @@ enum class Screen {
 
     // Extras tree
     Extras,
+
+    // Saved themes: export, import, and the library of slots
+    Themes,
 }
 
 /** In-memory nav stack on a SnapshotStateList. Must stay behind [rememberNavController]'s saver or rotation drops the user back to the root. */

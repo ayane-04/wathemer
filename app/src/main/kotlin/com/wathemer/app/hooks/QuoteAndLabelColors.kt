@@ -9,7 +9,6 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.StateListDrawable
-import android.os.Build
 import android.widget.TextView
 import com.wathemer.app.BuildConfig
 import com.wathemer.app.hooks.dispatch.ForegroundKillDispatcher
@@ -160,15 +159,11 @@ object QuoteAndLabelColors {
         val firstGd: GradientDrawable = when (inner) {
             is GradientDrawable -> inner
             is StateListDrawable -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    (0 until inner.stateCount)
-                        .asSequence()
-                        .mapNotNull { runCatching { inner.getStateDrawable(it) }.getOrNull() }
-                        .filterIsInstance<GradientDrawable>()
-                        .firstOrNull()
-                } else {
-                    inner.current as? GradientDrawable
-                }
+                (0 until inner.stateCount)
+                    .asSequence()
+                    .mapNotNull { runCatching { inner.getStateDrawable(it) }.getOrNull() }
+                    .filterIsInstance<GradientDrawable>()
+                    .firstOrNull()
             }
             else -> null
         } ?: return defaults

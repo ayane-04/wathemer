@@ -9,7 +9,6 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
-import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -358,12 +357,7 @@ object BubbleColors {
                                 Path.Direction.CW,
                             )
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            outline.setPath(path)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            outline.setConvexPath(path)
-                        }
+                        outline.setPath(path)
                     } else {
                         outline.setRoundRect(l, t, r, b, cornerRadius)
                     }

@@ -3,10 +3,12 @@ package com.wathemer.app.glass
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.RecordingCanvas
 import android.graphics.RuntimeShader
+import android.graphics.Shader
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
@@ -51,8 +53,8 @@ class GlassView @JvmOverloads constructor(
         }
 
     /**
-     * Capture in pre-draw, and the capture-invalidate loop is deliberate: removing the invalidate
-     * froze the glass (idle fell 520 frames to 0, panel stuck). Throttle the idle case, never stop it.
+     * Capture in pre-draw; the capture-invalidate loop is deliberate. Removing the invalidate
+     * freezes the glass, so throttle the idle case, never stop it.
      */
     private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
         // Guarded whole: capture() draws WhatsApp's own views, and an escape here crashes the UI thread every frame.
@@ -81,7 +83,7 @@ class GlassView @JvmOverloads constructor(
         } catch (t: Throwable) {
             if (!loggedPreDrawThrow) {
                 loggedPreDrawThrow = true
-                Log.w("wtLiquid.GlassView", "pre-draw capture threw, frame skipped", t)
+                Log.w("WaThemer.GlassView", "pre-draw capture threw, frame skipped", t)
             }
         }
         true // never cancel the host's frame
@@ -99,7 +101,7 @@ class GlassView @JvmOverloads constructor(
     private var lastScreenY = Int.MIN_VALUE
 
     // ── Idle throttling ────────────────────────────────────────────────────────────────
-    // Idle ran ~1950 frames per 8 s; slow it, never stop it, and the heartbeat covers unseen invalidates.
+    // Idle over-renders; slow it, never stop it, and the heartbeat covers unseen invalidates.
 
     private var lastActivityMs = 0L
 
@@ -333,7 +335,7 @@ class GlassView @JvmOverloads constructor(
 
     private val flatPaint = Paint()
 
-    /** Shade only the bevel band; the plateau gets the exact constant (whole-surface costs 11 ms GPU P50). */
+    /** Shade only the bevel band; the plateau gets the exact constant, sparing a whole-surface shader pass. */
     private fun drawLight(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
@@ -384,6 +386,55 @@ class GlassView @JvmOverloads constructor(
         return ((a * 255f + 0.5f).toInt() shl 24) or (ch(tr) shl 16) or (ch(tg) shl 8) or ch(tb)
     }
 
+    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private var rimW = -1
+    private var rimH = -1
+    private var rimAngle = Float.NaN
+    private var rimColor = 0
+    private var rimWidth = -1f
+
+    /** A gradient-shaded line on the silhouette. Rebuilt only when size, angle, colour or width move. */
+    private fun drawRim(canvas: Canvas) {
+        if (!params.rimEnabled) return
+        val px = params.rimStrokePx
+        if (px <= 0f) return
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
+
+        if (rimW != width || rimH != height || rimAngle != params.rimStrokeAngle ||
+            rimColor != params.rimStrokeColor || rimWidth != px
+        ) {
+            rimW = width
+            rimH = height
+            rimAngle = params.rimStrokeAngle
+            rimColor = params.rimStrokeColor
+            rimWidth = px
+            rimPaint.strokeWidth = px
+            val rad = Math.toRadians(rimAngle.toDouble())
+            // Half the box projected onto the axis, so the ramp spans the surface whatever the angle.
+            val ext = (abs(cos(rad)) * w + abs(sin(rad)) * h) / 2.0
+            val dx = (cos(rad) * ext).toFloat()
+            val dy = (sin(rad) * ext).toFloat()
+            // Lit at both ends of the axis, clear across the middle.
+            rimPaint.shader = LinearGradient(
+                w / 2f - dx, h / 2f - dy, w / 2f + dx, h / 2f + dy,
+                intArrayOf(rimColor, rimColor and 0x00FFFFFF, rimColor),
+                floatArrayOf(0f, 0.5f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+        }
+        // Scaled by materialize, or the rim arrives at full strength while the pane fades up.
+        rimPaint.alpha = (255f * materialize).toInt().coerceIn(0, 255)
+        // Inset half the width; clipToOutline eats the outer half otherwise.
+        val inset = px / 2f
+        val r = (params.cornerRadius - inset).coerceAtLeast(0f)
+        canvas.drawRoundRect(inset, inset, w - inset, h - inset, r, r, rimPaint)
+    }
+
     private fun deriveBevel(w: Int, h: Int) {
         val frac = params.bevelFraction
         if (frac <= 0f || w <= 0 || h <= 0) return
@@ -426,5 +477,7 @@ class GlassView @JvmOverloads constructor(
         } else if (params.tintColor ushr 24 != 0) {
             canvas.drawColor(params.tintColor)
         }
+        // Over the light pass, and plain Canvas so the software path keeps it.
+        drawRim(canvas)
     }
 }

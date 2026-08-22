@@ -25,7 +25,7 @@ class GlassBubbleDrawable(
     /** The wallpaper's dim, and 0 when it is already folded into the backdrop bitmap. */
     private val dim: Float,
     private val backdrop: (View) -> Bitmap?,
-    /** Maps backdrop pixels to screen via the ImageView's own imageMatrix; hand-deriving lands 120px off. */
+    /** Maps backdrop pixels to screen via the ImageView's own imageMatrix; hand-deriving lands it wrong. */
     private val placement: () -> Matrix?,
     /** The row being drawn: the only live route to a screen position; callback and canvas matrix are dead. */
     private val rowProvider: () -> View?,
@@ -75,7 +75,7 @@ class GlassBubbleDrawable(
         } catch (t: Throwable) {
             if (!loggedThrow) {
                 loggedThrow = true
-                Log.w("wtLiquid.Bubble", "draw threw, bubble skipped", t)
+                Log.w("WaThemer.Bubble", "draw threw, bubble skipped", t)
             }
         }
     }
@@ -98,7 +98,7 @@ class GlassBubbleDrawable(
         if (clip.width() <= 0f || clip.height() <= 0f) return
 
         // Resolve the backdrop only beside a row's true screen position, or it is built and never drawn.
-        // getLocationOnScreen, never InWindow: those agree only within one window (the 540px frost bug).
+        // getLocationOnScreen, never InWindow: those agree only within one window (the frost sampling bug).
         var bmp: Bitmap? = null
         var screenX = 0f
         var screenY = 0f

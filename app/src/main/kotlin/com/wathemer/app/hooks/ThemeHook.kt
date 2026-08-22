@@ -12,15 +12,11 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
-import java.util.concurrent.ConcurrentHashMap
 
 /** Four framework hooks that intercept every colour WhatsApp resolves, plus a relaunch refresh. Framework classes only, so no DexKit. */
 object ThemeHook {
 
     private const val TAG = "WaThemer"
-
-    /** How many non-colour int resolutions [probeNarrowedType] inspects before going quiet. */
-    private const val TYPE_PROBE_LIMIT = 400
 
     private val xprefs: XSharedPreferences by lazy {
         XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
@@ -47,7 +43,7 @@ object ThemeHook {
         }
     }
 
-    /** Rebuilds the map from prefs. Defaults must stay 0 = unset, never Prefs.STOCK_*: a non-zero default themes the whole app. */
+    /** Rebuilds the map from prefs. Defaults must stay 0 = unset: a non-zero default themes the whole app. */
     private fun reloadColors() {
         xprefs.reload()
         val primary = xprefs.getInt(Prefs.KEY_PRIMARY, 0)
@@ -59,23 +55,6 @@ object ThemeHook {
             "-> primary=#%08x bg=#%08x text=#%08x".format(primary, background, text)
         )
         ColorMap.rebuild(primary, background, text)
-    }
-
-    /** Counts non-colour ints seen, to bound [probeNarrowedType]. */
-    private var typeProbes = 0
-
-    /** Logs if hook 1's type narrowing would have dropped a substitution; a lost colour is otherwise invisible. */
-    private fun probeNarrowedType(tv: TypedValue) {
-        if (typeProbes >= TYPE_PROBE_LIMIT) return
-        if (tv.type !in TypedValue.TYPE_FIRST_INT..TypedValue.TYPE_LAST_INT) return
-        typeProbes++
-        val after = ColorMap.substitute(tv.data)
-        if (after != tv.data) {
-            XposedBridge.log(
-                "[$TAG] TYPE-NARROW: non-colour TypedValue type=0x%x data=#%08x would have become #%08x without the colour-type narrowing"
-                    .format(tv.type, tv.data, after)
-            )
-        }
     }
 
     /** hookAllMethods fails silently on no match; without the log a whole layer goes off the air unnoticed. */
@@ -100,7 +79,6 @@ object ThemeHook {
                     val tv = param.args.firstOrNull { it is TypedValue } as? TypedValue ?: return
                     if (tv.data == 0) return
                     if (tv.type !in TypedValue.TYPE_FIRST_COLOR_INT..TypedValue.TYPE_LAST_COLOR_INT) {
-                        probeNarrowedType(tv)
                         return
                     }
                     tv.data = ColorMap.substitute(tv.data)
@@ -151,33 +129,8 @@ object ThemeHook {
                     val after = ColorMap.substitute(before)
                     // Write only on change: an unconditional write autoboxes a fresh Integer per setColor call.
                     if (after != before) param.args[0] = after
-                    if (paintProbes < PAINT_PROBE_LIMIT) probePaintSubstitution(before, after)
                 }
             }
-        )
-    }
-
-    /** How many `Paint.setColor` calls [probePaintSubstitution] inspects before going quiet. */
-    private const val PAINT_PROBE_LIMIT = 3000
-
-    private var paintProbes = 0
-    private var paintSubs = 0
-    private val paintHits = ConcurrentHashMap<Int, Int>()
-
-    /** Lock-free blast-radius probe for hook 4: counts may drift, but the histogram must stay a ConcurrentHashMap. */
-    private fun probePaintSubstitution(before: Int, after: Int) {
-        paintProbes++
-        if (before != after) {
-            val rgb = before and 0xFFFFFF
-            paintHits.merge(rgb, 1, Int::plus)
-            paintSubs++
-        }
-        if (paintProbes < PAINT_PROBE_LIMIT) return
-        val top = paintHits.entries.sortedByDescending { it.value }.take(8)
-            .joinToString { "#%06x x%d".format(it.key, it.value) }
-        XposedBridge.log(
-            "[$TAG] PAINT-PROBE: $paintSubs of $paintProbes Paint.setColor calls rewritten " +
-                "(${paintSubs * 100 / maxOf(paintProbes, 1)}%). Top sources: $top"
         )
     }
 

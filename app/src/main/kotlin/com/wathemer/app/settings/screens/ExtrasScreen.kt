@@ -294,7 +294,8 @@ private fun FontPickerDialog(
             val builtinMatches = FONT_CHOICES.filter { matches(it.label) }
             val stockMatches = matches("System default")
             LazyColumn(
-                modifier = Modifier.heightIn(max = 420.dp),
+                // Weight as well as the cap: the cap alone overruns a short screen and the list loses its bottom.
+                modifier = Modifier.weight(1f, fill = false).heightIn(max = 420.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (stockMatches) {

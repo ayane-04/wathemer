@@ -32,11 +32,14 @@ import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.ShapeDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.TextPaint
 import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -57,8 +60,6 @@ import android.widget.ListView
 import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.core.widget.NestedScrollView
-import androidx.recyclerview.widget.RecyclerView
 import com.wathemer.app.BuildConfig
 import com.wathemer.app.glass.FrostDrawable
 import com.wathemer.app.glass.GlassBubbleDrawable
@@ -88,18 +89,22 @@ object GlassHook {
 
     // ── Tuning constants, all in dp ───────────────────────────────────────────────────
     // dp not px so every density matches the tuning device; var because loadGlassPrefs() overwrites these at install.
-    private var BLUR_DP = 16f
+    private var BLUR_DP = 12f
     private const val DOWNSAMPLE = 4f
 
     // One tint for every pane. Overwritten from KEY_GLASS_TINT at install; do not tune here, move the slider.
-    private var TINT_ALPHA = 12
+    private var TINT_ALPHA = 10
     // ── One band width for every surface, as a fraction ───────────────────────────────
     // A fraction of each surface's smaller side: one fixed dp band cannot fit both a small pill and the big card.
     private var BEVEL_FRACTION = 0.25f
     private const val DEPTH_RATIO = 1f
 
     // Must stay above BLUR_DP: the blur runs after refraction, and a wider blur smears the bend back to frost.
-    private var DISPLACE_DP = 25f
+    private var DISPLACE_DP = 20f
+
+    // Rim stroke, drawn on Canvas over the light pass. 0 alpha is off and costs nothing.
+    private var RIM_ALPHA = 10
+    private var RIM_WIDTH_DP = 2f
 
     // ── The chat-list card ────────────────────────────────────────────────────────────
     // CARD_GAP_DP mirrors my_search_bar's own 8dp bottom margin, so the card sits symmetrically between the two.
@@ -114,8 +119,8 @@ object GlassHook {
 
     private const val CARD_GAP_DP = 8f
 
-    // Deliberately 10dp against the pill's 16dp, so the card reads as the surface under them; the one width knob.
-    private const val CARD_INSET_DP = 10f
+    // Every card, against the pill's 16dp. The one width knob.
+    private const val CARD_INSET_DP = 6f
 
     // Breathing room between a card's border and the content inside it, applied equally on all four sides. The one knob for "too cluttered".
     private const val CARD_CONTENT_PAD_DP = 8f
@@ -341,11 +346,16 @@ object GlassHook {
             val k = Prefs
             enabled = p.getBoolean(k.KEY_GLASS_ENABLED, false)
             if (!enabled) return@runCatching
-            BLUR_DP = p.getInt(k.KEY_GLASS_BLUR, 16).toFloat()
-            TINT_ALPHA = p.getInt(k.KEY_GLASS_TINT, 12)
-            DISPLACE_DP = p.getInt(k.KEY_GLASS_DISPLACE, 25).toFloat()
+            BLUR_DP = p.getInt(k.KEY_GLASS_BLUR, 12).toFloat()
+            TINT_ALPHA = p.getInt(k.KEY_GLASS_TINT, 10)
+            DISPLACE_DP = p.getInt(k.KEY_GLASS_DISPLACE, 20).toFloat()
             BEVEL_FRACTION = p.getInt(k.KEY_GLASS_BEVEL, 25) / 100f
             CARD_RADIUS_DP = p.getInt(k.KEY_GLASS_RADIUS, 20).toFloat()
+            RIM_ALPHA = p.getInt(k.KEY_GLASS_RIM, 10)
+            RIM_WIDTH_DP = p.getInt(k.KEY_GLASS_RIM_WIDTH, 2).toFloat()
+            // Set once here; every construction site would otherwise repeat them.
+            GlassParams.defaultTransGamma = p.getInt(k.KEY_GLASS_GAMMA, 70) / 100f
+            GlassParams.defaultRimStrokeAngle = p.getInt(k.KEY_GLASS_RIM_ANGLE, 85).toFloat()
             // A set pill colour wins over the frost, the fabColored stand-down pattern.
             tokenTabPillSet = p.getInt(k.OVR_TAB_ACTIVE_PILL, 0) != 0
             navUnreadBg = p.getInt(k.KEY_UNREAD_ACCENT, 0)
@@ -359,11 +369,17 @@ object GlassHook {
             XposedBridge.log("[$TAG] disabled by preference")
             return
         }
+        val res = app.resources
+        // Density is only available here, so the dp to px conversion cannot live in loadGlassPrefs.
+        GlassParams.defaultRimStrokePx =
+            if (RIM_ALPHA > 0) RIM_WIDTH_DP * res.displayMetrics.density else 0f
+        GlassParams.defaultRimStrokeColor = ((RIM_ALPHA * 255 / 100) shl 24) or 0xFFFFFF
         XposedBridge.log(
             "[$TAG] blur=${BLUR_DP}dp tint=$TINT_ALPHA displace=${DISPLACE_DP}dp " +
-                "bevel=$BEVEL_FRACTION radius=${CARD_RADIUS_DP}dp",
+                "bevel=$BEVEL_FRACTION radius=${CARD_RADIUS_DP}dp " +
+                "gamma=${GlassParams.defaultTransGamma} rim=$RIM_ALPHA/${RIM_WIDTH_DP}dp " +
+                "rimAngle=${GlassParams.defaultRimStrokeAngle}",
         )
-        val res = app.resources
         val pkg = app.packageName
 
         val headerId = res.waId("header", pkg)
@@ -433,10 +449,13 @@ object GlassHook {
             }
         }
         // Settings is the same shape with a ScrollView; content taller than the viewport clamps the card to it.
-        val settingsScrollId = res.waId("settings_scroll_view", pkg)
-        if (settingsScrollId != 0) ViewThemeDispatcher.onId(settingsScrollId) { v ->
-            runCatching { injectContentCard(v, "settings") }
-                .onFailure { XposedBridge.log("[$TAG] settings card threw: $it") }
+        // An A/B flag swaps in a me-tab layout that scrolls a different id; hooking both covers either.
+        for (n in listOf("settings_scroll_view", "settings_nested_scroll_view")) {
+            val sid2 = res.waId(n, pkg)
+            if (sid2 != 0) ViewThemeDispatcher.onId(sid2) { v ->
+                runCatching { injectContentCard(v, "settings") }
+                    .onFailure { XposedBridge.log("[$TAG] settings card threw: $it") }
+            }
         }
         // Sub-pages have few stable list ids, but their Activity names are manifest names and never obfuscate.
         // Attach is per Activity; the card machinery is idempotent and an already treated scroller skips by tag.
@@ -449,16 +468,19 @@ object GlassHook {
                     if (CARDED_ACTIVITY_PREFIXES.none { name.startsWith(it) }) return
                     // Sheet activities already carry the sheet pane; a card under a sheet is buried work.
                     if (a.javaClass.simpleName.endsWith("BottomSheetActivity")) return
+                    if (a.javaClass.simpleName.endsWith("Sheet")) return
                     // Both draw a full-screen doodle SIBLING under the content; a sibling is invisible to the ancestor walk, so they are named.
                     if (a.javaClass.simpleName == "About" || a.javaClass.simpleName == "Licenses") return
                     val label = "${name.split('.').getOrElse(2) { "page" }}/${a.javaClass.simpleName}"
+                    // The breadcrumb that separates "hook never fired" from a silent guard.
+                    logOnce("card path armed: $label")
                     val content =
                         a.findViewById<ViewGroup>(android.R.id.content) ?: return
                     content.post {
                         runCatching {
                             findPageScroller(content)?.let {
                                 injectContentCard(it, label)
-                            } ?: logOnce("$label: no scroller found, no card")
+                            } ?: watchForPageScroller(content, label)
                         }.onFailure { XposedBridge.log("[$TAG] $label card threw: $it") }
                     }
                 }
@@ -661,10 +683,34 @@ object GlassHook {
             installQuoteMaskKill(quoteFrameId)
             ViewThemeDispatcher.onId(quoteFrameId) { v ->
                 if (!quoteColored) {
-                    frostOnLayoutWith(v, glassTint(QUOTE_ALPHA), v.dp(QUOTE_RADIUS_DP))
+                    // Blurred fill, not a film: tint-only vanishes against the dark bubble glass.
+                    liquidFrostOnLayout(v, QUOTE_RADIUS_DP, QUOTE_ALPHA)
                     if (v.foreground != null) v.foreground = null
+                    // The killed foreground mask was what rounded the accent bar; the clip takes over.
+                    if (!v.clipToOutline) {
+                        v.outlineProvider = object : ViewOutlineProvider() {
+                            override fun getOutline(view: View, outline: Outline) {
+                                outline.setRoundRect(
+                                    0, 0, view.width, view.height, view.dp(QUOTE_RADIUS_DP),
+                                )
+                            }
+                        }
+                        v.clipToOutline = true
+                    }
                 }
             }
+        }
+
+        // ── The voice-recording composer ─────────────────────────────────────────────
+        // A cover, not a clear: stripped bare, the compose quote underneath shows and two quotes stack.
+        val voiceDraftId = res.waId("voice_note_draft_layout_v2", pkg)
+        if (voiceDraftId != 0) ViewThemeDispatcher.onId(voiceDraftId) { v ->
+            liquidFrostOnLayout(v, 20f, TINT_ALPHA)
+        }
+        // Tint-only like the compose quote: a second bitmap pill doubles the panel's top edge.
+        val quoteV2Id = res.waId("quoted_message_preview_container_v2", pkg)
+        if (quoteV2Id != 0) ViewThemeDispatcher.onId(quoteV2Id) { v ->
+            if (!quoteColored) frostOnLayoutWith(v, glassTint(QUOTE_ALPHA), v.dp(QUOTE_RADIUS_DP))
         }
 
         // Section headers go bold; weight only, the size is WhatsApp's and reads fine.
@@ -795,6 +841,7 @@ object GlassHook {
             "empty_community_row_button",              // "Start your community", empty state
             "community_nux_next_button",               // "GET STARTED", creation intro
             "add_members_icon",                        // the green circle on the info page
+            "community_home_add_group_icon",           // "add group", the admin row under a community
             "owner_view",                              // the "Community Owner" chip
         )) {
             val bid = res.waId(n, pkg)
@@ -998,14 +1045,180 @@ object GlassHook {
             }
         }
         // ── The chat scroll and search discs ─────────────────────────────────────────────
-        // Both inflate from stubs that keep their ids, so the stub itself must be skipped.
-        for (n in listOf("scroll_bottom", "search_fab")) {
+        // All inflate from stubs that keep their ids, so the stub itself must be skipped.
+        for (n in listOf(
+            "scroll_bottom", "search_fab",
+            "next_important_message", "ai_voice_entry_fab", "active_cart",
+        )) {
             val fid = res.waId(n, pkg)
             if (fid == 0) continue
             ViewThemeDispatcher.onId(fid) { v ->
                 if (v is ViewStub) return@onId
                 runCatching { glassChatFab(v, n) }
                     .onFailure { XposedBridge.log("[$TAG] $n glass threw: $it") }
+            }
+        }
+        // A bare ImageView, so the pane host has nowhere to go; the frost disc is the fallback.
+        val aiRepliesId = res.waId("ai_replies", pkg)
+        if (aiRepliesId != 0) ViewThemeDispatcher.onId(aiRepliesId) { v ->
+            if (v is ViewStub) return@onId
+            frostCircleOnLayout(v)
+        }
+
+        // ── The mention autocomplete panel ───────────────────────────────────────────────
+        // A pane, not a film: the list under it must blur or the two text layers fight.
+        val mentionAttachId = res.waId("mention_attach", pkg)
+        if (mentionAttachId != 0) ViewThemeDispatcher.onId(mentionAttachId) { v ->
+            val host = v as? FrameLayout ?: return@onId
+            val apply = Runnable { runCatching { syncMentionPane(host) } }
+            apply.run()
+            if (host.getTag(frostListenerTag) == null) {
+                host.setTag(frostListenerTag, true)
+                host.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply.run() }
+            }
+        }
+
+        // ── Row-side pills: swipe hint, channel replies, quick forward, reaction counts ──
+        // Hand-built rather than frost(): a lone-emoji reaction pill is as tall as wide and the aspect gate drops it.
+        for (n in listOf(
+            "swipe_to_reply_hint",
+            "message_hint",
+            "replies_pill_container_key",
+            "newsletter_quick_forwarding_pill_container_key",
+            "reactions_bubble_layout",
+        )) {
+            val pid2 = res.waId(n, pkg)
+            if (pid2 != 0) ViewThemeDispatcher.onId(pid2) { v ->
+                watchFrostPosition(v)
+                val apply = Runnable {
+                    runCatching {
+                        if (v.height <= 0) return@runCatching
+                        if (v.getTag(pillPadTag) == null) {
+                            v.setTag(pillPadTag, true)
+                            val ex = v.dp(3f).toInt()
+                            val ey = v.dp(1.5f).toInt()
+                            v.setPadding(
+                                v.paddingLeft + ex, v.paddingTop + ey,
+                                v.paddingRight + ex, v.paddingBottom + ey,
+                            )
+                        }
+                        val existing = v.getTag(frostTag) as? FrostDrawable
+                        if (existing != null && v.background === existing) {
+                            existing.setRadius(v.height / 2f)
+                            return@runCatching
+                        }
+                        // Blurred wallpaper as the fill: a film lets the bubble edge bleed through these.
+                        val d = FrostDrawable(
+                            v, bubbleBackdrop(v), v.height / 2f, glassTint(CHIP_ALPHA),
+                            strokeWidth = v.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
+                            ignorePadding = true,
+                        )
+                        v.setTag(frostTag, d)
+                        v.background = d
+                    }
+                }
+                apply.run()
+                if (v.getTag(frostListenerTag) == null) {
+                    v.setTag(frostListenerTag, true)
+                    v.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply.run() }
+                }
+            }
+        }
+
+        // ── Top chat banners ─────────────────────────────────────────────────────────────
+        val chatBannerId = res.waId("banner_content", pkg)
+        if (chatBannerId != 0) ViewThemeDispatcher.onId(chatBannerId) { v ->
+            frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(16f))
+        }
+
+        // The forward picker's send bar, an opaque strip under the recipients.
+        val pickerFooterId = res.waId("footer_container", pkg)
+        val pickerShadowId = res.waId("shadow_top", pkg)
+        if (pickerFooterId != 0) ViewThemeDispatcher.onId(pickerFooterId) { v ->
+            if (activityOf(v)?.javaClass?.name?.contains(".picker.") != true) return@onId
+            liquidFrostOnLayout(v, 20f, TINT_ALPHA)
+            if (pickerShadowId != 0) {
+                (v as? ViewGroup)?.findViewById<View>(pickerShadowId)?.let { s ->
+                    if (s.visibility != View.INVISIBLE) s.visibility = View.INVISIBLE
+                }
+            }
+        }
+
+        // ── Calls tab leftovers ──────────────────────────────────────────────────────────
+        // The joinable-call row keeps a static ripple, which ensureBgHook's colour swap cannot reach.
+        val joinableRootId = res.waId("joinable_call_log_root_view", pkg)
+        val callRowId = res.waId("call_row_container", pkg)
+        if (joinableRootId != 0 && callRowId != 0) ViewThemeDispatcher.onId(callRowId) { v ->
+            if (insideId(v, joinableRootId, 3)) liquidFrostOnLayout(v, 16f)
+        }
+        // Cleared to a hole by the shell clearer while the call-action discs beside it are frosted.
+        val addFavId = res.waId("add_favorite_icon", pkg)
+        if (addFavId != 0) ViewThemeDispatcher.onId(addFavId) { v -> frostCircleOnLayout(v) }
+        // The call-link sheet's inner box has no id of its own; its sibling names the row.
+        val callLinkId = res.waId("call_link", pkg)
+        if (callLinkId != 0) ViewThemeDispatcher.onId(callLinkId) { v ->
+            val box = (v.parent as? ViewGroup)?.let { p ->
+                (0 until p.childCount).map { p.getChildAt(it) }.firstOrNull { c ->
+                    c !is GlassView && c.id == View.NO_ID && c.background != null && c !is ViewGroup
+                }
+            } ?: return@onId
+            liquidFrostOnLayout(box, 16f)
+        }
+        val linkIconId = res.waId("link_icon", pkg)
+        if (linkIconId != 0) ViewThemeDispatcher.onId(linkIconId) { v -> frostCircleOnLayout(v) }
+
+        // ── The balloons WhatsApp paints in code ─────────────────────────────────────────
+        // All take their fill from the bubble resolver at bind time, so the frost re-applies per layout.
+        for (n in listOf("conversation_row_date_divider", "date_divider_header")) {
+            val did = res.waId(n, pkg)
+            if (did != 0) ViewThemeDispatcher.onId(did) { v ->
+                if (v is ViewStub) return@onId
+                liquidFrostOnLayout(v, keepPadding = true)
+            }
+        }
+        val tiBubbleId = res.waId("ti_bubble", pkg)
+        if (tiBubbleId != 0) ViewThemeDispatcher.onId(tiBubbleId) { v ->
+            // Only the bubble; the dots are a sibling drawable and must keep animating.
+            liquidFrostOnLayout(v, keepPadding = true)
+        }
+        val unreadTvId = res.waId("unread_divider_tv", pkg)
+        if (unreadTvId != 0) ViewThemeDispatcher.onId(unreadTvId) { v ->
+            // The band is the parent's flat colour; the pill shape belongs on the text.
+            (v.parent as? View)?.let { p -> if (p.background != null) clearBg(p, "unread band") }
+            liquidFrostOnLayout(v, keepPadding = true)
+        }
+        // info is one of the most reused ids in the app, hence the activity scope.
+        val e2eInfoId = res.waId("info", pkg)
+        if (e2eInfoId != 0) ViewThemeDispatcher.onId(e2eInfoId) { v ->
+            if (activityOf(v)?.javaClass?.name?.endsWith(".Conversation") != true) return@onId
+            liquidFrostOnLayout(v, 16f, keepPadding = true)
+        }
+
+        // With no bubble on the row this timestamp chip IS the surface; the 100-odd inline ones sit in a bubble already.
+        bubblelessRootIds = intArrayOf(
+            res.waId("sticker_root", pkg),
+            res.waId("push_to_video_root", pkg),
+        ).filter { it != 0 }.toIntArray()
+        val dateWrapId = res.waId("date_wrapper", pkg)
+        if (dateWrapId != 0 && bubblelessRootIds.isNotEmpty()) ViewThemeDispatcher.onId(dateWrapId) { v ->
+            val pid = (v.parent as? View)?.id ?: return@onId
+            if (!bubblelessRootIds.contains(pid)) return@onId
+            // No clearBg first: the frost replaces the fill anyway, and the stock drawable still holds the inset.
+            liquidFrostOnLayout(v, keepPadding = true)
+        }
+
+        // ── Search-in-chat ───────────────────────────────────────────────────────────────
+        // Scoped to Conversation: the home search screen reuses this id with its own treatment.
+        val convSearchRootId = res.waId("search_fragment", pkg)
+        val convSearchBarId = res.waId("search_view_toolbar", pkg)
+        if (convSearchRootId != 0) ViewThemeDispatcher.onId(convSearchRootId) { v ->
+            if (activityOf(v)?.javaClass?.name?.endsWith(".Conversation") != true) return@onId
+            clearBg(v, "conversation search root")
+            // The bar itself gets the capsule pane from syncConvToolbar; only its fill goes here.
+            if (convSearchBarId != 0) {
+                (v as? ViewGroup)?.findViewById<View>(convSearchBarId)?.let { bar ->
+                    clearBg(bar, "conversation search bar")
+                }
             }
         }
 
@@ -1045,6 +1258,95 @@ object GlassHook {
             }
         }
 
+        // ── The add-status tile on the updates card ─────────────────────────────────────
+        // Stock is an opaque slab and a pane cannot go in, so the chips' frost; 16dp, the tile is too tall for a pill.
+        val statusTileId = res.waId("status_tile_layout", pkg)
+        if (statusTileId != 0) ViewThemeDispatcher.onId(statusTileId) { v ->
+            frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(16f))
+        }
+
+        // ── The rest of the updates card's stock leftovers ──────────────────────────────
+        // The share strip under the tiles; one id per Facebook/Instagram link state.
+        for (n in listOf(
+            "updates_contextual_migration_share_view",
+            "updates_contextual_status_and_channel_share_view",
+            "updates_contextual_status_and_channel_upsell",
+        )) {
+            val sid = res.waId(n, pkg)
+            if (sid != 0) ViewThemeDispatcher.onId(sid) { v ->
+                frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(16f))
+            }
+        }
+        // 12dp matches the slab it replaces.
+        val adBannerId = res.waId("advertise_banner_container", pkg)
+        if (adBannerId != 0) ViewThemeDispatcher.onId(adBannerId) { v ->
+            frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(12f))
+        }
+        // Muted tile and hidden disc: both ids are generic, so only the status tray's instances count.
+        val statusTrayId = res.waId("status_list", pkg)
+        val mutedTileId = res.waId("buttons_layout", pkg)
+        val mutedSlabId = res.waId("status_preview", pkg)
+        if (statusTrayId != 0 && mutedTileId != 0 && mutedSlabId != 0) {
+            ViewThemeDispatcher.onId(mutedTileId) { v ->
+                if (!insideId(v, statusTrayId, 4)) return@onId
+                (v as? ViewGroup)?.findViewById<View>(mutedSlabId)
+                    ?.let { frostOnLayoutWith(it, glassTint(CHIP_ALPHA), it.dp(16f)) }
+            }
+        }
+        val hiddenDiscId = res.waId("contact_selector", pkg)
+        if (statusTrayId != 0 && hiddenDiscId != 0) ViewThemeDispatcher.onId(hiddenDiscId) { v ->
+            if (insideId(v, statusTrayId, 5)) frostCircleOnLayout(v)
+        }
+        // The megaphone card root carries the fill but no id; its action button names it.
+        val megaBtnId = res.waId("megaphone_action_button", pkg)
+        if (megaBtnId != 0) ViewThemeDispatcher.onId(megaBtnId) { v ->
+            var anc: View? = v.parent as? View
+            var hops = 0
+            while (anc != null && hops < 4 && anc.background == null) { anc = anc.parent as? View; hops++ }
+            anc?.takeIf { it.background != null }
+                ?.let { frostOnLayoutWith(it, glassTint(CHIP_ALPHA), it.dp(16f)) }
+        }
+        // A transient full-width slab while a follow request runs; the card behind it is enough.
+        val qfProgressId = res.waId("quick_follow_progressBar", pkg)
+        if (qfProgressId != 0) ViewThemeDispatcher.onId(qfProgressId) { v ->
+            (v.parent as? View)?.let { p -> if (p.background != null) clearBg(p, "quick follow strip") }
+        }
+        // WDSBanner paints its fill in code after attach, so the frost re-applies per layout.
+        ViewThemeDispatcher.onView { v ->
+            if (v.javaClass.name == "com.whatsapp.ui.wds.components.banners.WDSBanner") {
+                frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(16f))
+            }
+            false
+        }
+        // My Statuses ships the home FABs in a foreign window, out of the fab-pane machinery's reach; glassPageFab stands in.
+        for (n in listOf("fab", "fab_second")) {
+            val fid = res.waId(n, pkg)
+            if (fid == 0) continue
+            ViewThemeDispatcher.onId(fid) { v ->
+                if (activityOf(v)?.javaClass?.name
+                        ?.startsWith("com.whatsapp.status.playback.MyStatuses") != true
+                ) return@onId
+                val apply = Runnable { runCatching { glassPageFab(v) } }
+                apply.run()
+                if (v.getTag(frostListenerTag) == null) {
+                    v.setTag(frostListenerTag, true)
+                    v.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply.run() }
+                }
+            }
+        }
+
+        // Status privacy parks viewport slack inside its stretched column; wrap and pin it so the card hugs real content.
+        val spHeaderId = res.waId("see_my_status_header", pkg)
+        if (spHeaderId != 0) ViewThemeDispatcher.onId(spHeaderId) { v ->
+            val col = v.parent as? View ?: return@onId
+            val lp = col.layoutParams ?: return@onId
+            if (lp.height != ViewGroup.LayoutParams.WRAP_CONTENT) {
+                lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                runCatching { lp.javaClass.getField("verticalBias").setFloat(lp, 0f) }
+                col.layoutParams = lp
+            }
+        }
+
         // ── Bottom sheets ──────────────────────────────────────────────────────────────
         // Material's own container, so this covers every sheet; sheets live in their own window, hence screen coords.
         val sheetId = res.waId("design_bottom_sheet", pkg)
@@ -1056,7 +1358,7 @@ object GlassHook {
 
         // ── Self-declared sheets ─────────────────────────────────────────────────────────
         // These carry BottomSheetBehavior themselves, so the design_bottom_sheet hook never sees them.
-        // Deliberately stock: content_sheet (status viewer), expressions tray, the call popups, the two webview sheets.
+        // Deliberately stock: expressions tray, the call popups, the two webview sheets; the status viewer's details sheet gets tint-only frost.
         for (n in listOf(
             "bottom_sheet",
             "audio_chat_bottom_sheet",
@@ -1071,6 +1373,57 @@ object GlassHook {
             ViewThemeDispatcher.onId(selfSheetId) { v ->
                 runCatching { glassSelfSheet(v, n) }
                     .onFailure { XposedBridge.log("[$TAG] self sheet $n threw: $it") }
+            }
+        }
+
+        // ── Sheet contents that paint OVER the wrapper's glass ──────────────────────────
+        // These roots paint their own fill above the cleared wrapper, and no shell clearing reaches a dialog window.
+        // This id roots a full-screen page as well as the sheet, and only the sheet is a card.
+        val galleryPickerId = res.waId("gallery_picker_layout", pkg)
+        if (galleryPickerId != 0) ViewThemeDispatcher.onId(galleryPickerId) { v ->
+            if (!isMediaPickerSheet(v)) return@onId
+            liquidFrostOnLayout(v, CARD_RADIUS_DP, TINT_ALPHA)
+            // The grid reaches the edges, so uncontained it draws across the sheet's top corners.
+            if (!v.clipToOutline) {
+                v.outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) {
+                        val r = view.dp(CARD_RADIUS_DP)
+                        // Bottom carried past the edge: a sheet rounds its top corners only.
+                        outline.setRoundRect(0, 0, view.width, view.height + r.toInt(), r)
+                    }
+                }
+                v.clipToOutline = true
+            }
+        }
+        for (n in listOf(
+            "sticker_pack_preview_bottom_sheet_layout",
+            "view_replies_bottom_sheet",
+            "answering_keyboard_popup",
+            "history_drawer_content",
+        )) {
+            val sid3 = res.waId(n, pkg)
+            if (sid3 != 0) ViewThemeDispatcher.onId(sid3) { v ->
+                liquidFrostOnLayout(v, CARD_RADIUS_DP, TINT_ALPHA)
+            }
+        }
+
+        // ── The small overlay windows ────────────────────────────────────────────────────
+        // Toasts and tooltips live in their own windows, so only their own view can carry glass.
+        for (n in listOf("toast_layout", "card_container", "skin_tone_selector")) {
+            val tid = res.waId(n, pkg)
+            if (tid != 0) ViewThemeDispatcher.onId(tid) { v ->
+                liquidFrostOnLayout(v, 16f)
+            }
+        }
+        for (n in listOf("tooltip_text", "ai_voice_tooltip_container")) {
+            val tid2 = res.waId(n, pkg)
+            if (tid2 != 0) ViewThemeDispatcher.onId(tid2) { v -> liquidFrostOnLayout(v) }
+        }
+        // Raw Dialogs: no parentPanel, so panelGlass never sees them.
+        for (n in listOf("permission_request_dialog", "nag_text", "recipients_container")) {
+            val did2 = res.waId(n, pkg)
+            if (did2 != 0) ViewThemeDispatcher.onId(did2) { v ->
+                liquidFrostOnLayout(v, CARD_RADIUS_DP, TINT_ALPHA)
             }
         }
 
@@ -1137,6 +1490,7 @@ object GlassHook {
         // content is each menu row's id and the only handle a popup exposes; its fill lives in another window.
         menuRowId = res.waId("content", pkg)
         menuTitleId = res.waId("menu_title", pkg)
+        menuSelRowId = res.waId("message_selection_drop_down_row_text", pkg)
         ensurePopupGlass()
 
         // ── Attachment tile pills ──────────────────────────────────────────────────────
@@ -1149,7 +1503,9 @@ object GlassHook {
             "pickfiletype_event_holder", "pickfiletype_imagine_sheet_holder",
             "pickfiletype_camera_holder", "pickfiletype_audio_holder",
             "pickfiletype_music_holder", "pickfiletype_quiz_holder",
-            "pickfiletype_question_holder",
+            "pickfiletype_question_holder", "pickfiletype_group_status_holder",
+            "pickfiletype_pix_holder", "pickfiletype_remittance_holder",
+            "pickfiletype_call_link",
         )) {
             val hid = res.waId(n, pkg)
             if (hid == 0) continue
@@ -1165,6 +1521,64 @@ object GlassHook {
                 // ignorePadding is the pill-vs-lozenge difference: an icon button's padding is glyph space, not chip inset.
                 icon.post { runCatching { frost(icon, allowSquare = true, ignorePadding = true) } }
             }
+        }
+
+        // One component, three ids; a stub's inflatedId is its own, so the usual id misses those pages.
+        for (n in listOf("wds_search_bar", "search_bar", "persistent_search_bar")) {
+            val barId = res.waId(n, pkg)
+            if (barId == 0) continue
+            ViewThemeDispatcher.onId(barId) { v ->
+                // The stub fires this id too, and it is not the bar.
+                val bar = v as? FrameLayout ?: return@onId
+                if (bar.getTag(wdsBarTag) == null) {
+                    bar.setTag(wdsBarTag, true)
+                    bar.viewTreeObserver.addOnGlobalLayoutListener {
+                        runCatching { syncWdsSearchBar(bar) }
+                    }
+                }
+                runCatching { syncWdsSearchBar(bar) }
+                    .onFailure { logOnce("wds search bar glass threw on $n: $it") }
+            }
+        }
+
+        // The AppCompat SearchView is a different component and gets its own path; it declines the
+        // pages whose host cannot carry a pane rather than clearing a fill it cannot replace.
+        val searchViewId = res.waId("search_view", pkg)
+        if (searchViewId != 0) ViewThemeDispatcher.onId(searchViewId) { v ->
+            if (v.getTag(wdsBarTag) == null) {
+                v.setTag(wdsBarTag, true)
+                v.viewTreeObserver.addOnGlobalLayoutListener {
+                    runCatching { syncSearchViewGlass(v) }
+                }
+            }
+            runCatching { syncSearchViewGlass(v) }
+                .onFailure { logOnce("search view glass threw: $it") }
+        }
+
+        // The band under the photo: its fill is a FOREGROUND, it has no id, so its parent reaches it.
+        val photoSectionId = res.waId("me_tab_profile_info_photo_section", pkg)
+        if (photoSectionId != 0) ViewThemeDispatcher.onId(photoSectionId) { v ->
+            val section = v as? ViewGroup ?: return@onId
+            val strip = Runnable {
+                for (i in 0 until section.childCount) {
+                    val c = section.getChildAt(i) ?: continue
+                    if (c is ViewGroup || c is ViewStub) continue
+                    if (c.foreground != null) {
+                        c.foreground = null
+                        logOnce("me tab photo band foreground cleared")
+                    }
+                }
+            }
+            strip.run()
+            if (section.getTag(frostHostListenerTag) == null) {
+                section.setTag(frostHostListenerTag, true)
+                section.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> strip.run() }
+            }
+        }
+        val meTabId = res.waId("me_tab_container", pkg)
+        if (meTabId != 0) ViewThemeDispatcher.onId(meTabId) { v ->
+            runCatching { ensureMeTabCard(v) }
+                .onFailure { logOnce("me tab card threw: $it") }
         }
 
         val searchInnerId = res.waId("search_bar_inner_layout", pkg)
@@ -1591,11 +2005,49 @@ object GlassHook {
         XposedBridge.log("[$TAG] search field pane added (backdrop=id/list)")
     }
 
+    // status.playback and group.product are named per page, the rest of those packages must stay bare; the dialer has no scroller to card.
     /** Manifest names never obfuscate; every non-sheet page under these takes the content card and folder header. */
     private val CARDED_ACTIVITY_PREFIXES = listOf(
         "com.whatsapp.settings.",
         "com.whatsapp.payments.",
         "com.whatsapp.catalog.",
+        "com.whatsapp.status.audienceselector.",
+        "com.whatsapp.status.updates.",
+        "com.whatsapp.status.playback.MyStatuses",
+        "com.whatsapp.status.playback.MyStatusAudience",
+        "com.whatsapp.status.playback.ArchivedStatuses",
+        "com.whatsapp.status.playback.audience.",
+        "com.whatsapp.status.playback.newsletterstatus.",
+        "com.whatsapp.conversation.conversationrow.message.MessageDetails",
+        "com.whatsapp.conversation.conversationrow.message.KeptMessages",
+        "com.whatsapp.dmsetting.",
+        "com.whatsapp.ephemeral.",
+        "com.whatsapp.group.product.GroupPermissions",
+        "com.whatsapp.group.product.GroupMembersSelector",
+        "com.whatsapp.group.product.newgroup.",
+        "com.whatsapp.contact.ui.picker.AddGroupParticipantsSelector",
+        "com.whatsapp.contact.ui.picker.BroadcastListMembersSelector",
+        "com.whatsapp.chatinfo.addtogroups.",
+        "com.whatsapp.xfamily.groups.ui.GroupMembersSelector",
+        "com.whatsapp.calling.ui.callhistory.group.GroupCallParticipantPicker",
+        "com.whatsapp.calling.ui.calllink.",
+        "com.whatsapp.contactshub.",
+        // Settings-reachable pages living outside com.whatsapp.settings.
+        "com.whatsapp.aura.",
+        "com.whatsapp.lists.",
+        "com.whatsapp.chatlock.",
+        "com.whatsapp.twofactor.",
+        "com.whatsapp.backup.",
+        "com.whatsapp.storage.",
+        "com.whatsapp.blocklist.",
+        "com.whatsapp.profile.ui.",
+        "com.whatsapp.authentication.",
+        "com.whatsapp.lastseen.",
+        "com.whatsapp.privacy.",
+        "com.whatsapp.integrityai.",
+        "com.whatsapp.privateai.",
+        "com.whatsapp.migration.transfer.",
+        "com.whatsapp.favorites.",
     )
 
     private val chatFabTag = tagKey("wathemer-chat-fab")
@@ -1660,14 +2112,13 @@ object GlassHook {
     private const val PANEL_RADIUS_FRACTION = 0.22f
     private const val PANEL_RADIUS_MAX_DP = 48f
 
-    /** Dark scrim for dialogs and menus: pulls a blurred bright backdrop down so the panel's own text reads. */
-    private const val PANEL_SCRIM = 0xB80E1418.toInt()
-
-    /** Panels blur less than cards. See the note at the blurRadius assignment in [panelGlass]. */
-    private const val PANEL_BLUR_SCALE = 0.6f
+    /** Panels stack over content that already carries a pane, so their own blur composes with it. */
+    private const val PANEL_BLUR_SCALE = 0.7f
 
     private var menuRowId = 0
     private var menuTitleId = 0
+    /** The message long-press menu's rows carry neither of the two above. */
+    private var menuSelRowId = 0
     private val panelGlassTag = tagKey("wathemer-panel-glass")
     private val panelSweepTag = tagKey("wathemer-panel-sweep")
 
@@ -1685,6 +2136,58 @@ object GlassHook {
             val box = RectF(0f, 0f, v.width.toFloat(), v.height.toFloat())
             (XposedHelpers.callMethod(corner, "getCornerSize", box) as? Float)?.takeIf { it > 0f }
         }.getOrNull()
+    }
+
+    private val stockPadById = HashMap<Int, Rect>()
+
+    /**
+     * Our fill reports no padding, so replacing a drawable that had some remeasures a wrap_content
+     * host narrower. Learn the stock inset once per id, then hold the view at it.
+     */
+    private fun keepStockPadding(v: View) {
+        val id = v.id
+        if (id == View.NO_ID) return
+        val bg = v.background
+        if (bg != null && bg !is FrostDrawable) {
+            val seen = Rect()
+            if (bg.getPadding(seen) && seen.left + seen.right > 0) stockPadById[id] = seen
+        }
+        val want = stockPadById[id] ?: return
+        // Only on a mismatch: setPadding requests layout, and an unguarded write from a layout callback loops.
+        if (v.paddingLeft != want.left || v.paddingTop != want.top ||
+            v.paddingRight != want.right || v.paddingBottom != want.bottom
+        ) {
+            v.setPadding(want.left, want.top, want.right, want.bottom)
+            dropFrame(v)
+        }
+    }
+
+    /**
+     * The label was measured against the old inset, so this frame would show it clipped. Returning
+     * false from pre-draw cancels the traversal instead of presenting it.
+     */
+    private fun dropFrame(v: View) {
+        val observer = v.viewTreeObserver ?: return
+        if (!observer.isAlive) return
+        observer.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                runCatching {
+                    if (observer.isAlive) observer.removeOnPreDrawListener(this)
+                    else v.viewTreeObserver.removeOnPreDrawListener(this)
+                }
+                return false
+            }
+        })
+    }
+
+    /** The picker's sheet variant, tested the way the app tests it. A server flag picks which ships. */
+    private fun isMediaPickerSheet(v: View): Boolean {
+        var c: Class<*>? = activityOf(v)?.javaClass
+        while (c != null) {
+            if (c.name == "com.whatsapp.gallerypicker.ui.MediaPickerBottomSheetActivity") return true
+            c = c.superclass
+        }
+        return false
     }
 
     /** The Activity a view ultimately belongs to, through however many ContextWrappers. */
@@ -1755,16 +2258,18 @@ object GlassHook {
                 underlay = under
                 params.apply {
                     downsample = DOWNSAMPLE
-                    // Less blur than a card, on purpose: at full radius the backdrop collapses and the panel reads as a flat slab.
                     blurRadius = host.dp(BLUR_DP * PANEL_BLUR_SCALE)
                     cornerRadius = own ?: host.dp(CARD_RADIUS_DP)
                     refractionEnabled = true
                     bevelFraction = BEVEL_FRACTION
                     depthRatio = DEPTH_RATIO
                     maxDisplacePx = host.dp(DISPLACE_DP)
-                    fresnelStrength = 0.5f
-                    // A dark scrim, not the shared white: white over a blurred bright message washes out and the text stops reading.
-                    tintColor = PANEL_SCRIM
+                    // Halved; the content underneath already carries a lit pane.
+                    fresnelStrength = 0.25f
+                    // Off; the pane underneath already lifted this content.
+                    transGamma = 1f
+                    // Half a pane's tint; the content underneath already carries one.
+                    tintColor = glassTint((TINT_ALPHA / 2).coerceAtLeast(0))
                 }
             }
             // MarginLayoutParams: addView converts them, avoiding a compile-time coordinatorlayout dependency.
@@ -1855,7 +2360,8 @@ object GlassHook {
         // A menu is rows carrying the menu-row id; one row is enough, the Calls Block menu has exactly one.
         // Both row shapes count: overflow rows carry content, call-menu buttons carry menu_title and no content.
         val rows = countDescendantsWithId(content, menuRowId, 0) +
-            if (menuTitleId != 0) countDescendantsWithId(content, menuTitleId, 0) else 0
+            (if (menuTitleId != 0) countDescendantsWithId(content, menuTitleId, 0) else 0) +
+            (if (menuSelRowId != 0) countDescendantsWithId(content, menuSelRowId, 0) else 0)
         if (rows < 1) return
         content.setTag(popupGlassTag, true)
         // The fill sits on wrapper views above the content: clear each one, reading the radius first or it is lost.
@@ -2016,7 +2522,7 @@ object GlassHook {
     /** Stronger than a reading surface: this panel exists to bury what slides under it. */
     private const val INFO_FADE_BLUR_BOOST = 1.8f
 
-    /** Collapse-driven blur band: one GlassView with fadeBottomPx because abutting panes cannot seam; expanded height is learned from layout. */
+    /** Collapse-driven blur band. One GlassView because abutting panes cannot seam; its expanded height is learned from layout. */
     private fun syncInfoFade(header: ViewGroup) {
         val h = header.height
         if (h <= 0) return
@@ -2083,6 +2589,8 @@ object GlassHook {
                     maxDisplacePx = header.dp(DISPLACE_DP)
                     fresnelStrength = 0.5f
                     cornerRadius = 0f
+                    // Full-bleed header panel, same rule as the bands.
+                    rimEnabled = false
                     tintColor = glassTintColor
                 }
                 setMaterialize(0f)
@@ -2121,13 +2629,6 @@ object GlassHook {
     private var infoTailSeedL = 0f
     private var infoTailSeedR = 0f
 
-    /** How far each section card is pulled in from the screen edges, so it reads as a pane. */
-    private const val INFO_CARD_INSET_X_DP = 8f
-
-    /** Card glass, a touch heavier than the panes elsewhere; deliberate, and kept subtle. */
-    private const val INFO_CARD_TINT_BOOST = 10
-    private const val INFO_CARD_BLUR_BOOST = 1.3f
-
     /** Half the gap between two stacked cards, applied at the top and bottom of each. */
     private const val INFO_CARD_GAP_DP = 5f
 
@@ -2161,16 +2662,16 @@ object GlassHook {
         val d = stack.resources.displayMetrics.density
         val pane = GlassBubblePane(host.context).apply {
             params = GlassParams(d).apply {
-                blurRadius = stack.dp(BLUR_DP * INFO_CARD_BLUR_BOOST)
+                blurRadius = stack.dp(BLUR_DP)
                 cornerRadius = stack.dp(INFO_CARD_RADIUS_DP)
                 refractionEnabled = true
                 bevelFraction = BEVEL_FRACTION
                 depthRatio = DEPTH_RATIO
                 maxDisplacePx = stack.dp(DISPLACE_DP)
                 fresnelStrength = 0.5f
-                tintColor = glassTint(TINT_ALPHA + INFO_CARD_TINT_BOOST)
+                tintColor = glassTintColor
             }
-            tint = { glassTint(TINT_ALPHA + INFO_CARD_TINT_BOOST) }
+            tint = { glassTintColor }
             // This window first, contentRef only as fallback: contentRef is home's decor and resolves the wrong screen here.
             backdrop = { bubbleBackdrop(stack) ?: contentRef?.get()?.let { c -> bubbleBackdrop(c) } }
             placement = { bubbleWpPlacement }
@@ -2207,16 +2708,16 @@ object GlassHook {
                 val d = host.resources.displayMetrics.density
                 val pane = GlassBubblePane(host.context).apply {
                     params = GlassParams(d).apply {
-                        blurRadius = host.dp(BLUR_DP * INFO_CARD_BLUR_BOOST)
+                        blurRadius = host.dp(BLUR_DP)
                         cornerRadius = host.dp(INFO_CARD_RADIUS_DP)
                         refractionEnabled = true
                         bevelFraction = BEVEL_FRACTION
                         depthRatio = DEPTH_RATIO
                         maxDisplacePx = host.dp(DISPLACE_DP)
                         fresnelStrength = 0.5f
-                        tintColor = glassTint(TINT_ALPHA + INFO_CARD_TINT_BOOST)
+                        tintColor = glassTintColor
                     }
-                    tint = { glassTint(TINT_ALPHA + INFO_CARD_TINT_BOOST) }
+                    tint = { glassTintColor }
                     // Local root first, `contentRef` second. See [insertInfoCardPane].
                     backdrop = { bubbleBackdrop(sheet) ?: contentRef?.get()?.let { c -> bubbleBackdrop(c) } }
                     placement = { bubbleWpPlacement }
@@ -2244,7 +2745,7 @@ object GlassHook {
         if (infoMemberSheetId == 0) return
         val sheet = host.rootView?.findViewById<View>(infoMemberSheetId) ?: return
         if (!sheet.isShown || sheet.height <= 0 || sheet.width <= 0) return
-        val insetX = host.dp(INFO_CARD_INSET_X_DP)
+        val insetX = host.dp(CARD_INSET_DP)
         val insetY = host.dp(INFO_CARD_GAP_DP)
         sheet.getLocationOnScreen(infoCardAt)
         out.add(
@@ -2259,7 +2760,7 @@ object GlassHook {
     private fun collectInfoCardRects(list: ViewGroup, out: RectList) {
         // Draw nothing without window focus: the contact popup is a second window, and lit glass burns straight through its scrim.
         if (!list.hasWindowFocus()) return
-        val insetX = list.dp(INFO_CARD_INSET_X_DP)
+        val insetX = list.dp(CARD_INSET_DP)
         val insetY = list.dp(INFO_CARD_GAP_DP)
         var tailL = 0f
         var tailR = 0f
@@ -2374,6 +2875,77 @@ object GlassHook {
         }
     }
 
+    // Copy at 1/4, halve to 1/30, double back to 1/2. Deeper than the wallpaper's 1/20 for sharp text.
+    // The shader samples NEAREST, so the rebuild size is the block size.
+    /** Popups sample the composited screen. A View.draw copy would miss every RenderNode effect. */
+    private const val POPUP_SNAP_COPY = 4
+    private const val POPUP_SNAP_BLUR = 30
+    private const val POPUP_SNAP_SMOOTH = 2
+
+    /** Progressive halve then double, like FrostDrawable.shrinkOf but sized to the screen. */
+    private fun smoothBlur(src: Bitmap, blurW: Int, outW: Int): Bitmap {
+        var cur = src
+        while (cur.width / 2 >= blurW && cur.height / 2 >= 1) {
+            val next = Bitmap.createScaledBitmap(cur, cur.width / 2, (cur.height / 2).coerceAtLeast(1), true)
+            if (cur !== src) cur.recycle()
+            cur = next
+        }
+        while (cur.width * 2 <= outW) {
+            val next = Bitmap.createScaledBitmap(cur, cur.width * 2, cur.height * 2, true)
+            if (cur !== src) cur.recycle()
+            cur = next
+        }
+        return cur
+    }
+
+    @Volatile private var screenSnap: Bitmap? = null
+    private val screenSnapPlace = Matrix()
+    @Volatile private var screenSnapPending = false
+    private val snapLoc = IntArray(2)
+
+    /** Once per popup open. The listener is on the main thread, so no draw sees a half-swapped pair. */
+    private fun requestScreenSnap(anchor: View) {
+        if (screenSnapPending) return
+        val win = activityOf(anchor)?.window ?: return
+        val decor = win.decorView
+        if (decor.width <= 0 || decor.height <= 0) return
+        val w = (decor.width / POPUP_SNAP_COPY).coerceAtLeast(1)
+        val h = (decor.height / POPUP_SNAP_COPY).coerceAtLeast(1)
+        val dst = runCatching { Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) }.getOrNull() ?: return
+        screenSnapPending = true
+        runCatching {
+            PixelCopy.request(
+                win, dst,
+                { res ->
+                    screenSnapPending = false
+                    if (res == PixelCopy.SUCCESS) {
+                        decor.getLocationOnScreen(snapLoc)
+                        val soft = runCatching {
+                            smoothBlur(
+                                dst,
+                                (decor.width / POPUP_SNAP_BLUR).coerceAtLeast(1),
+                                (decor.width / POPUP_SNAP_SMOOTH).coerceAtLeast(1),
+                            )
+                        }.getOrDefault(dst)
+                        // Bitmap to screen, off the output bitmap; the blur changed its size.
+                        screenSnapPlace.setScale(
+                            decor.width.toFloat() / soft.width,
+                            decor.height.toFloat() / soft.height,
+                        )
+                        screenSnapPlace.postTranslate(snapLoc[0].toFloat(), snapLoc[1].toFloat())
+                        screenSnap = soft
+                    } else {
+                        logOnce("popup snapshot: PixelCopy returned $res, staying on the wallpaper")
+                    }
+                },
+                Handler(Looper.getMainLooper()),
+            )
+        }.onFailure {
+            screenSnapPending = false
+            logOnce("popup snapshot threw, staying on the wallpaper: $it")
+        }
+    }
+
     /** GlassBubblePane, not panelGlass: cost stays flat as the menu grows, and one union rect avoids scalloped seams between items. */
     private fun popupRowGlass(content: View, radiusPx: Float?) {
         if (content.getTag(panelGlassTag) != null) return
@@ -2386,6 +2958,7 @@ object GlassHook {
             return
         }
         content.setTag(panelGlassTag, true)
+        requestScreenSnap(content)
         val d = content.resources.displayMetrics.density
         val pane = GlassBubblePane(host.context).apply {
             params = GlassParams(d).apply {
@@ -2399,9 +2972,9 @@ object GlassHook {
                 tintColor = glassTintColor
             }
             tint = { glassTintColor }
-            // Resolve via the activity's content view: a popup window holds no wallpaper views; the placement matrix is screen-space so it carries across.
-            backdrop = { contentRef?.get()?.let { host -> bubbleBackdrop(host) } }
-            placement = { bubbleWpPlacement }
+            // The screen if PixelCopy gave us one, else the wallpaper. Both are screen-space.
+            backdrop = { screenSnap ?: contentRef?.get()?.let { host -> bubbleBackdrop(host) } }
+            placement = { if (screenSnap != null) screenSnapPlace else bubbleWpPlacement }
             dim = { 0f }
             rimColor = glassTint(BUBBLE_RIM_ALPHA)
             rimWidth = d
@@ -2473,7 +3046,7 @@ object GlassHook {
         }
     }
 
-    /** One union rect over the rows: per-item rects notch at the seams, and the content view runs 66px taller than its rows. */
+    /** One union rect over the rows: per-item rects notch at the seams, and the content view runs taller than its rows. */
     private fun collectPopupRowRects(content: View, out: RectList) {
         val group = menuRowHost(content) ?: return
         if (content.width <= 0) return
@@ -2550,9 +3123,23 @@ object GlassHook {
             anc = anc.parent as? View
             depth++
         }
-        // The status viewer, camera and media viewer stay stock on purpose.
+        // The camera and media viewer stay stock on purpose.
         val cls = activityOf(sheet)?.javaClass?.name ?: ""
-        if (listOf(".status.", ".camera", "mediaview").any { cls.contains(it) }) return
+        if (listOf(".camera", "mediaview").any { cls.contains(it) }) return
+        // Tint-only frost on the viewers list: that window's backdrop is the status media, not the wallpaper.
+        if (cls.contains(".status.")) {
+            val detailsId = sheet.resources.waId("status_details_container", sheet.context.packageName)
+            val details = if (detailsId != 0) sheet.findViewById<View>(detailsId) else null
+            if (details == null || details.getTag(innerGlassTag) != null) return
+            details.setTag(innerGlassTag, true)
+            details.background = FrostDrawable(
+                details, null, details.dp(CARD_RADIUS_DP), glassTint(CHIP_ALPHA),
+                strokeWidth = details.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
+                ignorePadding = true,
+            )
+            logOnce("self sheet frosted: status details")
+            return
+        }
         if (sheet is FrameLayout) {
             injectSheetGlass(sheet)
             logOnce("self sheet glassed live: $name")
@@ -2561,7 +3148,7 @@ object GlassHook {
         sheet.setTag(innerGlassTag, true)
         clearBg(sheet, name)
         sheet.background = FrostDrawable(
-            sheet, bubbleBackdrop(contentRef?.get() ?: sheet), FrostDrawable.SHRINK,
+            sheet, bubbleBackdrop(contentRef?.get() ?: sheet),
             sheet.dp(CARD_RADIUS_DP), glassTintColor,
             strokeWidth = sheet.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
             ignorePadding = true,
@@ -2606,7 +3193,7 @@ object GlassHook {
         }
         // No bitmap: the card behind supplies the blur; passing one samples behind the card, not the chip.
         val d = FrostDrawable(
-            v, null, FrostDrawable.SHRINK, radius, tint,
+            v, null, radius, tint,
             strokeWidth = v.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
             ignorePadding = ignorePadding,
         )
@@ -2664,7 +3251,7 @@ object GlassHook {
         if (container == null || content == null) {
             // No stacking child or no activity behind: the stamp fallback, so the tray never shows stock.
             val d = FrostDrawable(
-                tray, bubbleBackdrop(tray), FrostDrawable.SHRINK, tray.dp(999f), glassTintColor,
+                tray, bubbleBackdrop(tray), tray.dp(999f), glassTintColor,
                 strokeWidth = tray.dp(1f), strokeColor = glassTint(BUBBLE_RIM_ALPHA),
             )
             tray.background = d
@@ -2708,7 +3295,7 @@ object GlassHook {
             tray.post(sync)
             logOnce("reactions tray glassed live")
         }
-        // The stock pill lived inside 36px of shadow padding; the wrappers' own fills go too.
+        // The stock pill sits inside shadow padding; the wrappers' own fills go too.
         var p: View? = tray.parent as? View
         var hops = 0
         while (p != null && hops < 3) {
@@ -3441,9 +4028,6 @@ object GlassHook {
         footer.requestLayout()
     }
 
-    /** Fade run below the pill; long enough that the ramp does not itself read as an edge. */
-    private const val CONV_BAND_FADE_DP = 44f
-
     /** The row dissolve runs from the list's top edge to the pill's bottom plus this; bigger is gentler. */
     private const val CONV_ROW_FADE_DP = 56f
 
@@ -3487,9 +4071,9 @@ object GlassHook {
             ?: holder.height
         val solid = (at[1] - abrAt[1]) + pillBottom
         if (solid <= 0) return
-        val fade = holder.dp(CONV_BAND_FADE_DP)
         // One pane only: two abutting panes cannot be seamless, each blur kernel is clipped to its own capture.
-        val total = (solid + fade).toInt()
+        // Hard stop on the pill's bottom edge; the SDF is expanded past it so the cut has no rim of its own.
+        val total = solid
 
         var band = convBandRef?.get()
         if (band == null || band.parent !== abr) {
@@ -3506,7 +4090,8 @@ object GlassHook {
                     maxDisplacePx = holder.dp(DISPLACE_DP)
                     fresnelStrength = 0.5f
                     cornerRadius = 0f
-                    fadeBottomPx = fade
+                    // Full-bleed panel; a rim here would outline the screen.
+                    rimEnabled = false
                     edgeExpandLeft = 8f
                     edgeExpandTop = 8f
                     edgeExpandRight = 8f
@@ -3534,11 +4119,10 @@ object GlassHook {
             convBandRef = WeakReference(band)
             XposedBridge.log(
                 "[$TAG] conversation band inserted at index $insertAt " +
-                    "(solid=${solid}px fade=${fade.toInt()}px tint=${convBandAlpha()})",
+                    "(solid=${solid}px tint=${convBandAlpha()})",
             )
         }
         band.params.tintColor = glassTint(convBandAlpha())
-        band.params.fadeBottomPx = fade
         val lp = band.layoutParams as? FrameLayout.LayoutParams ?: return
         if (lp.height != total) {
             lp.height = total
@@ -3569,6 +4153,67 @@ object GlassHook {
         }
     }
 
+    private val pillPadTag = tagKey("wathemer-pill-pad")
+    private val mentionPaneTag = tagKey("wathemer-mention-pane")
+    private val mentionPreDrawTag = tagKey("wathemer-mention-predraw")
+
+    /** The mention list blurs the conversation behind it; its own painted fill goes. */
+    private fun syncMentionPane(host: FrameLayout) {
+        var pane = host.getTag(mentionPaneTag) as? GlassView
+        if (pane == null || pane.parent !== host) {
+            pane = GlassView(host.context).apply {
+                backdrop = convCoordRef?.get()
+                underlay = wallpaperUnderlay(host)
+                params.apply {
+                    downsample = DOWNSAMPLE
+                    blurRadius = host.dp(BLUR_DP)
+                    cornerRadius = host.dp(16f)
+                    refractionEnabled = true
+                    bevelFraction = BEVEL_FRACTION
+                    depthRatio = DEPTH_RATIO
+                    maxDisplacePx = host.dp(DISPLACE_DP)
+                    fresnelStrength = 0.5f
+                    tintColor = glassTint(convPillAlpha())
+                }
+            }
+            host.addView(
+                pane, 0,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            host.setTag(mentionPaneTag, pane)
+            logOnce("mention pane inserted")
+        } else if (pane.backdrop == null) {
+            pane.backdrop = convCoordRef?.get()
+        }
+        // WhatsApp repaints the picker's fill per data pass with no layout to catch, so pre-draw it away.
+        if (host.getTag(mentionPreDrawTag) == null) {
+            host.setTag(mentionPreDrawTag, true)
+            host.viewTreeObserver.addOnPreDrawListener {
+                for (i in 0 until host.childCount) {
+                    val c = host.getChildAt(i)
+                    if (c !is GlassView && c.background != null) c.background = null
+                }
+                true
+            }
+        }
+    }
+
+    /** Zero every header pane but the one taking the capsule now, or two pills stack. */
+    private fun collapseHeaderPanes(holder: ViewGroup, keep: View) {
+        for ((owner, g) in convPanes.entries) {
+            if (g.parent !== holder || owner === keep) continue
+            val glp = g.layoutParams ?: continue
+            if (glp.width != 0 || glp.height != 0) {
+                glp.width = 0
+                glp.height = 0
+                g.layoutParams = glp
+            }
+        }
+    }
+
     /** One capsule spanning the toolbar; every rect is re-derived, never stored, custom_view resizes when the menu inflates. */
     private fun syncConvToolbar() {
         val holder = convHolderRef?.get() ?: return
@@ -3576,6 +4221,23 @@ object GlassHook {
         val toolbar = (0 until holder.childCount)
             .mapNotNull { holder.getChildAt(it) as? ViewGroup }
             .firstOrNull { it !is GlassView && it.javaClass.name.contains("Toolbar") } ?: return
+
+        // In search the holder swaps in its own bar; the capsule and the band's bottom edge follow it.
+        val barId = holder.resources.waId("search_view_toolbar", holder.context.packageName)
+        val searchBar = (if (barId != 0) holder.findViewById<View>(barId) else null)
+            ?.takeIf { it.isShown && it.width > 0 && it.height > 0 }
+        if (searchBar != null) {
+            collapseHeaderPanes(holder, searchBar)
+            val r = Rect(0, 0, searchBar.width, searchBar.height)
+            if (runCatching { holder.offsetDescendantRectToMyCoords(searchBar, r) }.isSuccess) {
+                clearBg(searchBar, "conversation search bar")
+                pill(holder, searchBar, r.left, r.top, r.right, r.bottom)
+            }
+            return
+        }
+        // In selection the bar lives in action_bar_root over this band; leave the capsule or that bar loses its pill.
+        if (!toolbar.isShown) return
+        collapseHeaderPanes(holder, toolbar)
 
         // WhatsApp's own bar fill has to go, or the pills sit on a slab instead of on the wallpaper.
         clearBg(toolbar, "conversation toolbar")
@@ -3640,7 +4302,7 @@ object GlassHook {
     private const val BUBBLE_FLAT_RADIUS_DP = 4f
     private var bubbleMergeOn = false
 
-    /* Bubbles take the panes' tint; a target-luma solve predicted right, looked wrong, and stays out. */
+    /* Bubbles take the panes' tint. */
 
     /** Follows the slider so the user's control still works; 5 heavier because a bubble transmits only wallpaper. */
     private const val BUBBLE_TINT_BOOST = 5
@@ -4185,7 +4847,6 @@ object GlassHook {
             }
         }
         XposedBridge.log("[$TAG] lock pill: $shapes fill shapes hooked")
-
     }
 
     /** ListView overrides drawChild, hook that exact method; onDraw runs before child dispatch, so the recorded row is right. */
@@ -4279,7 +4940,6 @@ object GlassHook {
         }.onFailure { XposedBridge.log("[$TAG] row hook (updateDisplayListIfDirty) failed: $it") }
 
         installMessageSelectionShape()
-
     }
 
     /** Weak keys, rows recycle; only the row-relative rect is cached, the screen position is re-read every frame. */
@@ -4287,6 +4947,19 @@ object GlassHook {
 
     /** rowH is a staleness check: a re-bound row re-reports, so a height mismatch means do not trust the rect. */
     private class BubbleMark(val rect: Rect, var rowH: Int, var flag: Int = 0)
+
+    /** Roots whose rows carry no bubble: a sticker draws bare, a video note draws a circle. */
+    private var bubblelessRootIds = IntArray(0)
+    private val bubblelessRowCache = WeakHashMap<View, Boolean>()
+
+    /** Painting a bubble for these puts a slab where WhatsApp shows none. */
+    private fun isBubblelessRow(row: View): Boolean {
+        if (bubblelessRootIds.isEmpty()) return false
+        bubblelessRowCache[row]?.let { return it }
+        val found = bubblelessRootIds.any { row.findViewById<View>(it) != null }
+        bubblelessRowCache[row] = found
+        return found
+    }
     private var convBubblePaneRef: WeakReference<GlassBubblePane>? = null
     private val bubbleRowAt = IntArray(2)
     private val bubbleRectScratch = RectF()
@@ -4564,7 +5237,7 @@ object GlassHook {
         val radius = readCornerRadius(frame) ?: (d * CARD_RADIUS_DP)
         // Straight assignment, never clearBg: its keep-clear re-assert kills the stamp.
         frame.background = FrostDrawable(
-            frame, bubbleBackdrop(frame), FrostDrawable.SHRINK,
+            frame, bubbleBackdrop(frame),
             radius, glassTintColor,
             strokeWidth = frame.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
             ignorePadding = true,
@@ -4581,9 +5254,6 @@ object GlassHook {
     }
 
     /* ── The contact picker ─────────────────────────────────────────────────────────────── */
-
-    /** Not CARD_INSET_DP: widening this screen must not move the home cards. */
-    private const val PICKER_INSET_DP = 3f
 
     /** Half the gap between picker cards; without it adjacent groups share an edge and read as one shape. */
     private const val PICKER_CARD_GAP_DP = 6f
@@ -4651,85 +5321,127 @@ object GlassHook {
         }
 
         pane(CARD_RADIUS_DP, { _, out -> collectPickerCards(out) }, "cards pane")
-        if (toolbar != null) {
-            pane(0f, { g, out ->
-                if (toolbar.isShown && toolbar.width > 0 && toolbar.height > 0) {
-                    // The shader gets cornerRadius unclamped, so it must be exact; set per frame, the height arrives at layout.
-                    g.params.cornerRadius = toolbar.height / 2f
-                    toolbar.getLocationOnScreen(pickerAt)
-                    val ix = toolbar.dp(PICKER_INSET_DP)
-                    out.add(
-                        pickerAt[0] + ix, pickerAt[1].toFloat(),
-                        pickerAt[0] + toolbar.width - ix,
-                        (pickerAt[1] + toolbar.height).toFloat(),
-                    )
-                }
-            }, "toolbar pill")
+        // The bar, not the toolbar in it: the two swap during search and the bar's own box does not move.
+        val header = root.findViewById<View>(
+            root.resources.waId("wds_search_bar", root.context.packageName),
+        ) ?: toolbar
+        if (header != null) {
+            root.viewTreeObserver.addOnGlobalLayoutListener {
+                runCatching { syncPickerBand(root, header) }
+            }
+            syncPickerBand(root, header)
         }
     }
 
     // Resolved once: waId is an uncached getIdentifier and this collect runs per pre-draw frame.
     private var pickerIdsResolved = false
-    private var pickerActionId = 0
+    private var pickerActionIds = IntArray(0)
+    private var pickerFooterId = 0
     private var pickerSelectorId = 0
     private var pickerPhotoId = 0
+    private var pickerNameId = 0
 
-    /** Kind at the height it was classified; a resize reclassifies, a plain rebind keeps the cached answer. */
-    private class PickerRowKind(val kind: Int, val height: Int)
+    /** Kind, height and the label it was classified at; two row types share a height, so height alone let a recycled view keep the wrong kind. */
+    private class PickerRowKind(val kind: Int, val height: Int, val name: CharSequence?)
     private val pickerRowKinds = WeakHashMap<View, PickerRowKind>()
 
-    /** Rows sort by contained id; the section header carries neither, which is what makes the gap between the cards. */
+    /** The name view per row. Cached because the subtree walk is the cost; its text is a field read. */
+    private val pickerNameViews = WeakHashMap<View, TextView>()
+    private var loggedGlyph = false
+
+    private fun pickerNameOf(row: View): CharSequence? {
+        if (pickerNameId == 0) return null
+        val tv = pickerNameViews[row] ?: (row.findViewById<View>(pickerNameId) as? TextView)
+            ?.also { pickerNameViews[row] = it } ?: return null
+        return tv.text
+    }
+
+    /** Rows sort by contained id; the section header carries none, which is what makes the gap between the cards. */
     private fun collectPickerCards(out: RectList) {
         val list = pickerListRef?.get() ?: return
         if (!list.isShown) return
         val pkg = list.context.packageName
         if (!pickerIdsResolved) {
             pickerIdsResolved = true
-            pickerActionId = list.resources.waId("header_footer_row", pkg)
+            // Their own ids: header_footer_row is the invite rows' layout and carries a contact_selector too.
+            pickerActionIds = intArrayOf(
+                list.resources.waId("menuitem_new_group_row", pkg),
+                list.resources.waId("menuitem_new_contact_row", pkg),
+                list.resources.waId("menuitem_new_communities_row", pkg),
+                list.resources.waId("menuitem_new_broadcast", pkg),
+            ).filter { it != 0 }.toIntArray()
+            pickerFooterId = list.resources.waId("header_footer_row", pkg)
             pickerSelectorId = list.resources.waId("contact_selector", pkg)
             pickerPhotoId = list.resources.waId("contactpicker_row_photo", pkg)
+            pickerNameId = list.resources.waId("contactpicker_row_name", pkg)
         }
-        val ix = list.dp(PICKER_INSET_DP)
+        val ix = list.dp(CARD_INSET_DP)
         var aT = Float.MAX_VALUE
         var aB = -Float.MAX_VALUE
         var cT = Float.MAX_VALUE
         var cB = -Float.MAX_VALUE
+        var fT = Float.MAX_VALUE
+        var fB = -Float.MAX_VALUE
         for (i in 0 until list.childCount) {
             val row = list.getChildAt(i) ?: continue
             if (row.height <= 0 || row.visibility != View.VISIBLE) continue
-            // Cached per row: two findViewById subtree walks per row per frame is what this avoids.
+            // Cached per row: the findViewById subtree walks are what this avoids.
             val cached = pickerRowKinds[row]
+            val shown = pickerNameOf(row)
             val kind: Int
-            if (cached != null && cached.height == row.height) {
+            if (cached != null && cached.height == row.height && cached.name == shown) {
                 kind = cached.kind
             } else {
-                val isA = pickerActionId != 0 && row.findViewById<View>(pickerActionId) != null
-                val isC = !isA && pickerSelectorId != 0 && row.findViewById<View>(pickerSelectorId) != null
-                kind = if (isA) 1 else if (isC) 2 else 0
-                pickerRowKinds[row] = PickerRowKind(kind, row.height)
+                val isA = pickerActionIds.any { row.findViewById<View>(it) != null }
+                val isF = !isA && pickerFooterId != 0 && row.findViewById<View>(pickerFooterId) != null
+                val isC = !isA && !isF && pickerSelectorId != 0 &&
+                    row.findViewById<View>(pickerSelectorId) != null
+                kind = if (isA) 1 else if (isC) 2 else if (isF) 3 else 0
+                pickerRowKinds[row] = PickerRowKind(kind, row.height, shown)
             }
             if (kind == 0) continue
-            val isAction = kind == 1
-            if (isAction) runCatching { frostPickerDiscs(row) }
+            if (kind == 1) runCatching { glassActionDisc(row) }
+            if (kind == 3) runCatching { frostPickerDiscs(row) }
             row.getLocationOnScreen(pickerAt)
             val t = pickerAt[1].toFloat()
             val b = (pickerAt[1] + row.height).toFloat()
-            if (isAction) {
-                if (t < aT) aT = t
-                if (b > aB) aB = b
-            } else {
-                if (t < cT) cT = t
-                if (b > cB) cB = b
+            when (kind) {
+                1 -> {
+                    if (t < aT) aT = t
+                    if (b > aB) aB = b
+                }
+                2 -> {
+                    if (t < cT) cT = t
+                    if (b > cB) cB = b
+                }
+                else -> {
+                    if (t < fT) fT = t
+                    if (b > fB) fB = b
+                }
             }
         }
         val l = ix
         val r = list.width - ix
         if (r <= l) return
-        // Clamped to the list's box: a card following its rows behind the toolbar would sit over the pill.
-        list.getLocationOnScreen(pickerAt)
-        val top = pickerAt[1].toFloat()
-        val bottom = (pickerAt[1] + list.height).toFloat()
         val gap = list.dp(PICKER_CARD_GAP_DP)
+        val radius = list.dp(CARD_RADIUS_DP)
+
+        // One clip, the box the topmost card is clamped to; a partly scrolled row reaches the list's edge.
+        val clipTop = gap.toInt()
+        val provider = list.outlineProvider as? CardOutline
+        if (provider == null) {
+            list.outlineProvider = CardOutline(l.toInt(), clipTop, r.toInt(), list.height, radius)
+            list.clipToOutline = true
+            list.invalidateOutline()
+        } else if (provider.set(l.toInt(), clipTop, r.toInt(), list.height, radius)) {
+            // Gated on a real move: unconditional from this per-frame path it schedules frames forever.
+            list.invalidateOutline()
+        }
+
+        // Clamped to the clip, not the list's edge: that is what puts air between the header and the card.
+        list.getLocationOnScreen(pickerAt)
+        val top = (pickerAt[1] + clipTop).toFloat()
+        val bottom = (pickerAt[1] + list.height).toFloat()
         // Unrolled: a listOf of pairs boxes four floats per pre-draw frame on this path.
         fun emit(t0: Float, b0: Float) {
             if (b0 <= t0) return
@@ -4739,13 +5451,98 @@ object GlassHook {
             if (b <= t) return
             out.add(pickerAt[0] + l, t, pickerAt[0] + r, b)
         }
+        // Three groups, so the invite rows keep a card of their own instead of extending the contacts'.
         emit(aT, aB)
         emit(cT, cB)
+        emit(fT, fB)
+    }
+
+    /**
+     * The New rows' discs. WhatsApp bakes the accent circle and the white glyph into one bitmap, so
+     * there is no fill to clear: the glyph is lifted out and the circle behind it becomes glass.
+     */
+    private fun glassActionDisc(row: View) {
+        if (row.getTag(pickerDiscTag) != null) return
+        val icon = firstImageIn(row, 0) ?: return
+        if (icon.width <= 0 || icon.height <= 0) return
+        row.setTag(pickerDiscTag, true)
+        runCatching {
+            val glyph = glyphOf(icon.resources, icon.drawable)
+            if (glyph !== icon.drawable) icon.setImageDrawable(glyph)
+            // For an icon that was never a bitmap: a vector keeps its theme fill, and community's is dark.
+            icon.imageTintList = ColorStateList.valueOf(Color.WHITE)
+            frost(icon, allowSquare = true, ignorePadding = true)
+        }
+    }
+
+    /** The row's icon has no id of its own, so it is found by shape: the first ImageView in it. */
+    private fun firstImageIn(v: View, depth: Int): ImageView? {
+        if (v is ImageView) return v
+        if (depth >= 4 || v !is ViewGroup) return null
+        for (i in 0 until v.childCount) {
+            firstImageIn(v.getChildAt(i) ?: continue, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    /** The glyph, white, whatever the icon is made of; the mask is read from the bitmap's own opacity, never assumed. */
+    private fun glyphOf(res: android.content.res.Resources, d: Drawable?): Drawable? {
+        val src = (d as? BitmapDrawable)?.bitmap ?: return d
+        return runCatching {
+            val w = src.width
+            val h = src.height
+            val px = IntArray(w * h)
+            src.getPixels(px, 0, w, 0, 0, w, h)
+
+            // Quantised to 5 bits a channel, so antialiasing does not split the fill into a thousand keys.
+            val counts = HashMap<Int, Int>()
+            var opaque = 0
+            for (p in px) {
+                if (p ushr 24 < 128) continue
+                opaque++
+                val q = p and 0xF8F8F8
+                counts[q] = (counts[q] ?: 0) + 1
+            }
+            val discInBitmap = opaque * 2 > px.size
+            val fill = counts.maxByOrNull { it.value }?.key ?: 0
+            if (!loggedGlyph) {
+                loggedGlyph = true
+                XposedBridge.log(
+                    "[$TAG] action glyph " + w + "x" + h + " opaque=" + opaque + "/" + px.size +
+                        " discInBitmap=" + discInBitmap + " fill=" + Integer.toHexString(fill),
+                )
+            }
+            val fr = (fill shr 16) and 0xFF
+            val fg = (fill shr 8) and 0xFF
+            val fb = fill and 0xFF
+
+            for (i in px.indices) {
+                val p = px[i]
+                val a = p ushr 24
+                if (a == 0) {
+                    px[i] = 0
+                    continue
+                }
+                val m = if (discInBitmap) {
+                    val dr = (p shr 16) and 0xFF
+                    val dg = (p shr 8) and 0xFF
+                    val db = p and 0xFF
+                    // Saturating at 255 of summed channel distance: a white glyph and a dark one both clear it.
+                    val dist = kotlin.math.abs(dr - fr) + kotlin.math.abs(dg - fg) +
+                        kotlin.math.abs(db - fb)
+                    if (dist >= 255) 255 else dist
+                } else {
+                    a
+                }
+                px[i] = ((m * a / 255) shl 24) or 0xFFFFFF
+            }
+            BitmapDrawable(res, Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888))
+        }.getOrDefault(d)
     }
 
     /** Scoped to the row: the same photo id is every contact's avatar, and frosting those would erase the photos. */
     private fun frostPickerDiscs(row: View) {
-        // The caller hands us classified action rows only; the row tag makes repeat frames a single getTag.
+        // The caller hands us classified rows only; the row tag makes repeat frames a single getTag.
         if (row.getTag(pickerDiscTag) != null) return
         if (pickerPhotoId == 0) return
         val photo = row.findViewById<View>(pickerPhotoId) ?: return
@@ -4754,6 +5551,316 @@ object GlassHook {
         photo.setTag(pickerDiscTag, true)
         row.setTag(pickerDiscTag, true)
         runCatching { frost(photo, allowSquare = true, ignorePadding = true) }
+    }
+
+    /** Band and pill stack, so they split TINT_ALPHA: the sum over the overlap must equal one surface. */
+    private fun pickerBandAlpha(): Int = (TINT_ALPHA / 2).coerceAtLeast(0)
+
+    private fun pickerPillAlpha(): Int = (TINT_ALPHA - pickerBandAlpha()).coerceAtLeast(0)
+
+    private var pickerBandRef: WeakReference<GlassView>? = null
+
+    /** Full-width band from the top edge to the pill's bottom; it lives in action_bar_root because id/content carries the status inset as padding and clips it. */
+    private fun syncPickerBand(root: ViewGroup, header: View) {
+        if (header.height <= 0) return
+        val under = wallpaperUnderlay(root)
+        // No wallpaper means nothing to transmit, and a tint-only band is just a grey wash.
+        if (under.isEmpty()) return
+        val abrId = root.resources.waId("action_bar_root", root.context.packageName)
+        if (abrId == 0) return
+        val abr = root.rootView?.findViewById<View>(abrId) as? FrameLayout ?: return
+
+        val at = IntArray(2)
+        val abrAt = IntArray(2)
+        header.getLocationOnScreen(at)
+        abr.getLocationOnScreen(abrAt)
+        val total = (at[1] - abrAt[1]) + header.height
+        if (total <= 0) return
+
+        var band = pickerBandRef?.get()
+        if (band == null || band.parent !== abr) {
+            band = GlassView(abr.context).apply {
+                // Wallpaper only: a full-bleed surface tracking live content reads as a flicker.
+                underlay = under
+                params.apply {
+                    downsample = DOWNSAMPLE
+                    blurRadius = root.dp(BLUR_DP)
+                    refractionEnabled = true
+                    // With the SDF expanded there is no bevel to size; a 1px nominal one keeps displacement at zero.
+                    bevelFraction = 0f
+                    bevelThickness = 1f
+                    depthRatio = DEPTH_RATIO
+                    maxDisplacePx = root.dp(DISPLACE_DP)
+                    fresnelStrength = 0.5f
+                    cornerRadius = 0f
+                    // Full-bleed panel; a rim here would outline the screen.
+                    rimEnabled = false
+                    edgeExpandLeft = 8f
+                    edgeExpandTop = 8f
+                    edgeExpandRight = 8f
+                    edgeExpandBottom = 8f
+                }
+            }
+            // Directly after the wallpaper and its dim, or the band hides behind them.
+            var insertAt = 0
+            for (i in 0 until abr.childCount) {
+                val c = abr.getChildAt(i)
+                if (c === under.firstOrNull() || (under.size > 1 && c === under[1])) insertAt = i + 1
+            }
+            if (insertAt == 0) {
+                XposedBridge.log(
+                    "[$TAG] WARN: wallpaper views are not children of action_bar_root; the picker " +
+                        "band will be behind them and invisible",
+                )
+            }
+            abr.addView(
+                band, insertAt,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, total).apply {
+                    gravity = Gravity.TOP
+                },
+            )
+            pickerBandRef = WeakReference(band)
+            XposedBridge.log("[$TAG] contact picker band inserted at " + insertAt + " (" + total + "px)")
+        }
+        band.params.tintColor = glassTint(pickerBandAlpha())
+        val lp = band.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (lp.height != total) {
+            lp.height = total
+            band.layoutParams = lp
+        }
+    }
+
+    private var meTabContainerRef: WeakReference<View>? = null
+    private val meTabAt = IntArray(2)
+    private val meTabHeaderAt = IntArray(2)
+    private var meTabHeaderRef: WeakReference<View>? = null
+    private val meTabPaneTag = tagKey("wathemer-me-tab-pane")
+
+    /** A stamped card on me_tab_container's box behind the profile block; the page scrolls, so a fixed panel or a full-bounds frost would not fit. */
+    private fun ensureMeTabCard(container: View) {
+        meTabContainerRef = WeakReference(container)
+        val host = container.rootView?.findViewById<View>(android.R.id.content) as? FrameLayout ?: return
+        if (host.getTag(meTabPaneTag) != null) return
+        if (!host.isAttachedToWindow) return
+        host.setTag(meTabPaneTag, true)
+        val d = host.resources.displayMetrics.density
+        val g = GlassBubblePane(host.context)
+        g.params = GlassParams(d).apply {
+            blurRadius = d * BLUR_DP
+            cornerRadius = d * CARD_RADIUS_DP
+            refractionEnabled = true
+            bevelFraction = BEVEL_FRACTION
+            depthRatio = DEPTH_RATIO
+            maxDisplacePx = d * DISPLACE_DP
+            fresnelStrength = 0.5f
+            tintColor = glassTintColor
+        }
+        g.tint = { glassTintColor }
+        g.backdrop = { bubbleBackdrop(g) }
+        g.placement = { bubbleWpPlacement }
+        g.dim = { 0f }
+        g.rimColor = glassTint(BUBBLE_RIM_ALPHA)
+        g.rimWidth = d
+        g.collect = { out -> collectMeTabCard(out) }
+        g.onGeometryChanged = { markWallpaperGeometryDirty() }
+        host.addView(
+            g, 0,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        XposedBridge.log("[$TAG] me tab profile card inserted")
+    }
+
+    private fun collectMeTabCard(out: RectList) {
+        val c = meTabContainerRef?.get() ?: return
+        if (!c.isShown || c.width <= 0 || c.height <= 0) return
+        val side = c.dp(CARD_INSET_DP)
+        val gap = c.dp(CARD_GAP_DP)
+        c.getLocationOnScreen(meTabAt)
+        // Clamped under the header. The header lives INSIDE this page's scroller and its motion scene
+        // pins it while the block collapses behind it, so an unclamped rect rides up over the capsule.
+        var top = meTabAt[1] + gap
+        // Re-resolved whenever the cache is dead or belongs to another window: this page is rebuilt on
+        // re-entry, and a detached header reads isShown false, so the clamp silently stops running.
+        var header = meTabHeaderRef?.get()
+        if (header == null || !header.isAttachedToWindow || header.rootView !== c.rootView) {
+            header = c.rootView?.findViewById(
+                c.resources.waId("wds_search_bar", c.context.packageName),
+            )
+            meTabHeaderRef = header?.let { WeakReference(it) }
+        }
+        if (header != null && header.isShown && header.height > 0) {
+            header.getLocationOnScreen(meTabHeaderAt)
+            top = maxOf(top, (meTabHeaderAt[1] + header.height + gap).toFloat())
+        }
+        val bottom = (meTabAt[1] + c.height).toFloat()
+
+        // The clip FIRST, never behind an early return: a skipped frame leaves the last value
+        // standing. A later sibling than the header, so it paints over it once that fill is gone.
+        val cl = side.toInt()
+        val ct = (top - meTabAt[1]).toInt().coerceIn(0, c.height)
+        val cr = c.width - side.toInt()
+        val cb = c.height
+        // Capped at half the height: a bigger radius yields an outline that cannot clip.
+        val radius = minOf(c.dp(CARD_RADIUS_DP), (cb - ct) / 2f).coerceAtLeast(0f)
+        val provider = c.outlineProvider as? CardOutline
+        if (provider == null) {
+            c.outlineProvider = CardOutline(cl, ct, cr, cb, radius)
+            c.invalidateOutline()
+        } else if (provider.set(cl, ct, cr, cb, radius)) {
+            // Gated on a real move: unconditional from this per-frame path it schedules frames forever.
+            c.invalidateOutline()
+        }
+        // Asserted every sync, never once: returning to a retained page cleared it and the block bled.
+        if (!c.clipToOutline) c.clipToOutline = true
+        // Collapsed far enough that nothing of the block is left below the header.
+        if (bottom <= top) return
+        out.add(meTabAt[0] + side, top, meTabAt[0] + c.width - side, bottom)
+    }
+
+    private val wdsBarPanes = WeakHashMap<ViewGroup, GlassView>()
+    private val wdsBackAt = IntArray(2)
+    private val wdsRect = Rect()
+    private val wdsOwnerAt = IntArray(2)
+    private val wdsBarTag = tagKey("wathemer-wds-search-bar")
+
+    /** A band behind this header means the capsule takes the remainder of the tint, not all of it. */
+    private fun headerBandBehind(bar: View): Boolean {
+        val abrId = bar.resources.waId("action_bar_root", bar.context.packageName)
+        val abr = if (abrId != 0) bar.rootView?.findViewById<View>(abrId) else null
+        if (abr != null && folderBands[abr]?.parent != null) return true
+        return pickerBandRef?.get()?.parent != null
+    }
+
+    /** The search_view id covers two unlike bar families; acted on only where the field's parent can hold a pane, else the fill is left alone on purpose, because clearing it with no pane makes the bar invisible. */
+    private fun syncSearchViewGlass(field: View) {
+        val host = field.parent as? FrameLayout ?: return
+        if (field.width <= 0 || field.height <= 0) return
+        val res = field.resources
+        val pkg = field.context.packageName
+
+        var glass = wdsBarPanes[host]
+        if (glass == null || glass.parent !== host) {
+            val under = wallpaperUnderlay(host)
+            if (under.isEmpty()) return
+            glass = GlassView(host.context).apply {
+                underlay = under
+                params.apply {
+                    downsample = DOWNSAMPLE
+                    blurRadius = host.dp(BLUR_DP)
+                    refractionEnabled = true
+                    bevelFraction = BEVEL_FRACTION
+                    depthRatio = DEPTH_RATIO
+                    maxDisplacePx = host.dp(DISPLACE_DP)
+                    fresnelStrength = 0.5f
+                }
+            }
+            host.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
+            wdsBarPanes[host] = glass
+            XposedBridge.log("[$TAG] search view capsule inserted")
+        }
+        // Only now, with a pane behind it, is the fill safe to take; two unlike families share this id.
+        if (field.background != null) clearBg(field, "search_view")
+        for (n in listOf("search_edit_frame", "search_plate", "submit_area", "search_view_toolbar")) {
+            val id = res.waId(n, pkg)
+            if (id == 0) continue
+            field.findViewById<View>(id)?.let { if (it.background != null) clearBg(it, n) }
+        }
+        glass.params.tintColor =
+            glassTint(if (headerBandBehind(host)) pickerPillAlpha() else TINT_ALPHA)
+
+        val lp = glass.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (lp.width != field.width || lp.height != field.height ||
+            lp.leftMargin != field.left || lp.topMargin != field.top
+        ) {
+            lp.width = field.width
+            lp.height = field.height
+            lp.leftMargin = field.left
+            lp.topMargin = field.top
+            lp.gravity = Gravity.TOP or Gravity.START
+            glass.layoutParams = lp
+            glass.params.cornerRadius = field.height / 2f
+        }
+    }
+
+    /** One GlassView capsule per WDSSearchBar, keyed on the component; it swaps a toolbar and a search view, and a stamped rect's light pass would not match a real pill. */
+    private fun syncWdsSearchBar(bar: FrameLayout) {
+        if (bar.width <= 0 || bar.height <= 0) return
+        val res = bar.resources
+        val pkg = bar.context.packageName
+        val fieldId = res.waId("wds_search_view", pkg)
+        val toolbarId = res.waId("toolbar", pkg)
+        val field = (if (fieldId != 0) bar.findViewById<View>(fieldId) else null)
+            ?.takeIf { it.isShown && it.height > 0 }
+        val toolbar = (if (toolbarId != 0) bar.findViewById<View>(toolbarId) else null)
+            ?.takeIf { it.isShown && it.height > 0 }
+        // The field wins: while it is up the toolbar is still a child and still measures.
+        val owner = field ?: toolbar ?: return
+        if (owner.parent !== bar) return
+        // Clear both: the search field's fill is on backgroundHolder, a CHILD, so clearing the field
+        // itself clears nothing and its rounded rect stays over the glass.
+        clearBg(owner, "wds search bar")
+        val holderId = res.waId("backgroundHolder", pkg)
+        (if (holderId != 0) owner.findViewById<View>(holderId) else null)
+            ?.let { clearBg(it, "wds search field fill") }
+
+        var glass = wdsBarPanes[bar]
+        if (glass == null || glass.parent !== bar) {
+            val under = wallpaperUnderlay(bar)
+            if (under.isEmpty()) return
+            glass = GlassView(bar.context).apply {
+                underlay = under
+                params.apply {
+                    downsample = DOWNSAMPLE
+                    blurRadius = bar.dp(BLUR_DP)
+                    refractionEnabled = true
+                    bevelFraction = BEVEL_FRACTION
+                    depthRatio = DEPTH_RATIO
+                    maxDisplacePx = bar.dp(DISPLACE_DP)
+                    fresnelStrength = 0.5f
+                }
+            }
+            // Index 0 draws behind the bar's own controls.
+            bar.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
+            wdsBarPanes[bar] = glass
+            val name = runCatching { res.getResourceEntryName(bar.id) }.getOrNull() ?: "?"
+            XposedBridge.log("[$TAG] wds search capsule inserted on " + name)
+        }
+        // A backdrop only if it reaches up here: sampled at our own position, a lower list reads black.
+        val list = bar.rootView?.findViewById<View>(android.R.id.list)
+        if (list != null) {
+            list.getLocationOnScreen(wdsBackAt)
+            owner.getLocationOnScreen(wdsOwnerAt)
+            val covers = wdsBackAt[1] <= wdsOwnerAt[1]
+            if (covers && glass.backdrop !== list) {
+                runCatching { glass.backdrop = list }
+                    .onFailure { logOnce("wds search backdrop rejected: $it") }
+            } else if (!covers && glass.backdrop != null) {
+                glass.backdrop = null
+            }
+        }
+        glass.params.tintColor =
+            glassTint(if (headerBandBehind(bar)) pickerPillAlpha() else TINT_ALPHA)
+
+        // The bar's own box in both states: one box cannot disagree with itself, so the swap is seamless.
+        val side = bar.dp(CARD_INSET_DP).toInt()
+        val box = wdsRect
+        box.set(side, 0, bar.width - side, bar.height)
+        if (box.width() <= 0 || box.height() <= 0) return
+        val lp = glass.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (lp.width != box.width() || lp.height != box.height() ||
+            lp.leftMargin != box.left || lp.topMargin != box.top
+        ) {
+            lp.width = box.width()
+            lp.height = box.height()
+            lp.leftMargin = box.left
+            lp.topMargin = box.top
+            lp.gravity = Gravity.TOP or Gravity.START
+            glass.layoutParams = lp
+            glass.params.cornerRadius = box.height() / 2f
+        }
     }
 
     /* ── The voice-recording lock pill ──────────────────────────────────────────────────── */
@@ -4955,6 +6062,7 @@ object GlassHook {
             val mark = bubbleBoundsByRow[row] ?: continue
             // See BubbleMark: a height mismatch means re-bound and not yet re-reported, so the rect is not trusted.
             if (mark.rowH != row.height) continue
+            if (isBubblelessRow(row)) continue
             GlassBubbleDrawable.clamp(mark.rect, row.height, insetX, insetY, bubbleRectScratch)
             if (bubbleRectScratch.width() <= 0f || bubbleRectScratch.height() <= 0f) continue
             row.getLocationOnScreen(bubbleRowAt)
@@ -4971,7 +6079,7 @@ object GlassHook {
         // Deliberately no frame driver: report stores rest, swipeDx re-adds the offset; do not re-add a per-frame invalidate.
     }
 
-    /** From onPreDraw, returning false so the bad position is never presented; post() starved ~0.8s behind startup. */
+    /** From onPreDraw, returning false so the bad position is never presented; post() starves behind startup. */
     private fun repinToBottom(list: AbsListView) {
         // Remove through the observer captured at registration; a detached list hands back a floating observer.
         // No registration guard, deliberately: the listener self-removes and the repin is idempotent.
@@ -5167,13 +6275,21 @@ object GlassHook {
 
         if (input != null && input.width > 0) {
             clearBg(input, "input_layout")
+            // The mic disc's own screen margin; the pill's left edge mirrors it or the corner clips.
+            var sideFloor = 0
+            if (send != null && send.width > 0) {
+                val sr = Rect(0, 0, send.width, send.height)
+                if (runCatching { footer.offsetDescendantRectToMyCoords(send, sr) }.isSuccess) {
+                    sideFloor = (footer.width - sr.right).coerceAtLeast(0)
+                }
+            }
             convRect.set(0, 0, input.width, input.height)
             runCatching { footer.offsetDescendantRectToMyCoords(input, convRect) }
             // Grown so the icons can breathe, clamped because the footer is a ClippingLayout and shaves the overflow.
             val pad = footer.dp(COMPOSE_PILL_PAD_DP).toInt()
             composePane(
                 footer, input,
-                (convRect.left - pad).coerceAtLeast(0),
+                (convRect.left - pad).coerceAtLeast(sideFloor),
                 (convRect.top - pad).coerceAtLeast(0),
                 (convRect.right + pad).coerceAtMost(footer.width),
                 (convRect.bottom + pad).coerceAtMost(footer.height),
@@ -5278,7 +6394,7 @@ object GlassHook {
             tintOverride = Color.argb(
                 ACCENT_ALPHA, Color.red(accent), Color.green(accent), Color.blue(accent),
             ),
-            allowSquare = true,                    // add_members_icon is a 113x113 circle
+            allowSquare = true,                    // add_members_icon is a circle
         )
 
         // frost()'s plain background set is not enough here: the button re-applies its own opaque fill, so route it through forceBg.
@@ -5324,8 +6440,113 @@ object GlassHook {
     }
 
     /** [frostOnLayout] with an explicit tint and radius; see the reply-quote call site. */
-    private fun frostOnLayoutWith(v: View, tint: Int, radius: Float) {
+    private fun frostOnLayoutWith(v: View, tint: Int, radius: Float?) {
         val apply = Runnable { runCatching { frost(v, tintOverride = tint, radiusOverride = radius) } }
+        apply.run()
+        if (v.getTag(frostListenerTag) == null) {
+            v.setTag(frostListenerTag, true)
+            v.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply.run() }
+        }
+    }
+
+    /** True when [id] names an ancestor within [depth] hops; scopes generic ids to one host. */
+    private fun insideId(v: View, id: Int, depth: Int): Boolean {
+        var p: View? = v.parent as? View
+        var hops = 0
+        while (p != null && hops < depth) {
+            if (p.id == id) return true
+            p = p.parent as? View
+            hops++
+        }
+        return false
+    }
+
+    private val frostMoveTag = tagKey("wathemer-frost-move")
+
+    /** offsetTopAndBottom moves rows without a redraw and a draw-time wallpaper patch freezes; invalidate on any screen move. */
+    private fun watchFrostPosition(v: View) {
+        if (v.getTag(frostMoveTag) != null) return
+        v.setTag(frostMoveTag, true)
+        FrostMoveWatch(v).arm()
+    }
+
+    /** Detaches with its view: one listener per recycled row, left registered, accumulates for the window's life. */
+    private class FrostMoveWatch(private val host: View) :
+        ViewTreeObserver.OnPreDrawListener, View.OnAttachStateChangeListener {
+        private val at = IntArray(2)
+        private var lastX = Int.MIN_VALUE
+        private var lastY = Int.MIN_VALUE
+        private var observing = false
+
+        fun arm() {
+            host.addOnAttachStateChangeListener(this)
+            if (host.isAttachedToWindow) attach()
+        }
+
+        private fun attach() {
+            if (observing) return
+            host.viewTreeObserver.addOnPreDrawListener(this)
+            observing = true
+        }
+
+        override fun onViewAttachedToWindow(v: View) = attach()
+
+        override fun onViewDetachedFromWindow(v: View) {
+            if (!observing) return
+            host.viewTreeObserver.removeOnPreDrawListener(this)
+            observing = false
+        }
+
+        override fun onPreDraw(): Boolean {
+            if (host.background !is FrostDrawable || !host.isShown || host.width <= 0) return true
+            host.getLocationOnScreen(at)
+            if (at[0] != lastX || at[1] != lastY) {
+                lastX = at[0]
+                lastY = at[1]
+                host.invalidate()
+            }
+            return true
+        }
+    }
+
+    /** Blurred-wallpaper fill kept on layout; the film variant lets whatever is underneath bleed through. */
+    private fun liquidFrostOnLayout(
+        v: View,
+        radiusDp: Float? = null,
+        tintAlpha: Int = CHIP_ALPHA,
+        /** For a wrap_content pill whose width comes from the stock drawable's own padding. */
+        keepPadding: Boolean = false,
+    ) {
+        watchFrostPosition(v)
+        val apply = Runnable {
+            runCatching {
+                if (keepPadding) keepStockPadding(v)
+                if (v.height <= 0) return@runCatching
+                val radius = radiusDp?.let { v.dp(it) } ?: (v.height / 2f)
+                val existing = v.getTag(frostTag) as? FrostDrawable
+                if (existing != null && v.background === existing) {
+                    existing.setRadius(radius)
+                    return@runCatching
+                }
+                val d = FrostDrawable(
+                    v, bubbleBackdrop(v), radius, glassTint(tintAlpha),
+                    strokeWidth = v.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
+                    ignorePadding = true,
+                )
+                v.setTag(frostTag, d)
+                v.background = d
+            }
+        }
+        apply.run()
+        if (v.getTag(frostListenerTag) == null) {
+            v.setTag(frostListenerTag, true)
+            v.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply.run() }
+        }
+    }
+
+    /** [frostOnLayout] for square views; the aspect gate would drop them, a disc is the point here. */
+    private fun frostCircleOnLayout(v: View) {
+        val apply = Runnable { runCatching { frost(v, allowSquare = true, ignorePadding = true) } }
         apply.run()
         if (v.getTag(frostListenerTag) == null) {
             v.setTag(frostListenerTag, true)
@@ -5362,8 +6583,8 @@ object GlassHook {
         walk(root)
     }
 
-    /** A TRANSPARENT ColorDrawable, never null: Material reads its background back, and mutate() on null crashes WhatsApp. */
     // forceBg keeps re-asserting its drawable; never pair this with a background you set yourself, it will null yours too.
+    /** A TRANSPARENT ColorDrawable, never null: Material reads its background back, and mutate() on null crashes WhatsApp. */
     private fun clearBg(v: View, what: String) = forceBg(v, ColorDrawable(Color.TRANSPARENT), what)
 
     /** Round by outline clip, never by swapping the background, which discards the user's tint and fights recolorBg. */
@@ -5387,7 +6608,7 @@ object GlassHook {
         logOnce("background forced on $what")
     }
 
-    /** One-time log lines: the re-apply sites fired 60-100 times per launch and buried the geometry lines. */
+    /** One-time log lines: the re-apply sites fire repeatedly per launch and bury the geometry lines. */
     private val loggedOnce = Collections.synchronizedSet(HashSet<String>())
 
     private var dividerHookInstalled = false
@@ -5522,13 +6743,26 @@ object GlassHook {
                 syncListCard()
                 applyLifts()
                 injectNavGlass()
-        
+
                 XposedBridge.log(
                     "[$TAG] nav floated: h=$h side=$side lift=$lift topMargin=${lp.topMargin}"
                 )
             }
         })
         container.requestLayout()
+    }
+
+    /** A search bar covering this header, whose own capsule is the one that should show. */
+    private fun searchOverlayShown(content: ViewGroup): Boolean {
+        val res = content.resources
+        val pkg = content.context.packageName
+        for (n in listOf("search_view", "search_fragment")) {
+            val id = res.waId(n, pkg)
+            if (id == 0) continue
+            val v = content.rootView?.findViewById<View>(id) ?: continue
+            if (v.isShown && v.height > 0) return true
+        }
+        return false
     }
 
     /** One pane over the union of the toolbar actions: per-button circles came out uneven, and ActionMenuView has no id to hang one on. */
@@ -5577,6 +6811,8 @@ object GlassHook {
             val bound = paneBindings.firstOrNull { it.pane.get() === glass }?.anchor?.get()
             if (bound !== header) bindPane(glass, header, "toolbar actions")
         }
+        // A shown search bar owns the header; its buttons stay isShown under it and the unions overlap.
+        val searchOverlay = searchOverlayShown(content)
         var l = Int.MAX_VALUE
         var t = Int.MAX_VALUE
         var r = Int.MIN_VALUE
@@ -5601,6 +6837,7 @@ object GlassHook {
             if (a.rootView !== content.rootView) continue
             // isShown, not visibility == VISIBLE: a hidden ancestor leaves the item itself still reporting VISIBLE.
             if (a.width <= 0 || a.height <= 0 || !a.isShown) continue
+            if (searchOverlay) continue
             // Only the group that owns the toolbar, plus the overflow button which is in both.
             val group = a.getTag(actionGroupTag)
             if (group != GROUP_BOTH &&
@@ -5889,7 +7126,6 @@ object GlassHook {
             // Gated on a real move: an unconditional invalidateOutline from a pre-draw path schedules the next frame forever.
             list.invalidateOutline()
         }
-
     }
 
     // ── Folder pages that reuse the chat-list layout ───────────────────────────────────
@@ -6003,7 +7239,8 @@ object GlassHook {
     /** Screen-px union of everything under [v] that actually paints; a group that only holds children is not ink.
      *  A transparent background is not ink either: the wallpaper protocol installs ColorDrawable(0) all over this tree. */
     private fun collectInk(v: View, depth: Int) {
-        if (v.visibility != View.VISIBLE || v.width <= 0 || v.height <= 0) return
+        // GONE, not "other than VISIBLE": an INVISIBLE view reserves its box and turning it on is no layout.
+        if (v.visibility == View.GONE || v.width <= 0 || v.height <= 0) return
         val group = v as? ViewGroup
         if (group != null && depth < 6 && group.childCount > 0) {
             for (i in 0 until group.childCount) collectInk(group.getChildAt(i), depth + 1)
@@ -6130,6 +7367,43 @@ object GlassHook {
         logOnce("$label appbar pin: $flagged/${appbar.childCount} flags cleared")
     }
 
+    private val pageCardWatchTag = tagKey("wathemer-page-card-watch")
+
+    /** Pages that load their list async miss the one post; watch layouts until it shows, bounded. */
+    private fun watchForPageScroller(content: ViewGroup, label: String) {
+        if (content.getTag(pageCardWatchTag) != null) return
+        content.setTag(pageCardWatchTag, true)
+        val obs = content.viewTreeObserver
+        obs.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            private var tries = 0
+            override fun onGlobalLayout() {
+                val done = runCatching {
+                    findPageScroller(content)?.let { injectContentCard(it, label); true } ?: false
+                }.getOrDefault(false)
+                tries++
+                if (done || tries >= 40) {
+                    // Remove through the observer captured at registration; a dead one silently no-ops.
+                    (if (obs.isAlive) obs else content.viewTreeObserver)
+                        .removeOnGlobalLayoutListener(this)
+                    if (!done) logOnce("$label: no scroller found after $tries layouts, no card")
+                }
+            }
+        })
+    }
+
+    /** By name up the chain: WhatsApp's androidx copies live in another classloader, so `is` cannot see them. */
+    private fun isAppScroller(v: View): Boolean {
+        var c: Class<*>? = v.javaClass
+        while (c != null) {
+            when (c.name) {
+                "androidx.recyclerview.widget.RecyclerView",
+                "androidx.core.widget.NestedScrollView" -> return true
+            }
+            c = c.superclass
+        }
+        return false
+    }
+
     /** The page's main scroller: the first shown vertical scrolling container of real height. */
     private fun findPageScroller(content: ViewGroup): View? {
         val queue = ArrayDeque<View>()
@@ -6141,8 +7415,7 @@ object GlassHook {
             if (v !== content && v.isShown && v.height > content.height / 2 && (
                     v is ScrollView ||
                         v is AbsListView ||
-                        v is RecyclerView ||
-                        v is NestedScrollView
+                        isAppScroller(v)
                     )
             ) {
                 return v
@@ -6150,6 +7423,30 @@ object GlassHook {
             (v as? ViewGroup)?.let { g -> for (i in 0 until g.childCount) queue.add(g.getChildAt(i)) }
         }
         return null
+    }
+
+    /** True when this row shows an icon, so its indent is earning the space it takes. */
+    private fun rowHasIcon(v: View, depth: Int): Boolean {
+        if (v is ImageView && v.visibility == View.VISIBLE) return true
+        if (depth >= 2 || v !is ViewGroup) return false
+        for (i in 0 until v.childCount) {
+            if (rowHasIcon(v.getChildAt(i) ?: continue, depth + 1)) return true
+        }
+        return false
+    }
+
+    /** Iconless settings rows still indent to the icon column, far right of their own heading. */
+    private fun alignIconlessRows(v: View, gutter: Int, want: Int, depth: Int) {
+        val g = v as? ViewGroup ?: return
+        for (i in 0 until g.childCount) {
+            val row = g.getChildAt(i) ?: continue
+            if (row is ViewGroup && row.paddingLeft >= gutter && !rowHasIcon(row, 0)) {
+                row.setPadding(want, row.paddingTop, row.paddingRight, row.paddingBottom)
+            } else if (depth < 3) {
+                // Rows sit three deep here, and a two level walk found none of them.
+                alignIconlessRows(row, gutter, want, depth + 1)
+            }
+        }
     }
 
     /** Wraps the list itself, so an empty page whose list is GONE gets no slab. */
@@ -6242,6 +7539,10 @@ object GlassHook {
             val wasAtTop = !list.canScrollVertically(-1)
             list.setPadding(side + pad, gap + pad, side + pad, list.paddingBottom)
             if (wasAtTop) repinToTop(list)
+        }
+        if (!frameCard) runCatching {
+            val den = list.resources.displayMetrics.density
+            alignIconlessRows(list, (64f * den).toInt(), (24f * den).toInt(), 0)
         }
 
         // Margins measure from the host's padding box, which carries the status bar inset, so a margin of t alone lands a status bar too low.
@@ -6378,8 +7679,7 @@ object GlassHook {
         abr.getLocationOnScreen(folderHeaderAbrAt)
         val solid = folderHeaderAt[1] - folderHeaderAbrAt[1] + headerBar.height
         if (solid <= 0) return
-        val fade = abr.dp(CONV_BAND_FADE_DP)
-        val total = (solid + fade).toInt()
+        val total = solid
 
         var band = folderBands[abr]
         if (band == null || band.parent !== abr) {
@@ -6396,7 +7696,8 @@ object GlassHook {
                     maxDisplacePx = abr.dp(DISPLACE_DP)
                     fresnelStrength = 0.5f
                     cornerRadius = 0f
-                    fadeBottomPx = fade
+                    // Full-bleed panel; a rim here would outline the screen.
+                    rimEnabled = false
                     edgeExpandLeft = 8f
                     edgeExpandTop = 8f
                     edgeExpandRight = 8f
@@ -6418,7 +7719,7 @@ object GlassHook {
                 },
             )
             folderBands[abr] = band
-            XposedBridge.log("[$TAG] $label band inserted (solid=${solid}px fade=${fade.toInt()}px)")
+            XposedBridge.log("[$TAG] $label band inserted (solid=${solid}px)")
         }
         band.params.tintColor = glassTint(convBandAlpha())
         (band.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
@@ -6657,6 +7958,69 @@ object GlassHook {
             }
         }
         syncFabPane(v)
+    }
+
+    private val pageFabPanes = WeakHashMap<View, GlassView>()
+
+    /** [glassFab] outside the home window: same transparent fill and white glyph, pane from [syncPageFabPane]. */
+    private fun glassPageFab(v: View) {
+        if (v.width <= 0 || v.height <= 0) return
+        flattenFab(v)
+        ensureWdsFabFields(v)
+        val f = wdsFabTintField ?: return
+        if (runCatching { f.get(v) }.getOrNull() !== fabTint) {
+            // The field too, or setWdsFabStyle rebuilds the fill from A03 on the next style pass.
+            runCatching { f.set(v, fabTint) }
+            v.backgroundTintList = fabTint
+            wdsFabIconField?.let { icon ->
+                runCatching { icon.set(v, fabIconTint) }
+                (v as? ImageView)?.imageTintList = fabIconTint
+            }
+            XposedBridge.log("[$TAG] page fab cleared (${v.width}x${v.height})")
+        }
+        syncPageFabPane(v)
+    }
+
+    /** [syncFabPane] outside the home window: the pane joins the fab's own parent and rides its bounds. */
+    private fun syncPageFabPane(fab: View) {
+        val parent = fab.parent as? ViewGroup ?: return
+        val content = fab.rootView?.findViewById<ViewGroup>(android.R.id.content) ?: return
+        var glass = pageFabPanes[fab]
+        if (glass == null || glass.parent !== parent) {
+            val backdrop = backdropFor(fab, parent, wallpaperUnderlay(content)) ?: return
+            glass = GlassView(parent.context).apply {
+                this.backdrop = backdrop
+                this.underlay = wallpaperUnderlay(content)
+                params.apply {
+                    downsample = DOWNSAMPLE
+                    blurRadius = parent.dp(BLUR_DP)
+                    cornerRadius = parent.dp(FAB_RADIUS_DP)
+                    refractionEnabled = true
+                    bevelFraction = BEVEL_FRACTION
+                    depthRatio = DEPTH_RATIO
+                    maxDisplacePx = parent.dp(DISPLACE_DP)
+                    fresnelStrength = 0.5f
+                    tintColor = glassTint(FAB_ALPHA)
+                }
+            }
+            // Unconstrained in a ConstraintLayout parent: measured at the fab's size, placed by translation.
+            parent.addView(
+                glass, parent.indexOfChild(fab).coerceAtLeast(0),
+                ViewGroup.LayoutParams(fab.width, fab.height),
+            )
+            pageFabPanes[fab] = glass
+            bindPane(glass, fab, "page fab")
+            XposedBridge.log("[$TAG] page fab pane inserted (${fab.width}x${fab.height})")
+        }
+        if (glass.pressSource !== fab) glass.pressSource = fab
+        val lp = glass.layoutParams
+        if (lp.width != fab.width || lp.height != fab.height) {
+            lp.width = fab.width
+            lp.height = fab.height
+            glass.layoutParams = lp
+        }
+        if (glass.translationX != fab.left.toFloat()) glass.translationX = fab.left.toFloat()
+        if (glass.translationY != fab.top.toFloat()) glass.translationY = fab.top.toFloat()
     }
 
     /** Kill the drop shadow, a smudge under a translucent button; WDSFab re-applies its A00 field, so the field is what changes. */
@@ -6953,7 +8317,6 @@ object GlassHook {
     private var searchPanelRef: WeakReference<View>? = null
     private var searchLowerOffset = 0
     private var searchRaised = false
-    private var searchProbed = false
     private val searchWatcherTag = tagKey("wathemer-search-watcher")
     private val searchLayoutTag = tagKey("wathemer-search-layout")
     private val homeBarLayoutTag = tagKey("wathemer-home-bar-layout")
@@ -6995,8 +8358,6 @@ object GlassHook {
     /** Runs on every attach of search_fragment; everything is idempotent except the two tag-guarded registrations. */
     private fun layoutSearchScreen(fragment: View) {
         val root = fragment as? ViewGroup ?: return
-        probeSearchTree(root)
-
         val input = root.findViewById<View>(searchInputId) ?: run {
             logOnce("search: no search_input under search_fragment; layout skipped")
             return
@@ -7151,7 +8512,6 @@ object GlassHook {
         if (list.childCount == 0) return
         // A miss here is silent and permanent: a renamed ChipGroup or a deeper row stops frost and wrap with nothing in the log.
         val group = searchChipGroup(list) ?: return
-        probeFilterRow(group)
 
         if (synchronized(wrapChipGroups) { wrapChipGroups[group] } != true) {
             ensureChipWrapHook(group)
@@ -7211,20 +8571,6 @@ object GlassHook {
         return null
     }
 
-    private var filterRowProbed = false
-
-    /** Logs the filter row's real classes once, after the adapter binds; uiautomator cannot name custom types. */
-    private fun probeFilterRow(group: ViewGroup) {
-        if (filterRowProbed) return
-        filterRowProbed = true
-        val parent = group.parent as? View
-        XposedBridge.log(
-            "[$TAG] ── filter row: ${parent?.javaClass?.name} ${parent?.width}x${parent?.height}" +
-                " (lp.h=${parent?.layoutParams?.height}) > ${group.javaClass.name}" +
-                " ${group.width}x${group.height}, ${group.childCount} chips"
-        )
-    }
-
     /** Visible characters, not text.length: the tokenising field keeps invisible anchor characters, so isNotEmpty lies. */
     private fun visibleLength(s: CharSequence?): Int {
         if (s.isNullOrEmpty()) return 0
@@ -7240,20 +8586,7 @@ object GlassHook {
 
     private fun searchQueryLength(input: View): Int {
         val t = (input as? TextView)?.text
-        probeSearchQuery(t)
         return visibleLength(t)
-    }
-
-    /** Print the field's raw buffer once, so [visibleLength]'s premise is measured, not assumed. */
-    private var searchQueryProbed = false
-
-    private fun probeSearchQuery(t: CharSequence?) {
-        if (searchQueryProbed) return
-        searchQueryProbed = true
-        // Lengths only, never the buffer's code points: a restored query is the user's own text.
-        XposedBridge.log(
-            "[$TAG] search field buffer on open: len=${t?.length ?: 0} visible=${visibleLength(t)}"
-        )
     }
 
     // ── Cross-fading the home content ──────────────────────────────────────────────────────
@@ -7731,24 +9064,4 @@ object GlassHook {
         }
     }
 
-    /** One-shot tree probe with real class names; uiautomator reports any custom subclass as plain ViewGroup. */
-    private fun probeSearchTree(root: ViewGroup) {
-        if (searchProbed) return
-        searchProbed = true
-        XposedBridge.log("[$TAG] ── search fragment tree ──")
-        fun walk(v: View, depth: Int) {
-            if (depth > 6) return
-            val name = runCatching {
-                if (v.id != View.NO_ID) v.resources.getResourceEntryName(v.id) else ""
-            }.getOrDefault("")
-            XposedBridge.log(
-                "[$TAG]   ${"  ".repeat(depth)}${v.javaClass.name} ${if (name.isEmpty()) "" else "#$name"}" +
-                    " ${v.width}x${v.height}" +
-                    if (v is ViewGroup) " (${v.childCount} children)" else ""
-            )
-            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i) ?: continue, depth + 1)
-        }
-        // Posted: at attach there are children but no measurements, and sizes are half the point.
-        root.post { runCatching { walk(root, 0) } }
-    }
 }

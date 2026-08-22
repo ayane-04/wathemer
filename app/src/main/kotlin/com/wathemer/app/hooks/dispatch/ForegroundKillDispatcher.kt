@@ -14,7 +14,7 @@ object ForegroundKillDispatcher {
     private val gates = HashMap<Int, MutableList<() -> Boolean>>()
     private var hooked = false
 
-    /** Suppress the foreground on [id], when [gate] says so. `id == 0` is ignored. */
+    /** Suppress the foreground on [id], when [gate] says so. `id == 0` and `id == -1` are ignored. */
     @Synchronized
     fun kill(id: Int, gate: () -> Boolean = { true }) {
         if (id == 0 || id == -1) return

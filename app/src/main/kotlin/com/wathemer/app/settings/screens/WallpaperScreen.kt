@@ -3,14 +3,9 @@
 package com.wathemer.app.settings.screens
 
 import android.app.Activity
-import android.content.Context
-import android.content.Intent
-import android.media.MediaScannerConnection
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -30,15 +25,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -55,16 +47,18 @@ import com.wathemer.app.settings.components.SliderItem
 import com.wathemer.app.settings.components.ToggleItem
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.prefs.Prefs
+import com.wathemer.app.settings.prefs.WallpaperAsset
 import com.wathemer.app.settings.preview.LocalThemeSnapshot
 import com.wathemer.app.settings.preview.previewBlurDp
 import com.wathemer.app.settings.preview.updateWallpaperBlur
 import com.wathemer.app.settings.preview.updateWallpaperDim
 import com.wathemer.app.settings.preview.updateWallpaperEnabled
 import com.wathemer.app.settings.preview.updateWallpaperPath
-import kotlin.math.roundToInt
 import com.yalantis.ucrop.UCrop
 import java.io.File
-import java.io.FileOutputStream
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun WallpaperScreen(nav: NavController, prefs: Prefs) {
@@ -75,7 +69,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
     // Self-repair once per entry; keyed on the path so a re-pick re-checks.
     LaunchedEffect(snap.wallpaperPath) {
         // The restore copy must run off main; the pref write after it must stay on main for Compose state.
-        val settled = withContext(Dispatchers.IO) { reconcileWallpaperAsset(context, prefs) }
+        val settled = withContext(Dispatchers.IO) { WallpaperAsset.reconcile(context, prefs) }
         if (settled != snap.wallpaperPath) snapshot.updateWallpaperPath(prefs, settled)
     }
 
@@ -86,7 +80,9 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
         when {
             result.resultCode == Activity.RESULT_OK && result.data != null -> {
                 val cropped = UCrop.getOutput(result.data!!)
-                val dest = cropped?.let { persistCropToDownloads(context, it) }
+                val dest = cropped?.let { src ->
+                    WallpaperAsset.persist(context) { context.contentResolver.openInputStream(src) }
+                }
                 when {
                     cropped == null -> {
                         Log.w(LOGTAG, "crop returned OK with no output Uri")
@@ -176,8 +172,8 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
                         "Replace current image"
                     },
                     onClick = {
-                        if (!hasAllFilesAccess()) {
-                            requestAllFilesAccess(context)
+                        if (!WallpaperAsset.hasAllFilesAccess()) {
+                            WallpaperAsset.requestAllFilesAccess(context)
                         } else {
                             pickLauncher.launch("image/*")
                         }
@@ -284,99 +280,4 @@ private fun WallpaperThumbnail(path: String?, stamp: Long, dim: Int, blur: Int) 
     }
 }
 
-/** Copy the crop to the Downloads file WallpaperResolver reads; the MediaScanner index is required cross-UID. */
-private fun persistCropToDownloads(context: Context, src: Uri): File? {
-    return try {
-        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val waThemerDir = File(downloads, "WaThemer").apply { mkdirs() }
-        val dest = File(waThemerDir, "wallpaper.png")
-        // Stage the write, do not write `dest` directly: a truncated half-copy still reads, defeating self-repair.
-        val staging = File(waThemerDir, "wallpaper.png.part")
-        val copied = context.contentResolver.openInputStream(src)?.use { input ->
-            FileOutputStream(staging).use { out -> input.copyTo(out) }
-            true
-        } ?: false
-        if (!copied) {
-            Log.w(LOGTAG, "persistCrop: openInputStream returned null for $src")
-            staging.delete()
-            return null
-        }
-        // Swap only once the bytes are on disk; rename can fail on some storage layers, hence the fallback copy.
-        dest.delete()
-        if (!staging.renameTo(dest)) {
-            Log.w(LOGTAG, "persistCrop: rename ${staging.name} -> ${dest.name} failed; copying")
-            staging.inputStream().use { input ->
-                FileOutputStream(dest).use { out -> input.copyTo(out) }
-            }
-            staging.delete()
-        }
-        // Private master in filesDir: cleaners can delete the shared copy, this one lets the self-repair restore it.
-        runCatching {
-            context.contentResolver.openInputStream(src)?.use { input ->
-                FileOutputStream(masterFile(context)).use { out -> input.copyTo(out) }
-            }
-        }.onFailure {
-            // Non-fatal on purpose: a failed backup must not fail the pick; logged because self-repair is now unarmed.
-            Log.w(LOGTAG, "persistCrop: private master copy failed, self-repair is now unarmed: $it")
-        }
-        dest.takeIf { it.canRead() }?.also { f ->
-            // Fire and forget: the async MediaStore index is what WallpaperResolver Strategy 3 falls back on.
-            MediaScannerConnection.scanFile(
-                context, arrayOf(f.absolutePath), arrayOf("image/png"), null,
-            )
-        }
-    } catch (t: Throwable) {
-        Log.w(LOGTAG, "persistCrop: failed to save the cropped wallpaper: $t")
-        null
-    }
-}
-
 private const val LOGTAG = "WaThemer.Wallpaper"
-
-/** The private master copy of the chosen wallpaper. Survives anything except an uninstall. */
-private fun masterFile(context: Context): File = File(context.filesDir, "wallpaper_master.png")
-
-/** Restore the wallpaper or clear a dead pref. Never prune without all-files access: real files read as missing. */
-private fun reconcileWallpaperAsset(context: Context, prefs: Prefs): String? {
-    val path = prefs.wallpaperPath?.takeIf { it.isNotBlank() } ?: return null
-    if (File(path).canRead()) return path
-    val master = masterFile(context)
-    if (master.canRead()) {
-        val restored = runCatching {
-            val dest = File(path)
-            dest.parentFile?.mkdirs()
-            master.inputStream().use { input ->
-                FileOutputStream(dest).use { out -> input.copyTo(out) }
-            }
-            dest.canRead()
-        }.getOrDefault(false)
-        if (restored) {
-            MediaScannerConnection.scanFile(context, arrayOf(path), arrayOf("image/png"), null)
-            return path
-        }
-        // Master readable but the copy failed: keep the pref, the next visit retries; never fall through to the prune.
-        Log.w(LOGTAG, "reconcile: master is readable but restoring $path failed; keeping the pref")
-        return path
-    }
-    // Only now, and only when we can actually tell that it is missing.
-    if (!hasAllFilesAccess()) return path
-    prefs.wallpaperPath = null
-    return null
-}
-
-private fun hasAllFilesAccess(): Boolean =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        Environment.isExternalStorageManager()
-    } else {
-        true
-    }
-
-private fun requestAllFilesAccess(context: Context) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val intent = Intent(
-            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-            Uri.parse("package:${context.packageName}"),
-        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-        context.startActivity(intent)
-    }
-}

@@ -41,14 +41,14 @@ class BackdropCapture(
      * [node] keeps the capture sharp: refraction can only bend detail that still exists.
      * [glassNode] redraws it at 1/[effectScale] and carries the shader, blur chained after.
      */
-    val node = RenderNode("wtLiquid-backdrop")
-    private val glassNode = RenderNode("wtLiquid-glass")
+    val node = RenderNode("wathemer-backdrop")
+    private val glassNode = RenderNode("wathemer-glass")
 
     private val hostLocation = IntArray(2)
     private val sourceLocation = IntArray(2)
 
     // Rebuilt only on input change (per-frame effects allocate); effectDirty stands in for ten uniforms.
-    /** Halves the transmission's two offscreen layers on large surfaces (27ms vs 12ms swipes); blur hides it. */
+    /** Halves the transmission's two offscreen layers on large surfaces; blur hides it. */
     private val effectScale: Float
         get() = if (host.width.toLong() * host.height > 600_000L) 2f else 1f
 
@@ -205,7 +205,7 @@ class BackdropCapture(
         loggedHostH = host.height
         loggedSrcId = srcId
         Log.i(
-            "wtLiquid.Capture",
+            "WaThemer.Capture",
             "host=${host.width}x${host.height} node=${w}x$h scale=${params.downsample} " +
                 "offset=($dx,$dy) underlayDy=$lastUnderlayDy " +
                 "src=${src?.width}x${src?.height} srcLaidOut=${src?.isLaidOut}",
@@ -281,7 +281,7 @@ class BackdropCapture(
         while (p is ViewGroup) {
             if (p === candidate) {
                 Log.w(
-                    "wtLiquid",
+                    "WaThemer.Capture",
                     "BackdropCapture: source ${candidate.javaClass.simpleName} IS an ancestor of " +
                         "this pane; capture disabled to avoid recursing into an already-recording " +
                         "node. The pane will draw its underlay only.",

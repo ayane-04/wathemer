@@ -237,7 +237,6 @@ fun MutableState<ThemeSnapshot>.updateBubbleStyleOutgoing(prefs: Prefs, v: Int) 
     prefs.setOverride(Prefs.BUBBLE_STYLE_OUTGOING, v)
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Snapshot-aware row helper: every update writes both the observable snapshot and prefs.
 // ─────────────────────────────────────────────────────────────────────────────

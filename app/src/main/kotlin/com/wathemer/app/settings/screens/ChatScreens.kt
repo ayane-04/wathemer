@@ -1,3 +1,4 @@
+// The Chat category tree: Bubbles (with the Custom bubble shape picker), Input, Header, Quote, Misc.
 package com.wathemer.app.settings.screens
 
 import androidx.compose.foundation.background
@@ -52,8 +53,6 @@ import com.wathemer.app.settings.preview.WaPreview
 import com.wathemer.app.settings.preview.WaPreviewKind
 import com.wathemer.app.settings.preview.updateBubbleStyleIncoming
 import com.wathemer.app.settings.preview.updateBubbleStyleOutgoing
-
-/** The Chat category tree: Bubbles (with the Custom bubble shape picker), Input, Header, Quote, Misc. */
 
 /* ── Root: Chat ──────────────────────────────────────────── */
 
@@ -465,4 +464,3 @@ fun ChatMiscScreen(nav: NavController, prefs: Prefs) {
         }
     }
 }
-

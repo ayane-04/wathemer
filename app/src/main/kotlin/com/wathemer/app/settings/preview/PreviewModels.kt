@@ -88,11 +88,10 @@ data class Tokens(
     // Unread badges
     val unreadAccent: Int,
     val unreadCountText: Int,
-    // Status bar. Cascade mirrors SystemBars.resolveStatusColor: status, explicit, home toolbar bg, primary.
+    // Status bar. Cascade mirrors SystemBars.resolveStatusColor: explicit, home toolbar bg, primary.
     val statusBarBg: Int,
     /** False -> the strip is not drawn at all, matching a hook that installs nothing. */
     val systemBarsEnabled: Boolean,
     /** True when a wallpaper is set; SystemBars.shouldTheme then draws no strip whatever the toggle says. */
     val wallpaperOwnsBars: Boolean,
 )
-

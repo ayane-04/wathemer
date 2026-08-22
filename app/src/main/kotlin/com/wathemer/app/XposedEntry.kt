@@ -41,7 +41,7 @@ class XposedEntry : IXposedHookLoadPackage {
 
         // Deliberately no master gate: every feature is opt-in on its own prefs and no-ops when unset.
         // FontSwap installs first so its font registers before WA inflates any text.
-        runCatching { FontSwap.install(lpparam) }
+        runCatching { FontSwap.install() }
             .onFailure { XposedBridge.log("[$TAG] FontSwap.install threw: $it") }
         // System bars: gated internally, no-op until enabled; mutually exclusive with the wallpaper feature.
         runCatching { SystemBars.install() }
@@ -64,7 +64,7 @@ class XposedEntry : IXposedHookLoadPackage {
                     // Order here is not load-bearing; anything that must run after all installers must be posted, not placed last.
                     runCatching { WallpaperImage.install(lpparam.classLoader) }
                         .onFailure { XposedBridge.log("[$TAG] WallpaperImage.install threw: $it") }
-                    runCatching { EffectsOverlays.install(app) }
+                    runCatching { EffectsOverlays.install() }
                         .onFailure { XposedBridge.log("[$TAG] EffectsOverlays.install threw: $it") }
                     runCatching { BubbleColors.install(app, lpparam.classLoader) }
                         .onFailure { XposedBridge.log("[$TAG] BubbleColors.install threw: $it") }
@@ -72,11 +72,11 @@ class XposedEntry : IXposedHookLoadPackage {
                         .onFailure { XposedBridge.log("[$TAG] BubbleShapes.install threw: $it") }
                     runCatching { BubbleAlbumClipping.install(app, lpparam.classLoader) }
                         .onFailure { XposedBridge.log("[$TAG] BubbleAlbumClipping.install threw: $it") }
-                    runCatching { ComposeBarColors.install(app, lpparam.classLoader) }
+                    runCatching { ComposeBarColors.install(app) }
                         .onFailure { XposedBridge.log("[$TAG] ComposeBarColors.install threw: $it") }
-                    runCatching { ChatHeaderColors.install(app, lpparam.classLoader) }
+                    runCatching { ChatHeaderColors.install(app) }
                         .onFailure { XposedBridge.log("[$TAG] ChatHeaderColors.install threw: $it") }
-                    runCatching { ActionModeColors.install(app, lpparam.classLoader) }
+                    runCatching { ActionModeColors.install(app) }
                         .onFailure { XposedBridge.log("[$TAG] ActionModeColors.install threw: $it") }
                     runCatching { QuoteAndLabelColors.install(app, lpparam.classLoader) }
                         .onFailure { XposedBridge.log("[$TAG] QuoteAndLabelColors.install threw: $it") }

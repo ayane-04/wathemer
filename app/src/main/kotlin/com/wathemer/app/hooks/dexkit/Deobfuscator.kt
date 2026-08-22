@@ -86,7 +86,7 @@ object Deobfuscator {
     private var balloonBorderDrawableMethod: Method? = null
     private var balloonInsetMethod: Method? = null
 
-    /** Resolve the bubble provider class + 3 methods. Idempotent. */
+    /** Resolve the bubble provider class + 4 methods. Idempotent. */
     @Synchronized
     fun loadBubbleProviderClass(classLoader: ClassLoader): Class<*>? {
         if (bubbleProviderResolved) return bubbleProviderClass
@@ -307,7 +307,7 @@ object Deobfuscator {
     private const val UPDATE_DRAW_STATE = "updateDrawState"
     private const val LINK_COLOR_FIELD = "linkColor"
 
-    /** Legacy span-base names, spelled as ART sees them: never jadx's C-prefixed form, which does not exist at runtime. */
+    /** Last-resort names, spelled as ART sees them, never jadx's C-prefixed form. Neither declares updateDrawState on 2.26.30 or later. */
     private val LEGACY_LINK_SPAN_NAMES = listOf(
         "X.17S",   // WA 2.26.20.72
         "X.1hK",   // WA 2.26.19.73

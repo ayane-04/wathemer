@@ -107,6 +107,12 @@ fun CategoryListScreen(nav: NavController, prefs: Prefs) {
                     leading = { CategoryTile(AppAccent) { ExtrasIcon(it) } },
                     onClick = { nav.push(Screen.Extras) },
                 )
+                CategoryRow(
+                    label = "Themes",
+                    description = "Save your look, share it, or use one someone sent you.",
+                    leading = { CategoryTile(AppAccent) { ThemesIcon(it) } },
+                    onClick = { nav.push(Screen.Themes) },
+                )
 
                 Spacer(Modifier.size(8.dp))
 
@@ -232,6 +238,30 @@ private fun ExtrasIcon(tint: Color) {
         drawCircle(tint, w * 0.06f, Offset(w * 0.40f, h * 0.52f))
         drawCircle(tint, w * 0.05f, Offset(w * 0.75f, h * 0.66f))
         drawLine(tint, Offset(w * 0.15f, h * 0.86f), Offset(w * 0.85f, h * 0.86f), 1.5.dp.toPx())
+    }
+}
+
+/** A stack of cards: one saved look behind another. */
+@Composable
+private fun ThemesIcon(tint: Color) {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val w = size.width; val h = size.height
+        val s = 1.5.dp.toPx()
+        drawRoundRect(
+            color = tint.copy(alpha = 0.45f),
+            topLeft = Offset(w * 0.22f, 0f),
+            size = Size(w * 0.78f, h * 0.72f),
+            cornerRadius = CornerRadius(2.5.dp.toPx()),
+            style = Stroke(s),
+        )
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(0f, h * 0.24f),
+            size = Size(w * 0.78f, h * 0.76f),
+            cornerRadius = CornerRadius(2.5.dp.toPx()),
+            style = Stroke(s),
+        )
+        drawCircle(tint, w * 0.08f, Offset(w * 0.24f, h * 0.62f))
     }
 }
 

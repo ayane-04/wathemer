@@ -2,8 +2,8 @@
 // Links hook the span base's updateDrawState via DexKit: WA's span overwrites setLinkTextColor.
 package com.wathemer.app.hooks
 
-import android.content.res.ColorStateList
 import android.app.Application
+import android.content.res.ColorStateList
 import android.graphics.PorterDuff
 import android.text.TextPaint
 import android.widget.ImageView

@@ -91,7 +91,7 @@ object WallpaperShellClearer {
             }
             false
         }
-        XposedBridge.log("$TAG: literal-color catchall installed (3 colors)")
+        XposedBridge.log("$TAG: literal-color catchall installed (${LITERAL_COLORS.size} colors)")
     }
 
     /** Intercepts bg assignment itself so timing stops mattering. Must stay narrow, flat opaque shell colours only, or avatar circles break. */

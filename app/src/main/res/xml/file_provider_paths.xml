@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only what the share sheet hands out: the copy made under a readable filename, because a slot
+     in the library is filed under a number. The library dir itself is deliberately not here. -->
+<paths>
+    <cache-path name="theme_share" path="share/" />
+</paths>

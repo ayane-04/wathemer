@@ -22,8 +22,8 @@ android {
         minSdk = 31
         targetSdk = 36
         // Bump on every build that leaves this machine, or a log cannot be tied to a build.
-        versionCode = 32
-        versionName = "0.2.1"
+        versionCode = 148
+        versionName = "0.5.0"
 
         ndk {
             // arm64 only: no 32-bit Android 12 devices exist, and emulators cannot run an Xposed module.

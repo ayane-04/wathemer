@@ -111,7 +111,7 @@ object SystemBars {
     }
 
     // ── Colour resolution (0 override = cascade) ───────────────────────────
-    // status -> explicit -> home toolbar bg -> accent (a visible "themed header" by default).
+    // status bar bg -> home toolbar bg -> accent (a visible "themed header" by default).
     private fun resolveStatusColor(): Int {
         val o = xprefs.getInt(Prefs.OVR_STATUS_BAR_BG, 0); if (o != 0) return o
         val tb = xprefs.getInt(Prefs.OVR_TOOLBAR_BG, 0); if (tb != 0) return tb

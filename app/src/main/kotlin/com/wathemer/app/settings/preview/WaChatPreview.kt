@@ -7,7 +7,6 @@ import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -307,7 +306,7 @@ internal fun ThinRule(color: Color) {
     Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(color))
 }
 
-/** Picker-grid thumb: real nine-patch under the hook's tint rule; cheap, the grid shows NAMES.size (57) cells one side at a time. */
+/** Picker-grid thumb: real nine-patch under the hook's tint rule; cheap, the grid shows NAMES.size cells one side at a time. */
 @Composable
 fun BubbleThumb(style: Int, isOutgoing: Boolean, tint: Color, modifier: Modifier = Modifier) {
     val dir = if (isOutgoing) "outgoing" else "incoming"

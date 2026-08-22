@@ -43,6 +43,10 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
     var displace by remember { mutableIntStateOf(prefs.glassDisplace) }
     var bevel by remember { mutableIntStateOf(prefs.glassBevel) }
     var radius by remember { mutableIntStateOf(prefs.glassRadius) }
+    var gamma by remember { mutableIntStateOf(prefs.glassGamma) }
+    var rim by remember { mutableIntStateOf(prefs.glassRim) }
+    var rimWidth by remember { mutableIntStateOf(prefs.glassRimWidth) }
+    var rimAngle by remember { mutableIntStateOf(prefs.glassRimAngle) }
 
     Scaffold(containerColor = Palette.Bg) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
@@ -141,15 +145,63 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                     valueLabel = { "${it.toInt()} dp" },
                 )
 
+                SliderItem(
+                    title = "Backdrop contrast",
+                    subtitle = "Lifts the darks in what shows through. Lower keeps more structure; " +
+                        "100 is off and reads flattest, the frosted-sheet look.",
+                    value = gamma.toFloat(),
+                    range = 30f..100f,
+                    steps = 69,
+                    onValueChange = { gamma = it.roundToInt().also { v -> prefs.glassGamma = v } },
+                    valueLabel = { if (it.toInt() == 100) "off" else "${it.toInt()}%" },
+                )
+
+                SectionHeader(
+                    title = "Edge highlight",
+                    subtitle = "A hard line on the rim, lit on one side and fading out on the other. " +
+                        "Separate from the bevel, which is a wide soft band.",
+                )
+                SliderItem(
+                    title = "Highlight strength",
+                    subtitle = "0 draws nothing at all.",
+                    value = rim.toFloat(),
+                    range = 0f..100f,
+                    steps = 99,
+                    onValueChange = { rim = it.roundToInt().also { v -> prefs.glassRim = v } },
+                    valueLabel = { if (it.toInt() == 0) "off" else "${it.toInt()}%" },
+                )
+                SliderItem(
+                    title = "Highlight width",
+                    subtitle = "Thin is the point. Wide stops reading as an edge.",
+                    value = rimWidth.toFloat(),
+                    range = 1f..4f,
+                    steps = 2,
+                    onValueChange = { rimWidth = it.roundToInt().also { v -> prefs.glassRimWidth = v } },
+                    valueLabel = { "${it.toInt()} dp" },
+                )
+                SliderItem(
+                    title = "Highlight angle",
+                    subtitle = "Which side of every surface catches the light.",
+                    value = rimAngle.toFloat(),
+                    range = 0f..360f,
+                    steps = 71,
+                    onValueChange = { rimAngle = it.roundToInt().also { v -> prefs.glassRimAngle = v } },
+                    valueLabel = { "${it.toInt()}deg" },
+                )
+
                 MenuRow(
                     title = "Restore recommended values",
                     subtitle = "Back to the defaults.",
                     onClick = {
-                        blur = 16; prefs.glassBlur = 16
-                        tint = 12; prefs.glassTint = 12
-                        displace = 25; prefs.glassDisplace = 25
+                        blur = 12; prefs.glassBlur = 12
+                        tint = 10; prefs.glassTint = 10
+                        displace = 20; prefs.glassDisplace = 20
                         bevel = 25; prefs.glassBevel = 25
                         radius = 20; prefs.glassRadius = 20
+                        gamma = 70; prefs.glassGamma = 70
+                        rim = 10; prefs.glassRim = 10
+                        rimWidth = 2; prefs.glassRimWidth = 2
+                        rimAngle = 85; prefs.glassRimAngle = 85
                     },
                 )
 

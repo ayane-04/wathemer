@@ -22,7 +22,7 @@ object ChatHeaderColors {
         }
     }
 
-    fun install(app: Application, classLoader: ClassLoader) {
+    fun install(app: Application) {
         xprefs.reload()
         val title    = xprefs.getInt(Prefs.CHAT_HEADER_TITLE, 0)
         val subtitle = xprefs.getInt(Prefs.CHAT_HEADER_SUBTITLE, 0)
