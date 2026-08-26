@@ -44,6 +44,7 @@ object QuoteAndLabelColors {
 
         if ((quoteBar or quoteBg or quoteText or forwardedLabel or mediaCaption) == 0) {
             XposedBridge.log("$TAG: no tokens set; skipping all hooks")
+            HookLog.skip("install/QuoteAndLabelColors", "no tokens set")
             return
         }
 

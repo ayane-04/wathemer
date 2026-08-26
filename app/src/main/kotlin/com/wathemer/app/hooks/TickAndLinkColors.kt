@@ -48,6 +48,7 @@ object TickAndLinkColors {
 
         if ((tickSeen or tickUnseen or linkColor) == 0) {
             XposedBridge.log("$TAG: no tokens set; skipping all hooks")
+            HookLog.skip("install/TickAndLinkColors", "no tokens set")
             return
         }
 
@@ -57,6 +58,7 @@ object TickAndLinkColors {
             val statusIndicatorId = res.waId("status_indicator", pkg)
             if (statusId == 0 && statusIndicatorId == 0) {
                 XposedBridge.log("$TAG: no status/status_indicator id; tick hooks NOT installed")
+                HookLog.skip("TickAndLinkColors/ticks", "no status/status_indicator id")
             } else {
                 installTickHooks(statusId, statusIndicatorId, tickSeen, tickUnseen)
             }

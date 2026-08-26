@@ -42,6 +42,7 @@ object ComposeBarColors {
         val customIcons = xprefs.getBoolean(Prefs.KEY_IOS_ICON_PACK, false)
         if (barBg == 0 && entryText == 0 && sendBg == 0 && sendIcon == 0 && iconTint == 0 && !customIcons) {
             XposedBridge.log("$TAG: no compose tokens set; skipping all hooks")
+            HookLog.skip("install/ComposeBarColors", "no compose tokens set")
             return
         }
 

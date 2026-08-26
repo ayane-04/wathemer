@@ -3,6 +3,8 @@
 package com.wathemer.app.hooks.dispatch
 
 import android.view.View
+import com.wathemer.app.hooks.HookLog
+import com.wathemer.app.hooks.WaIds
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -21,16 +23,25 @@ object ViewThemeDispatcher {
         if (loggedThrowers.add(handler)) XposedBridge.log("WaThemer.Dispatch: view handler threw (logged once): $t")
     }
 
+    /** Ledger names, built once at registration: this runs per attach and a concat here is per row. */
+    private val labels = HashMap<Int, String>()
+
+    private fun label(id: Int) = labels.getOrPut(id) { "view/${WaIds.nameOf(id)}" }
+
     /** Register an id-targeted callback. `id == -1` or `id == 0` is ignored. */
     fun onId(id: Int, action: (View) -> Unit) {
         if (id == -1 || id == 0) return
-        idActions.getOrPut(id) { ArrayList() }.add(action)
+        val list = idActions.getOrPut(id) { ArrayList() }
+        list.add(action)
+        // Armed, not yet fired. The summary's job is to show which of these never attach.
+        HookLog.arm(label(id), if (list.size > 1) "${list.size} handlers" else "")
         ensureHooked()
     }
 
     /** Register a fallback predicate callback. Return true to consume; false to continue. */
     fun onView(action: (View) -> Boolean) {
         viewActions.add(action)
+        HookLog.arm("view/predicate#${viewActions.size}")
         ensureHooked()
     }
 
@@ -44,8 +55,15 @@ object ViewThemeDispatcher {
                     val view = param.thisObject as? View ?: return
                     val id = view.id
                     // Isolated per handler: one thrower must not starve the rest of the fan-out.
-                    if (id != -1) idActions[id]?.forEach { a ->
-                        try { a(view) } catch (t: Throwable) { logThrowOnce(a, t) }
+                    if (id != -1) idActions[id]?.let { handlers ->
+                        // Counted here rather than per handler: one attach of this id is one event.
+                        HookLog.hit(label(id), view.javaClass.simpleName)
+                        for (a in handlers) {
+                            try { a(view) } catch (t: Throwable) {
+                                logThrowOnce(a, t)
+                                HookLog.fail(label(id), t)
+                            }
+                        }
                     }
                     for (h in viewActions) {
                         val consumed = try { h(view) } catch (t: Throwable) { logThrowOnce(h, t); false }
@@ -53,6 +71,15 @@ object ViewThemeDispatcher {
                     }
                 }
             },
+        )
+    }
+
+    /** Ids registered but never attached, which is the state a screenshot cannot tell you about. */
+    fun report() {
+        val armed = idActions.keys.filterNot { HookLog.isHit(label(it)) }
+        XposedBridge.log(
+            "WaThemer.Dispatch: ${idActions.size} ids registered, ${armed.size} never attached" +
+                if (armed.isEmpty()) "" else ": ${armed.map { WaIds.nameOf(it) }.sorted()}"
         )
     }
 }

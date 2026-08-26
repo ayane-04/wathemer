@@ -29,6 +29,7 @@ object ChatHeaderColors {
 
         if (title == 0 && subtitle == 0) {
             XposedBridge.log("$TAG: no header text tokens set; skipping")
+            HookLog.skip("install/ChatHeaderColors", "no header text tokens set")
             return
         }
 

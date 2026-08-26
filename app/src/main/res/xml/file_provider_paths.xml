@@ -3,4 +3,6 @@
      in the library is filed under a number. The library dir itself is deliberately not here. -->
 <paths>
     <cache-path name="theme_share" path="share/" />
+    <!-- The downloaded update, handed to the system installer. Emptied before each download. -->
+    <cache-path name="updates" path="updates/" />
 </paths>

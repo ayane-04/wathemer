@@ -100,12 +100,14 @@ object BubbleShapes {
         // Stand down under glass: nothing arbitrates factory vs leaf hooks, and insets would pad a shape never drawn.
         if (xprefs.getBoolean(Prefs.KEY_GLASS_ENABLED, false)) {
             XposedBridge.log("$TAG: Liquid Glass owns the bubbles; shapes standing down")
+            HookLog.skip("install/BubbleShapes", "Liquid Glass owns the bubbles")
             return
         }
         incomingStyle = xprefs.getInt(Prefs.BUBBLE_STYLE_INCOMING, 0)
         outgoingStyle = xprefs.getInt(Prefs.BUBBLE_STYLE_OUTGOING, 0)
         if (incomingStyle == 0 && outgoingStyle == 0) {
             XposedBridge.log("$TAG: no bubble shape set; skipping")
+            HookLog.skip("install/BubbleShapes", "no bubble shape set")
             return
         }
         val leftBg = xprefs.getInt(Prefs.BUBBLE_LEFT_BG, 0)
@@ -124,6 +126,7 @@ object BubbleShapes {
 
         if (!Deobfuscator.ensureBridge(app)) {
             XposedBridge.log("$TAG: DexKit init failed; shapes off")
+            HookLog.skip("install/BubbleShapes", "DexKit init failed")
             return
         }
 
@@ -176,6 +179,7 @@ object BubbleShapes {
         val factory = Deobfuscator.loadBubbleDrawableMethod(classLoader)
         if (factory == null) {
             XposedBridge.log("$TAG: leaf builders AND factory both unresolved; shapes off")
+            HookLog.skip("BubbleShapes/leafBuilders", "leaf builders and factory both unresolved")
             return
         }
         XposedBridge.hookMethod(factory, object : XC_MethodHook() {

@@ -33,6 +33,7 @@ object BubbleAlbumClipping {
         if (!active) {
             // Every pref-gated installer logs when it stands down, or the log cannot explain its absence.
             XposedBridge.log("$TAG: no bubble background colour set; album clipping not installed")
+            HookLog.skip("install/BubbleAlbumClipping", "no bubble background colour set")
             return
         }
 

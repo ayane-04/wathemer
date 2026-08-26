@@ -65,6 +65,9 @@ class WallpaperImage private constructor(
     }
 
     private fun injectFor(activity: Activity) {
+        // A status composer's canvas colour is the post itself, so nothing here may clear or cover it.
+        val cls = activity.javaClass.name
+        if (NO_WALLPAPER_PREFIXES.any { cls.startsWith(it) }) return
         xprefs.reload()
         if (!xprefs.getBoolean(Prefs.KEY_WALLPAPER_ENABLED, false)) {
             return
@@ -86,6 +89,9 @@ class WallpaperImage private constructor(
         }
         injectWallpaper(activity, file)
     }
+
+    /** Screens whose own background is content, not chrome. Prefix so every composer mode is covered. */
+    private val NO_WALLPAPER_PREFIXES = listOf("com.whatsapp.status.composer.")
 
     private fun injectWallpaper(activity: Activity, file: File) {
         val content = activity.window.decorView.findViewById<View>(android.R.id.content) as? ViewGroup

@@ -50,6 +50,9 @@ enum class Screen {
 
     // Saved themes: export, import, and the library of slots
     Themes,
+
+    // Version check and the download it offers
+    Updates,
 }
 
 /** In-memory nav stack on a SnapshotStateList. Must stay behind [rememberNavController]'s saver or rotation drops the user back to the root. */

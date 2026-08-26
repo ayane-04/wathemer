@@ -60,6 +60,7 @@ import com.wathemer.app.settings.screens.HomescreenTabBarScreen
 import com.wathemer.app.settings.screens.LiquidGlassScreen
 import com.wathemer.app.settings.screens.StatusBarScreen
 import com.wathemer.app.settings.screens.ThemesScreen
+import com.wathemer.app.settings.screens.UpdatesScreen
 import com.wathemer.app.settings.screens.WallpaperScreen
 
 /** Hosts the settings UI over an in-memory nav stack; system back pops until the root, then Android closes the activity. */
@@ -216,6 +217,7 @@ private fun ScreenSwitch(nav: NavController, prefs: Prefs, onMessage: (String) -
 
         Screen.Extras                  -> ExtrasScreen(nav, prefs, onMessage)
         Screen.Themes                  -> ThemesScreen(nav, prefs, onMessage)
+        Screen.Updates                 -> UpdatesScreen(nav, prefs, onMessage)
     }
 }
 

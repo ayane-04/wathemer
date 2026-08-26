@@ -4,6 +4,8 @@ package com.wathemer.app.hooks.dispatch
 
 import android.graphics.drawable.Drawable
 import android.view.View
+import com.wathemer.app.hooks.HookLog
+import com.wathemer.app.hooks.WaIds
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -18,7 +20,9 @@ object ForegroundKillDispatcher {
     @Synchronized
     fun kill(id: Int, gate: () -> Boolean = { true }) {
         if (id == 0 || id == -1) return
-        gates.getOrPut(id) { ArrayList(1) }.add(gate)
+        val list = gates.getOrPut(id) { ArrayList(1) }
+        list.add(gate)
+        HookLog.arm("fgkill/${WaIds.nameOf(id)}", if (list.size > 1) "${list.size} gates" else "")
         ensureHook()
     }
 
@@ -39,6 +43,7 @@ object ForegroundKillDispatcher {
                         for (g in list) {
                             if (runCatching { g() }.getOrDefault(false)) {
                                 p.args[0] = null
+                                HookLog.hit("fgkill/" + WaIds.nameOf(id))
                                 return
                             }
                         }

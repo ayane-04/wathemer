@@ -58,6 +58,7 @@ object BubbleColors {
 
         if (!bgActive && !textActive) {
             XposedBridge.log("$TAG: no bubble colours set; skipping all hooks")
+            HookLog.skip("install/BubbleColors", "no bubble colours set")
             return
         }
 
@@ -173,6 +174,7 @@ object BubbleColors {
             .filter { it.second != 0 }
         if (resolved.isEmpty()) {
             XposedBridge.log("$TAG: foreground-kill; no candidate ids resolved; skipping")
+            HookLog.skip("BubbleColors/foregroundKill", "no candidate ids resolved")
             return
         }
         val idSet = resolved.map { it.second }.toHashSet()
@@ -232,6 +234,7 @@ object BubbleColors {
 
         if (messageTextId == 0 && dateId == 0) {
             XposedBridge.log("$TAG: message_text + date ids both missing; text/date hooks skipped")
+            HookLog.skip("BubbleColors/text", "message_text and date ids both missing")
             return
         }
         XposedBridge.log(
@@ -335,6 +338,8 @@ object BubbleColors {
         ViewThemeDispatcher.onId(id) { v ->
             // WDSRoundedFrameLayout self-clips; adding our outline would double-clip.
             if (v.javaClass.name.endsWith(".WDSRoundedFrameLayout")) return@onId
+            // clipChildren=false is WhatsApp saying content overflows this box; a sticker draws past it on purpose.
+            if ((v as? ViewGroup)?.clipChildren == false) return@onId
             v.clipToOutline = true
             v.outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {

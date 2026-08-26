@@ -10,6 +10,18 @@
          primary path for the "Restart WhatsApp" button. Root (su) is used as fallback. -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
+    <!-- The update check and its download. Only the settings app reaches the network; the code
+         inside WhatsApp never does. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Tells you the download finished. Best effort: the Updates screen carries the same state
+         and its own Install button, so a denied permission costs nothing. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Hands the downloaded APK to the system installer, which shows its own confirm dialog.
+         Nothing is installed without that dialog. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- MANAGE_EXTERNAL_STORAGE: needed to write the cropped wallpaper to
          /sdcard/Download/WaThemer/wallpaper.png on API 30+ (scoped storage blocks
          public Download/ writes otherwise). User is sent to the system "All files

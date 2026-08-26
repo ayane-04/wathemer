@@ -26,6 +26,7 @@ import com.wathemer.app.settings.components.SliderItem
 import com.wathemer.app.settings.components.StubNote
 import com.wathemer.app.settings.components.ToggleItem
 import com.wathemer.app.settings.nav.NavController
+import com.wathemer.app.settings.prefs.GlassDefaults
 import com.wathemer.app.settings.prefs.Prefs
 import kotlin.math.roundToInt
 
@@ -193,15 +194,17 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                     title = "Restore recommended values",
                     subtitle = "Back to the defaults.",
                     onClick = {
-                        blur = 12; prefs.glassBlur = 12
-                        tint = 10; prefs.glassTint = 10
-                        displace = 20; prefs.glassDisplace = 20
-                        bevel = 25; prefs.glassBevel = 25
-                        radius = 20; prefs.glassRadius = 20
-                        gamma = 70; prefs.glassGamma = 70
-                        rim = 10; prefs.glassRim = 10
-                        rimWidth = 2; prefs.glassRimWidth = 2
-                        rimAngle = 85; prefs.glassRimAngle = 85
+                        // Through GlassDefaults, or this button and the shipped values drift apart.
+                        blur = GlassDefaults.BLUR; prefs.glassBlur = blur
+                        tint = GlassDefaults.TINT; prefs.glassTint = tint
+                        displace = GlassDefaults.DISPLACE; prefs.glassDisplace = displace
+                        bevel = GlassDefaults.BEVEL; prefs.glassBevel = bevel
+                        radius = GlassDefaults.RADIUS; prefs.glassRadius = radius
+                        gamma = GlassDefaults.GAMMA; prefs.glassGamma = gamma
+                        rim = GlassDefaults.RIM; prefs.glassRim = rim
+                        rimWidth = GlassDefaults.RIM_WIDTH; prefs.glassRimWidth = rimWidth
+                        rimAngle = GlassDefaults.RIM_ANGLE; prefs.glassRimAngle = rimAngle
+                        merge = GlassDefaults.BUBBLE_MERGE; prefs.glassBubbleMerge = merge
                     },
                 )
 

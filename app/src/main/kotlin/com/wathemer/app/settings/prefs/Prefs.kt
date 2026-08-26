@@ -157,53 +157,80 @@ class Prefs(
 
     /** Backdrop blur radius in dp (4..40). The screen blur behind every glass surface. */
     var glassBlur: Int
-        get() = sp.getInt(KEY_GLASS_BLUR, 12)
+        get() = sp.getInt(KEY_GLASS_BLUR, GlassDefaults.BLUR)
         set(value) { commitInt(KEY_GLASS_BLUR, value.coerceIn(4, 40)) }
 
     /** Tint alpha 0..80. How much white the glass adds over what shows through. */
     var glassTint: Int
-        get() = sp.getInt(KEY_GLASS_TINT, 10)
+        get() = sp.getInt(KEY_GLASS_TINT, GlassDefaults.TINT)
         set(value) { commitInt(KEY_GLASS_TINT, value.coerceIn(0, 80)) }
 
     /** Refraction amplitude ceiling in dp (0..60). 0 disables the lensing at the edges. */
     var glassDisplace: Int
-        get() = sp.getInt(KEY_GLASS_DISPLACE, 20)
+        get() = sp.getInt(KEY_GLASS_DISPLACE, GlassDefaults.DISPLACE)
         set(value) { commitInt(KEY_GLASS_DISPLACE, value.coerceIn(0, 60)) }
 
     /** Bevel band as a percent of the surface's smaller side (5..40). Capped by corner radius. */
     var glassBevel: Int
-        get() = sp.getInt(KEY_GLASS_BEVEL, 25)
+        get() = sp.getInt(KEY_GLASS_BEVEL, GlassDefaults.BEVEL)
         set(value) { commitInt(KEY_GLASS_BEVEL, value.coerceIn(5, 40)) }
 
     /** Card corner radius in dp (0..40). */
     var glassRadius: Int
-        get() = sp.getInt(KEY_GLASS_RADIUS, 20)
+        get() = sp.getInt(KEY_GLASS_RADIUS, GlassDefaults.RADIUS)
         set(value) { commitInt(KEY_GLASS_RADIUS, value.coerceIn(0, 40)) }
 
     /** Transmitted-backdrop gamma as a percent (30..100). Below 100 lifts the darks; 100 is off and reads flattest. */
     var glassGamma: Int
-        get() = sp.getInt(KEY_GLASS_GAMMA, 70)
+        get() = sp.getInt(KEY_GLASS_GAMMA, GlassDefaults.GAMMA)
         set(value) { commitInt(KEY_GLASS_GAMMA, value.coerceIn(30, 100)) }
 
     /** Rim highlight strength 0..100, the alpha of the edge stroke. 0 is off and draws nothing. */
     var glassRim: Int
-        get() = sp.getInt(KEY_GLASS_RIM, 10)
+        get() = sp.getInt(KEY_GLASS_RIM, GlassDefaults.RIM)
         set(value) { commitInt(KEY_GLASS_RIM, value.coerceIn(0, 100)) }
 
     /** Rim stroke width in dp (1..4). Thin is the point; wide stops reading as an edge. */
     var glassRimWidth: Int
-        get() = sp.getInt(KEY_GLASS_RIM_WIDTH, 2)
+        get() = sp.getInt(KEY_GLASS_RIM_WIDTH, GlassDefaults.RIM_WIDTH)
         set(value) { commitInt(KEY_GLASS_RIM_WIDTH, value.coerceIn(1, 4)) }
 
     /** Rim gradient angle in degrees (0..360); decides which side of every surface lights up. */
     var glassRimAngle: Int
-        get() = sp.getInt(KEY_GLASS_RIM_ANGLE, 85)
+        get() = sp.getInt(KEY_GLASS_RIM_ANGLE, GlassDefaults.RIM_ANGLE)
         set(value) { commitInt(KEY_GLASS_RIM_ANGLE, value.coerceIn(0, 360)) }
 
     /** Grouped-message merging on glass bubbles: continuations flatten the top corner on the sender's side. */
     var glassBubbleMerge: Boolean
-        get() = sp.getBoolean(KEY_GLASS_BUBBLE_MERGE, false)
+        get() = sp.getBoolean(KEY_GLASS_BUBBLE_MERGE, GlassDefaults.BUBBLE_MERGE)
         set(value) { commitBoolean(KEY_GLASS_BUBBLE_MERGE, value) }
+
+    /** Look for a new release when the settings app opens. Throttled to one request a day. */
+    var updateAutoCheck: Boolean
+        get() = sp.getBoolean(KEY_UPDATE_AUTO_CHECK, true)
+        set(value) { commitBoolean(KEY_UPDATE_AUTO_CHECK, value) }
+
+    /** Epoch millis of the last answered check; the throttle is the only reader. */
+    var updateLastCheck: Long
+        get() = sp.getLong(KEY_UPDATE_LAST_CHECK, 0L)
+        set(value) { commitLong(KEY_UPDATE_LAST_CHECK, value) }
+
+    /** The newest release seen, cached so the screen opens with an answer instead of a spinner. */
+    var updateVersion: String
+        get() = sp.getString(KEY_UPDATE_VERSION, "") ?: ""
+        set(value) { commitStringOrRemove(KEY_UPDATE_VERSION, value.ifBlank { null }) }
+
+    var updateNotes: String
+        get() = sp.getString(KEY_UPDATE_NOTES, "") ?: ""
+        set(value) { commitStringOrRemove(KEY_UPDATE_NOTES, value.ifBlank { null }) }
+
+    var updateUrl: String
+        get() = sp.getString(KEY_UPDATE_URL, "") ?: ""
+        set(value) { commitStringOrRemove(KEY_UPDATE_URL, value.ifBlank { null }) }
+
+    var updateAsset: String
+        get() = sp.getString(KEY_UPDATE_ASSET, "") ?: ""
+        set(value) { commitStringOrRemove(KEY_UPDATE_ASSET, value.ifBlank { null }) }
 
     /** App-wide iOS icon pack toggle. Glyphs are colour templates, so tint tokens still colour them. false = stock icons. */
     var iosIconPack: Boolean
@@ -347,6 +374,11 @@ class Prefs(
         commitChecked(key, sp.edit().putInt(key, value).commit())
         markWorldReadable()
         Log.i(TAG, "commitInt $key = #%08x -> ${storeDescription()}".format(value))
+    }
+
+    private fun commitLong(key: String, value: Long) {
+        commitChecked(key, sp.edit().putLong(key, value).commit())
+        markWorldReadable()
     }
 
     private fun commitString(key: String, value: String) {
@@ -532,6 +564,15 @@ class Prefs(
         const val KEY_GLASS_RIM_WIDTH = "glass_rim_width"
         const val KEY_GLASS_RIM_ANGLE = "glass_rim_angle"
         const val KEY_GLASS_BUBBLE_MERGE = "glass_bubble_merge"
+
+        // ── Updates ───────────────────────────────────
+        // Settings-app only; the hook never reads these and a theme file can never write them.
+        const val KEY_UPDATE_AUTO_CHECK = "update_auto_check"
+        const val KEY_UPDATE_LAST_CHECK = "update_last_check"
+        const val KEY_UPDATE_VERSION    = "update_version"
+        const val KEY_UPDATE_NOTES      = "update_notes"
+        const val KEY_UPDATE_URL        = "update_url"
+        const val KEY_UPDATE_ASSET      = "update_asset"
 
         /** Every colour override key, the one list [applyPresetFull] clears. Every new colour key must be added here; structural keys stay out so presets keep them. */
         val ALL_COLOR_OVERRIDE_KEYS: List<String> = listOf(

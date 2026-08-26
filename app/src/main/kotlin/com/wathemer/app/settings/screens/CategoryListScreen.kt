@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wathemer.app.BuildConfig
 import com.wathemer.app.settings.components.AppAccent
 import com.wathemer.app.settings.components.CategoryRow
 import com.wathemer.app.settings.components.MenuRow
@@ -41,6 +42,7 @@ import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.nav.Screen
 import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.settings.preview.LocalThemeSnapshot
+import com.wathemer.app.update.isNewerVersion
 
 /** Root screen: the top-level categories. No back button. */
 @Composable
@@ -48,6 +50,12 @@ fun CategoryListScreen(nav: NavController, prefs: Prefs) {
     val snapshot = LocalThemeSnapshot.current
     var themed by remember { mutableStateOf(prefs.hasGlobalTheme()) }
     val previewName = detectPresetName(prefs.primary, prefs.background, prefs.text)
+    // From the last check only; opening this screen never goes to the network.
+    val updateBlurb = if (isNewerVersion(prefs.updateVersion, BuildConfig.VERSION_NAME)) {
+        "Version ${prefs.updateVersion} is out. You have ${BuildConfig.VERSION_NAME}."
+    } else {
+        "You are on ${BuildConfig.VERSION_NAME}."
+    }
 
     Scaffold(containerColor = Palette.Bg) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
@@ -112,6 +120,12 @@ fun CategoryListScreen(nav: NavController, prefs: Prefs) {
                     description = "Save your look, share it, or use one someone sent you.",
                     leading = { CategoryTile(AppAccent) { ThemesIcon(it) } },
                     onClick = { nav.push(Screen.Themes) },
+                )
+                CategoryRow(
+                    label = "Updates",
+                    description = updateBlurb,
+                    leading = { CategoryTile(AppAccent) { UpdatesIcon(it) } },
+                    onClick = { nav.push(Screen.Updates) },
                 )
 
                 Spacer(Modifier.size(8.dp))
@@ -238,6 +252,22 @@ private fun ExtrasIcon(tint: Color) {
         drawCircle(tint, w * 0.06f, Offset(w * 0.40f, h * 0.52f))
         drawCircle(tint, w * 0.05f, Offset(w * 0.75f, h * 0.66f))
         drawLine(tint, Offset(w * 0.15f, h * 0.86f), Offset(w * 0.85f, h * 0.86f), 1.5.dp.toPx())
+    }
+}
+
+/** An arrow onto a line: the download that an update is. */
+@Composable
+private fun UpdatesIcon(tint: Color) {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val w = size.width; val h = size.height
+        val s = 1.5.dp.toPx()
+        drawLine(tint, Offset(w * 0.5f, 0f), Offset(w * 0.5f, h * 0.62f), strokeWidth = s)
+        drawLine(tint, Offset(w * 0.26f, h * 0.38f), Offset(w * 0.5f, h * 0.64f), strokeWidth = s)
+        drawLine(tint, Offset(w * 0.74f, h * 0.38f), Offset(w * 0.5f, h * 0.64f), strokeWidth = s)
+        drawLine(
+            tint.copy(alpha = 0.45f),
+            Offset(w * 0.12f, h * 0.92f), Offset(w * 0.88f, h * 0.92f), strokeWidth = s,
+        )
     }
 }
 

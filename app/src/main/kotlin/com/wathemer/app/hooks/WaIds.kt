@@ -17,10 +17,17 @@ object WaIds {
     /** Names that resolved to 0. Doubles as the log-once guard: `add` returns false if present. */
     private val missing = ConcurrentHashMap.newKeySet<String>()
 
+    /** Resolved ids back to the name they were asked for, so a dispatcher can name what it fired. */
+    private val names = ConcurrentHashMap<Int, String>()
+
+    /** The name [id] was resolved from, or a hex id when it never came through here. */
+    fun nameOf(id: Int): String = names[id] ?: "id/0x${id.toString(16)}"
+
     /** Resolves a WA id, logging the first miss per name; returns the raw 0 so existing guards keep working. */
     fun id(res: Resources, name: String, pkg: String): Int {
         val value = runCatching { res.getIdentifier(name, "id", pkg) }.getOrDefault(0)
         requested.add(name)
+        if (value != 0) names[value] = name
         if (value == 0 && missing.add(name)) {
             XposedBridge.log(
                 "[$TAG] WA id UNRESOLVED: '$name' in $pkg; the surface driven by it will be absent, " +

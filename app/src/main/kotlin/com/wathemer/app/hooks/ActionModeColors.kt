@@ -41,6 +41,7 @@ object ActionModeColors {
 
         if (bg == 0 && icons == 0 && title == 0 && closeRipple == 0) {
             XposedBridge.log("$TAG: no action-mode tokens set; skipping")
+            HookLog.skip("install/ActionModeColors", "no action-mode tokens set")
             return
         }
 

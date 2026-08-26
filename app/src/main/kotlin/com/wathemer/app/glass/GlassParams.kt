@@ -214,9 +214,10 @@ class GlassParams(var density: Float) {
 
     /** Install-time globals, so the hook sets them once rather than at every construction site. */
     companion object {
-        @JvmStatic var defaultTransGamma: Float = 0.7f
+        // Mirrors GlassDefaults by hand; the engine does not import settings.
+        @JvmStatic var defaultTransGamma: Float = 0.75f
         @JvmStatic var defaultRimStrokePx: Float = 0f
-        @JvmStatic var defaultRimStrokeAngle: Float = 85f
+        @JvmStatic var defaultRimStrokeAngle: Float = 90f
         @JvmStatic var defaultRimStrokeColor: Int = Color.WHITE
     }
 }

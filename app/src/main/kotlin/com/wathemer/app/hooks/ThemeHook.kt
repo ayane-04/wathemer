@@ -32,6 +32,7 @@ object ThemeHook {
             // No tokens, install nothing: unthemed WhatsApp stays bit-for-bit stock, and per-element features are independent anyway.
             if (ColorMap.isEmpty()) {
                 XposedBridge.log("[$TAG] no global colour tokens set; global substitution NOT installed (WhatsApp stays stock)")
+                HookLog.skip("install/ThemeHook", "no global colour tokens set")
                 return
             }
             installFrameworkHooks(classLoader)
