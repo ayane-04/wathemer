@@ -22,7 +22,6 @@ object FontSwap {
     private const val TAG = "WaThemer.Font"
     // android.util.Log tag, greppable in logcat. XposedBridge.log routing is less reliable.
     private const val LOGTAG = "WaThemerFont"
-    private const val WHATSAPP_PKG = "com.whatsapp"
     private val pkg = BuildConfig.APPLICATION_ID
 
     // Family keys merged into sSystemFontMap; monospace only on opt-in (the OTP field uses RobotoMono directly).
@@ -50,27 +49,20 @@ object FontSwap {
         val mapMono = xprefs.getBoolean(Prefs.KEY_FONT_MAP_MONOSPACE, false)
         Log.i(LOGTAG, "install: choice=$choice mapMono=$mapMono")
 
-        // ── Layer 1: the global map and statics. Needs a Context, hence the onCreate before-hook.
-        XposedHelpers.findAndHookMethod(
-            Application::class.java, "onCreate",
-            object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val app = param.thisObject as? Application ?: return
-                    if (app.packageName != WHATSAPP_PKG) return
-                    if (normalFace != null) return            // idempotent: only patch once
-                    loadFaces(app, choice)
-                    val nf = normalFace ?: run {
-                        Log.w(LOGTAG, "face '$choice' failed to load; leaving stock WA")
-                        return
-                    }
-                    val bf = boldFace ?: Typeface.create(nf, Typeface.BOLD)
-                    val mono = if (mapMono) nf else null
-                    patchSystemFontMap(nf, mono)
-                    patchStaticFields(nf, bf, mono)
-                    Log.i(LOGTAG, "Layer1 applied (choice=$choice)")
-                }
-            },
-        )
+        // ── Layer 1: the global map and statics. Needs a Context, hence the app-create anchor.
+        HostAppInit.onCreate(HostAppInit.ORDER_FONT, "FontSwap") { app ->
+            if (normalFace != null) return@onCreate           // idempotent: only patch once
+            loadFaces(app, choice)
+            val nf = normalFace ?: run {
+                Log.w(LOGTAG, "face '$choice' failed to load; leaving stock WA")
+                return@onCreate
+            }
+            val bf = boldFace ?: Typeface.create(nf, Typeface.BOLD)
+            val mono = if (mapMono) nf else null
+            patchSystemFontMap(nf, mono)
+            patchStaticFields(nf, bf, mono)
+            Log.i(LOGTAG, "Layer1 applied (choice=$choice)")
+        }
 
         // ── Layer 2: per-view enforcement on the platform 2-arg setTypeface.
         XposedHelpers.findAndHookMethod(
@@ -104,7 +96,7 @@ object FontSwap {
                 }
             },
         )
-        Log.i(LOGTAG, "FontSwap installed (Layer1 armed on Application.onCreate, Layer2 on TextView.setTypeface)")
+        Log.i(LOGTAG, "FontSwap installed (Layer1 armed on app create, Layer2 on TextView.setTypeface)")
         XposedBridge.log("[$TAG] installed: choice=$choice mono=$mapMono")
     }
 

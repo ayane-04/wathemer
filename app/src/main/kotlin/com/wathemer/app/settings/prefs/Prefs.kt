@@ -365,6 +365,36 @@ class Prefs(
         return ok
     }
 
+    /**
+     * Snapshots the store to filesDir so the next build can restore it. The framework store is
+     * unreachable once this module stops being a legacy one, and filesDir survives an update.
+     */
+    fun exportForMigration(): Int? {
+        // A snapshot of the private fallback would be empty and would overwrite a good one.
+        if (!moduleStoreActive) return null
+        return runCatching {
+            val all = sp.all
+            if (all.isEmpty()) return null
+            val json = JSONObject()
+            for ((k, v) in all) {
+                // Same typed shape as prefs_before_reset.json, so one reader can take either file.
+                val entry = JSONObject()
+                entry.put("type", v?.javaClass?.simpleName ?: "null")
+                entry.put("value", if (v is Set<*>) JSONArray(v.toList()) else v)
+                json.put(k, entry)
+            }
+            val dest = File(context.filesDir, EXPORT_FILE)
+            val part = File(context.filesDir, "$EXPORT_FILE.part")
+            // Via .part: a kill mid-write must not leave a truncated file where a whole one was.
+            part.writeText(json.toString())
+            if (!part.renameTo(dest)) {
+                dest.delete()
+                check(part.renameTo(dest))
+            }
+            all.size
+        }.onFailure { Log.w(TAG, "exportForMigration failed: $it") }.getOrNull()
+    }
+
     /** Logs failed commits: after a reinstall the store can belong to the old UID and writes silently vanish. */
     private fun commitChecked(key: String, ok: Boolean) {
         if (!ok) Log.w(TAG, "commit FAILED for $key: the settings file is not writable by this UID")
@@ -434,6 +464,9 @@ class Prefs(
         private const val TAG = "WaThemer.Prefs"
 
         const val FILE = "com.wathemer.app_prefs"
+
+        /** Handover file for the move off the framework store; the next build reads it once and deletes it. */
+        const val EXPORT_FILE = "prefs_export.json"
 
         const val KEY_CHATLIST_DIVIDER = "chatlist_divider"
         const val KEY_EFFECT_SNOW = "effect_snow"

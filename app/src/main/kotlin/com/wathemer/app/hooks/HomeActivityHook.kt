@@ -43,7 +43,6 @@ import java.lang.reflect.Field
 object HomeActivityHook {
 
     private const val TAG = "WaThemer.Home"
-    private const val WA_PKG = "com.whatsapp"
     private const val BADGE_TAG_KEY = -1167196159
     private const val TOOLBAR_HOOKED_TAG_KEY = -1167196160
     // Tags the toolbar View itself, not a parent, so the watcher registration is idempotent across re-attaches.
@@ -62,19 +61,11 @@ object HomeActivityHook {
 
     fun install(classLoader: ClassLoader) {
         try {
-            // Defer install until Application.onCreate so we have a context for resource lookup.
-            XposedHelpers.findAndHookMethod(
-                Application::class.java, "onCreate",
-                object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        val app = param.thisObject as? Application ?: return
-                        // Manifest scope is com.whatsapp only, but filter anyway.
-                        if (app.packageName != WA_PKG) return
-                        runCatching { installInternal(app, classLoader) }
-                            .onFailure { XposedBridge.log("[$TAG] installInternal threw: $it"); XposedBridge.log(it) }
-                    }
-                }
-            )
+            // Defer install until the host application is created, so resource lookup has a context.
+            HostAppInit.onCreate(HostAppInit.ORDER_HOME, "HomeActivityHook") { app ->
+                runCatching { installInternal(app, classLoader) }
+                    .onFailure { XposedBridge.log("[$TAG] installInternal threw: $it"); XposedBridge.log(it) }
+            }
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] install FAILED: $t"); XposedBridge.log(t)
         }

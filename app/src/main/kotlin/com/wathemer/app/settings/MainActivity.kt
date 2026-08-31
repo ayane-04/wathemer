@@ -66,11 +66,15 @@ import com.wathemer.app.settings.screens.WallpaperScreen
 /** Hosts the settings UI over an in-memory nav stack; system back pops until the root, then Android closes the activity. */
 class MainActivity : ComponentActivity() {
 
+    // Held only so onStop can re-snapshot; the UI keeps using the local below.
+    private var openPrefs: Prefs? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         armCropInsetFix()
         val prefs = Prefs.open(this)
+        openPrefs = prefs
         // Settings survive an uninstall (framework store, not package data); reconcile before the UI reads anything.
         prefs.reconcileFreshInstall()?.let { r ->
             if (r.deferred) {
@@ -109,6 +113,9 @@ class MainActivity : ComponentActivity() {
             .onSuccess { e ->
                 if (e != null) Log.i("WaThemer.Prefs", "legacy user font imported: ${e.name}")
             }
+        // Last, so the snapshot holds the reconciled and migrated state rather than what preceded it.
+        runCatching { prefs.exportForMigration() }
+            .onSuccess { n -> if (n != null) Log.i("WaThemer.Prefs", "migration snapshot: $n settings") }
         setContent {
             WaThemerTheme {
                 ThemeSnapshotHost(prefs) {
@@ -120,6 +127,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Edits made this session postdate the launch snapshot, and leaving for the installer lands here. */
+    override fun onStop() {
+        super.onStop()
+        runCatching { openPrefs?.exportForMigration() }
     }
 }
 
