@@ -201,6 +201,20 @@ object ThemeLibrary {
             }
         }
 
+        // Tuning only; whether glass is on stays with the wallpaper gate above.
+        doc.glass?.let { g ->
+            values[Prefs.KEY_GLASS_BLUR] = g.blur
+            values[Prefs.KEY_GLASS_TINT] = g.tint
+            values[Prefs.KEY_GLASS_DISPLACE] = g.displace
+            values[Prefs.KEY_GLASS_BEVEL] = g.bevel
+            values[Prefs.KEY_GLASS_RADIUS] = g.radius
+            values[Prefs.KEY_GLASS_GAMMA] = g.gamma
+            values[Prefs.KEY_GLASS_RIM] = g.rim
+            values[Prefs.KEY_GLASS_RIM_WIDTH] = g.rimWidth
+            values[Prefs.KEY_GLASS_RIM_ANGLE] = g.rimAngle
+            values[Prefs.KEY_GLASS_BUBBLE_MERGE] = g.bubbleMerge
+        }
+
         doc.font?.let { f -> applyFont(context, prefs, f, clear, values, problems) }
 
         if (!prefs.applyThemeWrite(clear, values)) {
@@ -288,6 +302,19 @@ object ThemeLibrary {
             ),
             flags = flags,
             font = font,
+            // Only once a slider has actually been moved, or every theme would stamp defaults on its importer.
+            glass = if (Prefs.THEME_GLASS_KEYS.none { prefs.isSet(it) }) null else ThemeGlass(
+                blur = prefs.glassBlur,
+                tint = prefs.glassTint,
+                displace = prefs.glassDisplace,
+                bevel = prefs.glassBevel,
+                radius = prefs.glassRadius,
+                gamma = prefs.glassGamma,
+                rim = prefs.glassRim,
+                rimWidth = prefs.glassRimWidth,
+                rimAngle = prefs.glassRimAngle,
+                bubbleMerge = prefs.glassBubbleMerge,
+            ),
         )
     }
 

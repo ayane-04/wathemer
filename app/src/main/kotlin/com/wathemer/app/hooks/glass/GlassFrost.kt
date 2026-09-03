@@ -14,6 +14,7 @@ import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.ShapeDrawable
 import android.view.View
 import android.view.ViewTreeObserver
+import android.widget.TextView
 import com.wathemer.app.glass.FrostDrawable
 
 /** Frost one view from the wallpaper; idempotent, recycled chips come back bound to a different chip. */
@@ -241,6 +242,23 @@ internal fun tintWdsShape(d: Drawable?, color: Int): Boolean {
 }
 
 private val stockPadById = HashMap<Int, Rect>()
+
+/** WhatsApp's own band padding, restated on the label because the band it came from is cleared. */
+private const val UNREAD_PILL_PAD_DP = 6f
+
+/**
+ * The unread label ships with `background="@null"` and no vertical padding: the pill and the air
+ * around it were the parent band's, which glass clears. Font padding goes too, or the leading is
+ * heavier above than below and the text sits low in its own pill.
+ */
+internal fun padUnreadPill(v: View) {
+    val tv = v as? TextView ?: return
+    if (tv.includeFontPadding) tv.includeFontPadding = false
+    val want = v.dp(UNREAD_PILL_PAD_DP).toInt()
+    // Only on a mismatch: setPadding asks for layout, and this runs from a layout callback.
+    if (v.paddingTop == want && v.paddingBottom == want) return
+    v.setPadding(v.paddingLeft, want, v.paddingRight, want)
+}
 
 /**
  * Our fill reports no padding, so replacing a drawable that had some remeasures a wrap_content

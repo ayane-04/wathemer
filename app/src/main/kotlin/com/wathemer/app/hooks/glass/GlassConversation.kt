@@ -21,11 +21,19 @@ internal var convCoordRef: WeakReference<ViewGroup>? = null
 
 internal var convFooterRef: WeakReference<ViewGroup>? = null
 
+/** The strip above the messages, pinned message included; the floated toolbar sits over its whole height. */
+internal var convBannerRef: WeakReference<ViewGroup>? = null
+
 internal val convToolbarTag = tagKey("wathemer-conv-toolbar")
 
 internal val convFooterTag = tagKey("wathemer-conv-footer")
 
 private val convFloatTag = tagKey("wathemer-conv-float")
+
+private val convBannerTag = tagKey("wathemer-conv-banner")
+
+/** Where the header capsule ends inside the holder; the strip hangs off this, not off the holder's full height. */
+private var convCapsuleBottom = -1
 
 private val convPanes = WeakHashMap<View, GlassView>()
 
@@ -39,6 +47,9 @@ private const val CONV_CAPSULE_GROW_DP = 8f
 
 /** Resting clearance from the chrome; clipToPadding = false still lets rows scroll into the band. */
 private const val CONV_CHROME_GAP_DP = 6f
+
+/** Header capsule to pinned strip: a divider, not a margin. The two read as one stack of pills. */
+private const val CONV_BANNER_GAP_DP = 3f
 
 /** Negative bottom margin grows the coordinator to y=0; translationZ is not optional, messages would paint over the toolbar. */
 internal fun floatConvToolbar(holder: ViewGroup) {
@@ -56,10 +67,57 @@ internal fun floatConvToolbar(holder: ViewGroup) {
             v.layoutParams = lp
             if (v.translationZ < 1f) v.translationZ = 1f
             XposedBridge.log("[$TAG] conversation toolbar floated (h=$h, bottomMargin=-$h)")
+            // The banner may have attached before the height existed, and it offsets by exactly this.
+            convBannerRef?.get()?.let { b -> runCatching { syncConvBanner(b) } }
             runCatching { syncConvToolbar() }
         }
     })
     holder.requestLayout()
+}
+
+/** The banner shares the coordinator's top edge with the floated toolbar, so without this it is never visible. */
+internal fun clearConvBanner(banner: ViewGroup) {
+    convBannerRef = WeakReference(banner)
+    syncConvBanner(banner)
+    if (banner.getTag(convBannerTag) != null) return
+    banner.setTag(convBannerTag, true)
+    // Height is 0 until something is pinned, so the offset has to be re-derived rather than set once.
+    banner.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+        (v as? ViewGroup)?.let { runCatching { syncConvBanner(it) } }
+    }
+}
+
+/** Offsets the strip by the toolbar's height, and takes it back when the strip empties. */
+private fun syncConvBanner(banner: ViewGroup) {
+    val lp = banner.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+    // An empty strip must keep a zero margin or it opens a gap above the first message.
+    val gap = (CONV_BANNER_GAP_DP * banner.resources.displayMetrics.density).toInt()
+    // Off the capsule's own bottom edge; the holder is taller than the capsule and would open a margin.
+    val below = if (convCapsuleBottom > 0) convCapsuleBottom + gap else (convHolderRef?.get()?.height ?: 0)
+    val want = if (banner.height <= 0) 0 else below
+    syncConvBannerPill(banner)
+    if (lp.topMargin == want) return
+    lp.topMargin = want
+    banner.layoutParams = lp
+    XposedBridge.log("[$TAG] conversation banner cleared of the toolbar (topMargin=$want)")
+}
+
+/** Same inset and stadium as the header capsule, so the strip reads as the next pill down, not a slab. */
+private fun syncConvBannerPill(banner: ViewGroup) {
+    if (banner.width <= 0 || banner.height <= 0) return
+    val strip = (0 until banner.childCount)
+        .mapNotNull { banner.getChildAt(it) as? ViewGroup }
+        .firstOrNull { it !is GlassView } ?: return
+    // WhatsApp's own opaque fill has to go, or the pane sits behind a slab and nothing of it shows.
+    clearBg(strip, "conversation pinned strip")
+    for (i in 0 until strip.childCount) {
+        (strip.getChildAt(i) as? ViewGroup)?.let { clearBg(it, "conversation pinned strip inner") }
+    }
+    val inset = (CONV_PILL_INSET_DP * banner.resources.displayMetrics.density).toInt()
+    val r = banner.width - inset
+    if (r - inset <= 0) return
+    // The list, never the coordinator: the strip is the coordinator's own child and would capture itself.
+    pill(banner, strip, inset, 0, r, banner.height, source = convListHostRef?.get())
 }
 
 /** RelativeLayout here, so the negative margin goes on the list host; the footer draws later and needs no lift. */
@@ -300,6 +358,7 @@ internal fun syncConvToolbar() {
         val r = Rect(0, 0, searchBar.width, searchBar.height)
         if (runCatching { holder.offsetDescendantRectToMyCoords(searchBar, r) }.isSuccess) {
             clearBg(searchBar, "conversation search bar")
+            convCapsuleBottom = r.bottom
             pill(holder, searchBar, r.left, r.top, r.right, r.bottom)
         }
         return
@@ -358,7 +417,11 @@ internal fun syncConvToolbar() {
     // WhatsApp's own layout spaces the controls inside it, so none of the per-pill centring defects can recur.
     val l = inset
     val r = holder.width - inset
-    if (r - l > band) pill(holder, toolbar, l, pt, r, pb)
+    if (r - l > band) {
+        convCapsuleBottom = pb
+        pill(holder, toolbar, l, pt, r, pb)
+    }
+    convBannerRef?.get()?.let { b -> runCatching { syncConvBanner(b) } }
 }
 
 /** [convRect] = [child]'s bounds mapped into [holder]'s coordinates. */
@@ -381,6 +444,7 @@ private fun padConvList(listHost: ViewGroup, footerHeight: Int) {
     val d = list.resources.displayMetrics.density
     val gap = (CONV_CHROME_GAP_DP * d).toInt()
     val holder = convHolderRef?.get()
+    // Unchanged by the banner: the list host already starts below its height, and its margin is this same toolbar.
     val top = (holder?.height ?: 0) + gap
     val bottom = footerHeight + gap
     if (list.paddingTop == top && list.paddingBottom == bottom) return
@@ -418,12 +482,14 @@ private fun containsList(v: View, depth: Int): Boolean {
 }
 
 /** Keyed by the element, not by index: the ActionMenuView's children change when the menu inflates. */
-internal fun pill(holder: ViewGroup, owner: View, l: Int, t: Int, r: Int, b: Int) {
+internal fun pill(holder: ViewGroup, owner: View, l: Int, t: Int, r: Int, b: Int, source: View? = null) {
     if (r <= l || b <= t) return
+    // A holder inside the coordinator has to name its own source, or the capture would contain the pane.
+    val src = source ?: convCoordRef?.get()
     var glass = convPanes[owner]
     if (glass == null || glass.parent !== holder) {
         glass = GlassView(holder.context).apply {
-            backdrop = convCoordRef?.get()
+            backdrop = src
             underlay = wallpaperUnderlay(holder)
             params.apply {
                 downsample = DOWNSAMPLE
@@ -441,7 +507,7 @@ internal fun pill(holder: ViewGroup, owner: View, l: Int, t: Int, r: Int, b: Int
         HookLog.hit("pane/convCapsule")
     } else if (glass.backdrop == null) {
         // The coordinator may have attached after the pill did.
-        glass.backdrop = convCoordRef?.get()
+        glass.backdrop = src
     }
     // Re-asserted: the band may arrive after the pill, and the split depends on whether it exists.
     glass.params.tintColor = glassTint(convPillAlpha())

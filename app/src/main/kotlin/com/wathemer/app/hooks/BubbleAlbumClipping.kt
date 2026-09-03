@@ -7,10 +7,8 @@ import android.graphics.Outline
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 
 private const val TAG = "WaThemer.AlbumClip"
@@ -18,12 +16,7 @@ private const val ALBUM_CLASS = "com.whatsapp.conversationrow.album.Conversation
 
 object BubbleAlbumClipping {
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable()
-            reload()
-        }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     fun install(app: Application, classLoader: ClassLoader) {
         xprefs.reload()

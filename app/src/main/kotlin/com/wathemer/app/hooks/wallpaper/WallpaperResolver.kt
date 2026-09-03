@@ -4,10 +4,10 @@ package com.wathemer.app.hooks.wallpaper
 
 import android.content.ContentResolver
 import android.content.Context
+import android.content.SharedPreferences
 import android.provider.MediaStore
 import android.util.Log
 import com.wathemer.app.settings.prefs.Prefs
-import de.robv.android.xposed.XSharedPreferences
 import java.io.File
 import java.io.FileOutputStream
 
@@ -17,7 +17,7 @@ object WallpaperResolver {
     private const val CACHE_FILENAME = "wt_wallpaper.png"
 
     /** Returns the wallpaper file, or null meaning skip painting this Activity. */
-    fun resolve(context: Context, prefs: XSharedPreferences): File? {
+    fun resolve(context: Context, prefs: SharedPreferences): File? {
         val storedPath = prefs.getString(Prefs.KEY_WALLPAPER_PATH, null)
             ?.takeIf { it.isNotBlank() }
             ?: return null

@@ -31,6 +31,7 @@ import com.wathemer.app.settings.nav.Screen
 import com.wathemer.app.settings.nav.rememberNavController
 import com.wathemer.app.settings.prefs.FontLibrary
 import com.wathemer.app.settings.prefs.Prefs
+import com.wathemer.app.settings.prefs.ServiceBridge
 import com.wathemer.app.settings.preview.ThemeSnapshotHost
 import com.wathemer.app.settings.screens.BackdropScreen
 import com.wathemer.app.settings.screens.CategoryListScreen
@@ -73,8 +74,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         armCropInsetFix()
-        val prefs = Prefs.open(this)
+        val prefs = Prefs.open(this, ServiceBridge.awaitPrefs())
         openPrefs = prefs
+        // Before the reconcile: an update hands over through the snapshot, an uninstall leaves none to import.
+        val carried = runCatching { prefs.importSnapshotIfEmpty() }.getOrNull()
+        carried?.let {
+            if (it.imported > 0) Log.i("WaThemer.Prefs", "carried over ${it.imported} settings from ${it.source}")
+        }
+        importWarn = carried?.warn == true
         // Settings survive an uninstall (framework store, not package data); reconcile before the UI reads anything.
         prefs.reconcileFreshInstall()?.let { r ->
             if (r.deferred) {
@@ -164,6 +171,9 @@ private fun ComponentActivity.armCropInsetFix() {
     })
 }
 
+/** Read by AppRoot; set once at launch, before setContent, so no state plumbing is needed. */
+private var importWarn = false
+
 @Composable
 private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
     // App chrome stays locked to AppAccent no matter which WhatsApp theme is being configured.
@@ -173,6 +183,19 @@ private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Uni
             Text(
                 text = "Module not active. Enable WaThemer in your Xposed manager, add WhatsApp to " +
                     "its scope, then reopen this app. Changes made now will NOT apply.",
+                color = Color(0xFF1A1207),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFFFC46B))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+        // The one case the store starts over: updated past the export build, or the snapshot failed to read.
+        if (importWarn && prefs.moduleStoreActive) {
+            Text(
+                text = "Your settings could not be carried over. If this replaced version 0.9.4 or " +
+                    "later, install that version, open it once, then update again.",
                 color = Color(0xFF1A1207),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier

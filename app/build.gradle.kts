@@ -22,8 +22,8 @@ android {
         minSdk = 31
         targetSdk = 36
         // Bump on every build that leaves this machine, or a log cannot be tied to a build.
-        versionCode = 184
-        versionName = "0.9.4"
+        versionCode = 201
+        versionName = "1.0.0"
 
         ndk {
             // arm64 only: no 32-bit Android 12 devices exist, and emulators cannot run an Xposed module.
@@ -98,6 +98,11 @@ android {
 dependencies {
     // Xposed (provided at runtime by LSPosed framework)
     compileOnly(libs.libxposed.legacy)
+
+    // Modern module contract; the hook side still calls the legacy API, which 101 permits and 102 blocks.
+    compileOnly(libs.libxposed.api)
+    // Settings-side service client; bundled, it is how the app reaches the framework's preference store.
+    implementation(libs.libxposed.service)
 
     // DexKit resolves obfuscated WhatsApp classes; every query is validated against this exact AAR, do not swap in the Maven 2.x.
     implementation(files("libs/dexkit-android.aar"))

@@ -13,14 +13,12 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.widget.TextView
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.hooks.dexkit.Deobfuscator
 import com.wathemer.app.hooks.dispatch.ForegroundKillDispatcher
 import com.wathemer.app.hooks.dispatch.TextColorDispatcher
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import java.lang.reflect.Method
 
@@ -32,12 +30,7 @@ private fun dlog(m: String) { XposedBridge.log("$TAG: $m") }
 
 object BubbleColors {
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable()
-            reload()
-        }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     /** Wire bubble theming into the WA process. Called from XposedEntry after Application.onCreate. */
     fun install(app: Application, classLoader: ClassLoader) {

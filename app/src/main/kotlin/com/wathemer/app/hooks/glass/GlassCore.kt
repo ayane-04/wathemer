@@ -5,6 +5,7 @@ package com.wathemer.app.hooks.glass
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.RectF
@@ -17,16 +18,19 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.animation.Interpolator
 import android.view.animation.PathInterpolator
+import android.widget.AbsListView
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
-import com.wathemer.app.BuildConfig
+import com.wathemer.app.glass.BackdropCapture
 import com.wathemer.app.glass.GlassParams
+import com.wathemer.app.hooks.HookLog
+import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.waId
 import com.wathemer.app.settings.prefs.GlassDefaults
 import com.wathemer.app.settings.prefs.Prefs
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
 import java.util.Collections
@@ -140,10 +144,7 @@ internal fun tagKey(name: String): Int = (name.hashCode() and 0x00FFFFFF) or 0x7
 internal fun loadGlassPrefs(): Boolean {
     var enabled = false
     runCatching {
-        val p = XSharedPreferences(
-            BuildConfig.APPLICATION_ID,
-            Prefs.FILE,
-        )
+        val p = ModulePrefs.open()
         p.reload()
         val k = Prefs
         enabled = p.getBoolean(k.KEY_GLASS_ENABLED, false)
@@ -176,6 +177,30 @@ internal var navUnreadText = 0
 
 /** True once install completed; [badgeGlassFill] answers 0 before that. */
 @Volatile internal var armed = false
+
+private var selectorGuardArmed = false
+
+/**
+ * The list selector is touch feedback, not backdrop. Drawn into a pane's RenderNode its ripple arms
+ * an animator against that node, and the frame's own draw then dies on "Target already set!".
+ */
+internal fun ensureSelectorGuard() {
+    if (selectorGuardArmed) return
+    selectorGuardArmed = true
+    runCatching {
+        XposedHelpers.findAndHookMethod(
+            AbsListView::class.java, "drawSelector", Canvas::class.java,
+            object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!BackdropCapture.capturing) return
+                    param.result = null
+                    logOnce("list selector held back while a pane was capturing")
+                }
+            },
+        )
+        HookLog.arm("guard/listSelector")
+    }.onFailure { HookLog.fail("guard/listSelector", it) }
+}
 
 internal fun logOnce(msg: String) {
     if (loggedOnce.add(msg)) XposedBridge.log("[$TAG] $msg")

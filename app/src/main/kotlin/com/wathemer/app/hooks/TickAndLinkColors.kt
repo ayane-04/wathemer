@@ -7,11 +7,9 @@ import android.content.res.ColorStateList
 import android.graphics.PorterDuff
 import android.text.TextPaint
 import android.widget.ImageView
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.hooks.dexkit.Deobfuscator
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 
@@ -30,12 +28,7 @@ private fun isBlueish(color: Int): Boolean {
 
 object TickAndLinkColors {
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable()
-            reload()
-        }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     fun install(app: Application, classLoader: ClassLoader) {
         xprefs.reload()

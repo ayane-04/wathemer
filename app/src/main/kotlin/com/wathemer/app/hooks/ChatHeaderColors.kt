@@ -4,23 +4,16 @@ package com.wathemer.app.hooks
 
 import android.app.Application
 import android.widget.TextView
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.hooks.dispatch.TextColorDispatcher
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
 import com.wathemer.app.settings.prefs.Prefs
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 
 private const val TAG = "WaThemer.ChatHeader"
 
 object ChatHeaderColors {
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable()
-            reload()
-        }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     fun install(app: Application) {
         xprefs.reload()

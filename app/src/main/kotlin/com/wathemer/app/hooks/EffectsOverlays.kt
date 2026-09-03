@@ -14,10 +14,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.util.Random
@@ -31,10 +29,7 @@ object EffectsOverlays {
     private const val SNOW_TAG = "wt_effect_snow"
 
     fun install() {
-        val xprefs = XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable()
-            reload()
-        }
+        val xprefs = ModulePrefs.open()
         if (!xprefs.getBoolean(Prefs.KEY_EFFECT_SNOW, false)) return
         XposedHelpers.findAndHookMethod(
             Activity::class.java, "onPostCreate", Bundle::class.java,

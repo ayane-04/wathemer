@@ -21,17 +21,16 @@ import android.view.ViewStub
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.glass.FrostDrawable
 import com.wathemer.app.glass.GlassParams
 import com.wathemer.app.glass.GlassView
 import com.wathemer.app.hooks.HookLog
+import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.WaIds
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
 import com.wathemer.app.hooks.waId
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
@@ -49,6 +48,8 @@ object GlassHook {
             HookLog.skip("install/GlassHook", "glass_enabled is off")
             return
         }
+        // Before any pane exists: every capture draws live views, and a ripple in one crashes the frame.
+        ensureSelectorGuard()
         val res = app.resources
         // Density is only available here, so the dp to px conversion cannot live in loadGlassPrefs.
         GlassParams.defaultRimStrokePx =
@@ -699,6 +700,14 @@ object GlassHook {
             (v as? ViewGroup)?.let { convCoordRef = WeakReference(it) }
             runCatching { syncConvToolbar() }
         }
+        // Pinned messages and the rest of the strip share the coordinator's top edge with the floated toolbar.
+        val convBannerId = res.waId("banner_container", pkg)
+        if (convBannerId != 0) ViewThemeDispatcher.onId(convBannerId) { v ->
+            (v as? ViewGroup)?.let { banner ->
+                runCatching { clearConvBanner(banner) }
+                    .onFailure { XposedBridge.log("[$TAG] clearConvBanner threw: $it") }
+            }
+        }
         if (convHolderId != 0) ViewThemeDispatcher.onId(convHolderId) { v ->
             val holder = v as? ViewGroup ?: return@onId
             convHolderRef = WeakReference(holder)
@@ -876,6 +885,8 @@ object GlassHook {
         if (unreadTvId != 0) ViewThemeDispatcher.onId(unreadTvId) { v ->
             // The band is the parent's flat colour; the pill shape belongs on the text.
             (v.parent as? View)?.let { p -> if (p.background != null) clearBg(p, "unread band") }
+            // Stock leaves this label unpadded and unbacked, so the pill needs the band's own 6dp back.
+            padUnreadPill(v)
             liquidFrostOnLayout(v, keepPadding = true)
         }
         // info is one of the most reused ids in the app, hence the activity scope.
@@ -1369,10 +1380,7 @@ object GlassHook {
             .filter { it != 0 }
             .toIntArray()
         runCatching {
-            val p = XSharedPreferences(
-                BuildConfig.APPLICATION_ID,
-                Prefs.FILE,
-            )
+            val p = ModulePrefs.open()
             p.reload()
             fabColored = p.getInt(Prefs.OVR_FAB_BG, 0) != 0
             miniFabColored = p.getInt(Prefs.OVR_MINI_FAB_BG, 0) != 0

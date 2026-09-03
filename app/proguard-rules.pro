@@ -19,3 +19,7 @@
 # Standard Xposed API: keep its annotations
 -keep class de.robv.android.xposed.** { *; }
 -keep interface de.robv.android.xposed.** { *; }
+
+# Modern module contract: the entry list is rewritten on obfuscation and the service client is reflective
+-adaptresourcefilecontents META-INF/xposed/java_init.list
+-keep class io.github.libxposed.** { *; }

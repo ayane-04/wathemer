@@ -21,6 +21,18 @@ class BackdropCapture(
     private val params: GlassParams,
 ) {
 
+    companion object {
+        /**
+         * True only while live views are being drawn into a pane's own RenderNode. A ripple drawn
+         * there arms its animator against that node, and the frame's real draw then throws
+         * IllegalStateException("Target already set!") from RenderNodeAnimator.setTarget.
+         */
+        @Volatile
+        @JvmStatic
+        var capturing: Boolean = false
+            private set
+    }
+
     /** The subtree to blur. Must not be an ancestor of [host]. Null disables capture. */
     var source: View? = null
         set(value) {
@@ -102,6 +114,7 @@ class BackdropCapture(
 
         node.setPosition(0, 0, w, h)
         val canvas = node.beginRecording(w, h)
+        capturing = true
         try {
             // Scale first, then translate: the offsets are in pre-downsample pixels.
             canvas.scale(1f / scale, 1f / scale)
@@ -133,6 +146,7 @@ class BackdropCapture(
                 src.draw(canvas)
             }
         } finally {
+            capturing = false
             // endRecording must run even if draw() throws, or every later beginRecording throws too.
             node.endRecording()
         }

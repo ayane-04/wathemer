@@ -13,19 +13,18 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
-import com.wathemer.app.BuildConfig
+import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.WaIds
 import com.wathemer.app.hooks.glass.GlassHook
 import com.wathemer.app.hooks.waId
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.io.File
 
 class WallpaperImage private constructor(
-    private val xprefs: XSharedPreferences,
+    private val xprefs: ModulePrefs.WtPrefs,
 ) {
 
     /** Sticky true only after a fully successful inject; a failed inject must leave it false or siblings go transparent over nothing. */
@@ -39,7 +38,7 @@ class WallpaperImage private constructor(
     fun isWallpaperActive(): Boolean = wallpaperActive
 
     private fun installInternal() {
-        // Enabled check lives in the callback so toggles apply without restart; depends on xposedsharedprefs=true in the manifest.
+        // Enabled check lives in the callback so a toggle applies on the next Activity create.
         XposedHelpers.findAndHookMethod(
             Activity::class.java, "onPostCreate", Bundle::class.java,
             object : XC_MethodHook() {
@@ -310,12 +309,9 @@ class WallpaperImage private constructor(
         var INSTANCE: WallpaperImage? = null
             private set
 
-        /** Must run before any feature that branches on INSTANCE at install time, like HomeActivityHook's wallpaper gates. */
+        /** Sets [INSTANCE]; siblings read wallpaper state through it, so this client stays in ORDER_MAIN. */
         fun install(classLoader: ClassLoader) {
-            val xprefs = XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-                makeWorldReadable()
-                reload()
-            }
+            val xprefs = ModulePrefs.open()
             val instance = WallpaperImage(xprefs)
             INSTANCE = instance
             instance.installInternal()

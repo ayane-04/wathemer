@@ -13,11 +13,9 @@ import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.hooks.dispatch.TextColorDispatcher
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
 import com.wathemer.app.settings.prefs.Prefs
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import java.util.WeakHashMap
 
@@ -25,12 +23,7 @@ private const val TAG = "WaThemer.ActionMode"
 
 object ActionModeColors {
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable()
-            reload()
-        }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     fun install(app: Application) {
         xprefs.reload()

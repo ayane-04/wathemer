@@ -5,11 +5,9 @@ import android.content.res.ColorStateList
 import android.graphics.Paint
 import android.graphics.drawable.Drawable
 import android.util.TypedValue
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.util.DrawableColors
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 
@@ -18,11 +16,9 @@ object ThemeHook {
 
     private const val TAG = "WaThemer"
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable()
-            reload()
-            XposedBridge.log("[$TAG] XSharedPreferences file=${file?.absolutePath}, readable=${file?.canRead()}, size=${file?.length()}")
+    private val xprefs: ModulePrefs.WtPrefs by lazy {
+        ModulePrefs.open().also {
+            XposedBridge.log("[$TAG] remote preferences opened: ${it.all.size} keys")
         }
     }
 
@@ -51,8 +47,7 @@ object ThemeHook {
         val background = xprefs.getInt(Prefs.KEY_BACKGROUND, 0)
         val text = xprefs.getInt(Prefs.KEY_TEXT, 0)
         XposedBridge.log(
-            "[$TAG] reloadColors: file=${xprefs.file?.absolutePath} " +
-            "exists=${xprefs.file?.exists()} size=${xprefs.file?.length()} " +
+            "[$TAG] reloadColors: remote store ${xprefs.all.size} keys " +
             "-> primary=#%08x bg=#%08x text=#%08x".format(primary, background, text)
         )
         ColorMap.rebuild(primary, background, text)

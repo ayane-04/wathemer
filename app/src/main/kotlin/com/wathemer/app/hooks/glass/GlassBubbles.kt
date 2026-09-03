@@ -12,16 +12,15 @@ import android.view.ViewTreeObserver
 import android.widget.AbsListView
 import android.widget.FrameLayout
 import android.widget.ListView
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.glass.GlassBubbleDrawable
 import com.wathemer.app.glass.GlassBubblePane
 import com.wathemer.app.glass.GlassParams
 import com.wathemer.app.glass.RectList
+import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.dexkit.Deobfuscator
 import com.wathemer.app.settings.prefs.GlassDefaults
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
@@ -74,10 +73,7 @@ internal fun installBubbleGlass(app: Application) {
     var left = 0
     var right = 0
     runCatching {
-        val p = XSharedPreferences(
-            BuildConfig.APPLICATION_ID,
-            Prefs.FILE,
-        )
+        val p = ModulePrefs.open()
         p.reload()
         left = p.getInt(Prefs.BUBBLE_LEFT_BG, 0)
         right = p.getInt(Prefs.BUBBLE_RIGHT_BG, 0)

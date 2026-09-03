@@ -4,6 +4,10 @@ kotlin = "2.2.21"
 
 xposed-legacy = "82"
 
+# Modern module contract. api 101: the last level whose class loader still serves de.robv.android.xposed.
+libxposed-api = "101.0.1"
+libxposed-service = "101.0.0"
+
 activity-compose = "1.10.1"
 compose-bom = "2025.10.01"
 material = "1.13.0"
@@ -15,6 +19,10 @@ ucrop = "2.2.10"
 [libraries]
 # Xposed (compileOnly; provided at runtime by LSPosed)
 libxposed-legacy = { group = "de.robv.android.xposed", name = "api", version.ref = "xposed-legacy" }
+
+# Modern entry (compileOnly; the framework provides its own at runtime) and the settings-side service client (bundled).
+libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed-api" }
+libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "libxposed-service" }
 
 # AndroidX core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }

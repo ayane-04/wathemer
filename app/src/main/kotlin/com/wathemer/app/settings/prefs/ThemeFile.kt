@@ -26,10 +26,25 @@ data class ThemeDoc(
     val bubbles: ThemeBubbles?,
     val flags: Map<String, Boolean>,
     val font: ThemeFont?,
+    val glass: ThemeGlass?,
 )
 
 /** [hasImage] says whether wallpaper.png is in the archive; without it there is nothing to point the store at. */
 data class ThemeWallpaper(val hasImage: Boolean, val enabled: Boolean, val dim: Int, val blur: Int)
+
+/** The glass sliders. Carries the look, never [Prefs.KEY_GLASS_ENABLED], which the wallpaper gate still owns. */
+data class ThemeGlass(
+    val blur: Int,
+    val tint: Int,
+    val displace: Int,
+    val bevel: Int,
+    val radius: Int,
+    val gamma: Int,
+    val rim: Int,
+    val rimWidth: Int,
+    val rimAngle: Int,
+    val bubbleMerge: Boolean,
+)
 
 /** Shapes travel as asset names, never as the stored index: the registry is ordered and a removal renumbers it. */
 data class ThemeBubbles(val incoming: String?, val outgoing: String?)
@@ -241,6 +256,23 @@ object ThemeFile {
                     .put("name", f.name),
             )
         }
+        // A new section rather than a format bump: an older reader skips what it does not know.
+        doc.glass?.let { g ->
+            root.put(
+                "glass",
+                JSONObject()
+                    .put("blur", g.blur)
+                    .put("tint", g.tint)
+                    .put("displace", g.displace)
+                    .put("bevel", g.bevel)
+                    .put("radius", g.radius)
+                    .put("gamma", g.gamma)
+                    .put("rim", g.rim)
+                    .put("rimWidth", g.rimWidth)
+                    .put("rimAngle", g.rimAngle)
+                    .put("bubbleMerge", g.bubbleMerge),
+            )
+        }
         return root.toString(2)
     }
 
@@ -297,6 +329,22 @@ object ThemeFile {
             )
         }
 
+        // Clamped to the same ranges the Prefs setters use; applyThemeWrite puts ints in raw.
+        val glass = root.optJSONObject("glass")?.let { o ->
+            ThemeGlass(
+                blur = o.optInt("blur", GlassDefaults.BLUR).coerceIn(4, 40),
+                tint = o.optInt("tint", GlassDefaults.TINT).coerceIn(0, 80),
+                displace = o.optInt("displace", GlassDefaults.DISPLACE).coerceIn(0, 60),
+                bevel = o.optInt("bevel", GlassDefaults.BEVEL).coerceIn(5, 40),
+                radius = o.optInt("radius", GlassDefaults.RADIUS).coerceIn(0, 40),
+                gamma = o.optInt("gamma", GlassDefaults.GAMMA).coerceIn(30, 100),
+                rim = o.optInt("rim", GlassDefaults.RIM).coerceIn(0, 100),
+                rimWidth = o.optInt("rimWidth", GlassDefaults.RIM_WIDTH).coerceIn(1, 4),
+                rimAngle = o.optInt("rimAngle", GlassDefaults.RIM_ANGLE).coerceIn(0, 360),
+                bubbleMerge = o.optBoolean("bubbleMerge", GlassDefaults.BUBBLE_MERGE),
+            )
+        }
+
         return ThemeDoc(
             name = sanitizeName(root.optString("name")),
             createdAt = root.optLong("createdAt", 0L),
@@ -306,6 +354,7 @@ object ThemeFile {
             bubbles = bubbles,
             flags = flags,
             font = font,
+            glass = glass,
         )
     }
 

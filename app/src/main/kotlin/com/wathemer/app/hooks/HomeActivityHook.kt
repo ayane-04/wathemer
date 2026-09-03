@@ -34,7 +34,6 @@ import com.wathemer.app.hooks.wallpaper.WallpaperImage
 import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.util.findActivity
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
@@ -52,12 +51,7 @@ object HomeActivityHook {
     private const val WP_TOOLBAR_TAG = "wt_toolbar"
     private const val WP_APPBAR_TAG = "wt_appbar"
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable()
-            reload()
-        }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     fun install(classLoader: ClassLoader) {
         try {

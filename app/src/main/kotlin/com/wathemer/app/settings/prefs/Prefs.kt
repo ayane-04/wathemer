@@ -15,7 +15,7 @@ import org.json.JSONObject
 class Prefs(
     private val sp: SharedPreferences,
     private val context: Context,
-    /** True when the framework redirected this store; false means writes land in a private file no hook reads, and the UI must say so. */
+    /** True when the framework served this store; false means writes land in a private file no hook reads, and the UI must say so. */
     val moduleStoreActive: Boolean = true,
 ) {
 
@@ -288,7 +288,7 @@ class Prefs(
     /** Override token by key; 0 means not overridden, which callers read as "use global". */
     fun getOverride(key: String): Int = sp.getInt(key, 0)
 
-    /** Generic setter; 0 clears the override. Cross-process reads ride the framework's xposedsharedprefs redirect, not markWorldReadable. */
+    /** Generic setter; 0 clears the override. The hook side reads these through the framework store. */
     fun setOverride(key: String, value: Int) {
         commitInt(key, value)
     }
@@ -315,7 +315,6 @@ class Prefs(
             ALL_COLOR_OVERRIDE_KEYS.forEach { remove(it) }
         }.commit()
         commitChecked("resetToStock", ok)
-        markWorldReadable()
         if (ok) Log.i(TAG, "resetToStock: cleared globals + ${ALL_COLOR_OVERRIDE_KEYS.size} overrides")
     }
 
@@ -337,7 +336,6 @@ class Prefs(
             ALL_COLOR_OVERRIDE_KEYS.forEach { remove(it) }
         }.commit()
         commitChecked("applyPresetFull", ok)
-        markWorldReadable()
         if (ok) Log.i(TAG, "applyPresetFull: globals set + ${ALL_COLOR_OVERRIDE_KEYS.size} colour overrides cleared (primary=#%08x bg=#%08x text=#%08x)".format(primary, background, text))
     }
 
@@ -360,14 +358,13 @@ class Prefs(
             }
         }.commit()
         commitChecked("applyThemeWrite", ok)
-        markWorldReadable()
         if (ok) Log.i(TAG, "applyThemeWrite: cleared ${clear.size}, wrote ${values.size}")
         return ok
     }
 
     /**
-     * Snapshots the store to filesDir so the next build can restore it. The framework store is
-     * unreachable once this module stops being a legacy one, and filesDir survives an update.
+     * Snapshots the store to filesDir, the one place that survives an update. It carried the move
+     * off the old store, and it stays: a snapshot import is the recovery path for a framework swap.
      */
     fun exportForMigration(): Int? {
         // A snapshot of the private fallback would be empty and would overwrite a good one.
@@ -395,6 +392,55 @@ class Prefs(
         }.onFailure { Log.w(TAG, "exportForMigration failed: $it") }.getOrNull()
     }
 
+    /** What [importSnapshotIfEmpty] found. [warn] is the case the UI must say out loud. */
+    data class SnapshotImport(val imported: Int, val source: String?, val warn: Boolean)
+
+    /**
+     * One-shot restore into an empty store from the snapshot the previous build wrote. Must run
+     * before the reconcile: an uninstall leaves no snapshot, so the reconcile still clears there.
+     */
+    fun importSnapshotIfEmpty(): SnapshotImport? {
+        if (!moduleStoreActive) return null
+        if (runCatching { sp.all }.getOrNull().orEmpty().isNotEmpty()) return null
+        val marker = File(context.filesDir, "install.marker")
+        val source = listOf(EXPORT_FILE, "prefs_before_reset.json")
+            .map { File(context.filesDir, it) }
+            .firstOrNull { it.length() > 0 }
+        if (source == null) {
+            // A marker with nothing behind it means an update from a build that never exported.
+            return SnapshotImport(0, null, warn = marker.exists())
+        }
+        val entries = runCatching { JSONObject(source.readText()) }
+            .onFailure { Log.w(TAG, "import: unreadable snapshot ${source.name}: $it") }
+            .getOrNull() ?: return SnapshotImport(0, source.name, warn = true)
+        var wrote = 0
+        val e = sp.edit()
+        for (key in entries.keys()) {
+            val entry = entries.optJSONObject(key) ?: continue
+            val value = entry.opt("value") ?: continue
+            when (value) {
+                is Int -> { e.putInt(key, value); wrote++ }
+                is Long -> if (entry.optString("type") == "Integer") { e.putInt(key, value.toInt()); wrote++ }
+                           else { e.putLong(key, value); wrote++ }
+                is Boolean -> { e.putBoolean(key, value); wrote++ }
+                is String -> { e.putString(key, value); wrote++ }
+                is JSONArray -> {
+                    val set = (0 until value.length()).mapTo(mutableSetOf()) { value.getString(it) }
+                    e.putStringSet(key, set); wrote++
+                }
+                else -> Log.w(TAG, "import: $key carries ${value.javaClass.simpleName}, skipped")
+            }
+        }
+        val ok = e.commit()
+        commitChecked("importSnapshot", ok)
+        if (ok) {
+            // Renamed, not deleted: the bytes stay recoverable and the import can never run twice.
+            runCatching { source.renameTo(File(context.filesDir, "${source.name}.imported")) }
+            Log.i(TAG, "importSnapshot: $wrote settings from ${source.name}")
+        }
+        return SnapshotImport(if (ok) wrote else 0, source.name, warn = !ok)
+    }
+
     /** Logs failed commits: after a reinstall the store can belong to the old UID and writes silently vanish. */
     private fun commitChecked(key: String, ok: Boolean) {
         if (!ok) Log.w(TAG, "commit FAILED for $key: the settings file is not writable by this UID")
@@ -402,23 +448,19 @@ class Prefs(
 
     private fun commitInt(key: String, value: Int) {
         commitChecked(key, sp.edit().putInt(key, value).commit())
-        markWorldReadable()
-        Log.i(TAG, "commitInt $key = #%08x -> ${storeDescription()}".format(value))
+        Log.i(TAG, "commitInt $key = #%08x -> ${if (moduleStoreActive) "framework store" else "private fallback, no hook reads it"}".format(value))
     }
 
     private fun commitLong(key: String, value: Long) {
         commitChecked(key, sp.edit().putLong(key, value).commit())
-        markWorldReadable()
     }
 
     private fun commitString(key: String, value: String) {
         commitChecked(key, sp.edit().putString(key, value).commit())
-        markWorldReadable()
     }
 
     private fun commitBoolean(key: String, value: Boolean) {
         commitChecked(key, sp.edit().putBoolean(key, value).commit())
-        markWorldReadable()
         Log.i(TAG, "commitBoolean $key = $value")
     }
 
@@ -429,36 +471,10 @@ class Prefs(
                 if (value == null) remove(key) else putString(key, value)
             }.commit(),
         )
-        markWorldReadable()
         Log.i(TAG, "commitStringOrRemove $key = $value")
     }
 
-    private fun prefsFile(): File = File(File(context.filesDir.parent, "shared_prefs"), "$FILE.xml")
 
-    /** Where a write actually landed. Never log [prefsFile] as the destination: it sits unused while the redirect is active. */
-    private fun storeDescription(): String = if (moduleStoreActive) {
-        "framework prefs store (redirected)"
-    } else {
-        val f = prefsFile()
-        "${f.absolutePath} (${f.length()} bytes, PRIVATE, no hook reads this)"
-    }
-
-    /** Chmod the private prefs dir + file world-readable; only the legacy non-redirected path needs it. */
-    private fun markWorldReadable() {
-        // The framework's copy is not ours to re-permission; only the legacy private file needs this.
-        if (moduleStoreActive) return
-        try {
-            val sharedDir = File(context.filesDir.parent, "shared_prefs")
-            sharedDir.setReadable(true, false)
-            sharedDir.setExecutable(true, false)
-            val f = prefsFile()
-            if (f.exists()) {
-                f.setReadable(true, false)
-            }
-        } catch (t: Throwable) {
-            Log.w(TAG, "markWorldReadable failed: $t")
-        }
-    }
 
     companion object {
         private const val TAG = "WaThemer.Prefs"
@@ -651,6 +667,13 @@ class Prefs(
             KEY_SYSTEM_BARS_ENABLED, KEY_SYSTEM_BAR_AUTO_ICONS, KEY_FONT_MAP_MONOSPACE,
         )
 
+        /** The glass sliders as one list, so the writable set and the exporter cannot drift apart. */
+        val THEME_GLASS_KEYS: List<String> = listOf(
+            KEY_GLASS_BLUR, KEY_GLASS_TINT, KEY_GLASS_DISPLACE, KEY_GLASS_BEVEL, KEY_GLASS_RADIUS,
+            KEY_GLASS_GAMMA, KEY_GLASS_RIM, KEY_GLASS_RIM_WIDTH, KEY_GLASS_RIM_ANGLE,
+            KEY_GLASS_BUBBLE_MERGE,
+        )
+
         /** Every key an imported theme may touch. A key missing here is unreachable from a theme file, which is the whole guarantee. */
         val THEME_WRITABLE_KEYS: Set<String> = (
             THEME_COLOR_KEYS + THEME_FLAG_KEYS + listOf(
@@ -659,7 +682,7 @@ class Prefs(
                 KEY_CUSTOM_FONT, KEY_FONT_USER_FILE, KEY_FONT_USER_NAME, KEY_FONT_USER_STAMP,
                 // Here only so a theme with no wallpaper can switch glass off; no theme file ever names it.
                 KEY_GLASS_ENABLED,
-            )
+            ) + THEME_GLASS_KEYS
             ).toSet()
 
         /** WA's own dark-mode colours, mostly UI display fallbacks. Not settings-only: SystemBars and WallpaperImage read them hook-side, so grep before repurposing. */
@@ -669,19 +692,13 @@ class Prefs(
 
         const val MAX_RECENTS = 12
 
-        /** MODE_WORLD_READABLE is the LSPosed handshake; the framework redirects the store to where hooks read it. SecurityException = module not active, private fallback. */
-        @Suppress("DEPRECATION", "WorldReadableFiles")
-        fun open(context: Context): Prefs {
-            var active = true
-            val sp = try {
-                context.getSharedPreferences(FILE, Context.MODE_WORLD_READABLE)
-            } catch (e: SecurityException) {
-                // From here on writes land in a private file no hooked process reads.
-                Log.w(TAG, "MODE_WORLD_READABLE rejected; module not active? Falling back to MODE_PRIVATE: $e")
-                active = false
-                context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        /** [remote] is the framework's store; null means no framework answered and writes land where no hook reads. */
+        fun open(context: Context, remote: SharedPreferences?): Prefs {
+            if (remote == null) {
+                Log.w(TAG, "framework store unavailable; falling back to MODE_PRIVATE")
+                return Prefs(context.getSharedPreferences(FILE, Context.MODE_PRIVATE), context, moduleStoreActive = false)
             }
-            return Prefs(sp, context, moduleStoreActive = active)
+            return Prefs(remote, context, moduleStoreActive = true)
         }
     }
 }

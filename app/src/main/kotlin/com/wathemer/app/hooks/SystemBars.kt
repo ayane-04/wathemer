@@ -11,11 +11,9 @@ import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.FrameLayout
-import com.wathemer.app.BuildConfig
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 
@@ -31,9 +29,7 @@ object SystemBars {
         "mediaview", "mediaalbum", "voip", "statusplayback", "watchandbrowse", "cameraactivity",
     )
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply { makeWorldReadable(); reload() }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     fun install() {
         // Hook unconditionally; the gates live in the callbacks so toggling applies on the next Activity create.

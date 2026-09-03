@@ -6,7 +6,6 @@ import android.app.Application
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
-import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.concurrent.atomic.AtomicBoolean
@@ -30,9 +29,9 @@ object HostAppInit {
     private val fired = AtomicBoolean(false)
 
     /** Finds the host's own onCreate override. Must run before any [onCreate] registration. */
-    fun resolve(lpparam: XC_LoadPackage.LoadPackageParam) {
+    fun resolve(appClassName: String?, classLoader: ClassLoader) {
         // Loading the host class early must never cost the installers that follow, so nothing escapes here.
-        val m = runCatching { findHostOnCreate(lpparam) }
+        val m = runCatching { findHostOnCreate(appClassName, classLoader) }
             .onFailure { XposedBridge.log("[$TAG] anchor lookup threw: $it") }
             .getOrNull()
         hostOnCreate = m
@@ -93,9 +92,9 @@ object HostAppInit {
     }
 
     /** First declared no-arg onCreate at or above the manifest's application class, stopping short of the framework's. */
-    private fun findHostOnCreate(lpparam: XC_LoadPackage.LoadPackageParam): Method? {
-        val declared = lpparam.appInfo?.className ?: return null
-        var c: Class<*>? = XposedHelpers.findClassIfExists(declared, lpparam.classLoader)
+    private fun findHostOnCreate(appClassName: String?, classLoader: ClassLoader): Method? {
+        val declared = appClassName ?: return null
+        var c: Class<*>? = XposedHelpers.findClassIfExists(declared, classLoader)
         while (c != null && c != Application::class.java) {
             val m = runCatching { c!!.getDeclaredMethod("onCreate") }.getOrNull()
             // Walking up from the concrete class, the first override is the one virtual dispatch reaches.

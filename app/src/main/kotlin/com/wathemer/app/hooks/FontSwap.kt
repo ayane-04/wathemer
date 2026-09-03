@@ -12,7 +12,6 @@ import android.widget.TextView
 import com.wathemer.app.BuildConfig
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.io.File
@@ -35,9 +34,7 @@ object FontSwap {
     private val reentry = ThreadLocal.withInitial { false }
     @Volatile private var loggedRestampFail = false
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply { makeWorldReadable(); reload() }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     fun install() {
         xprefs.reload()

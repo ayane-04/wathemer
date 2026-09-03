@@ -15,7 +15,6 @@ import com.wathemer.app.hooks.dexkit.Deobfuscator
 import com.wathemer.app.settings.prefs.BubbleStyles
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
@@ -28,11 +27,7 @@ object BubbleShapes {
     private val STOCK_DARK_INCOMING = BubbleStyles.STOCK_DARK_INCOMING
     private val STOCK_DARK_OUTGOING = BubbleStyles.STOCK_DARK_OUTGOING
 
-    private val xprefs: XSharedPreferences by lazy {
-        XSharedPreferences(BuildConfig.APPLICATION_ID, Prefs.FILE).apply {
-            makeWorldReadable(); reload()
-        }
-    }
+    private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     private var incomingStyle = 0   // 0 = off (stock); else nine-patch index = style - 1
     private var outgoingStyle = 0
