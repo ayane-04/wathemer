@@ -15,6 +15,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewParent
 import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -648,15 +649,33 @@ internal fun syncToolbarTitle() {
 
 /** The big Chats title, child 0 of the vertical container so everything reflows; text read off the nav because string names are stripped. */
 internal fun injectBigTitle(bar: View) {
-    val container = bar.parent as? ViewGroup ?: return
-    // my_search_bar is not home-only; same fails-closed guard as [extendList].
-    if (!WaIds.classIs(container, "ConversationsContainer")) return
+    val direct = bar.parent as? ViewGroup ?: return
+    // Two layouts: the bar beside the list in the container, or seated inside the list as its header row.
+    val seated = !WaIds.classIs(direct, "ConversationsContainer")
+    var list: View? = null
+    if (seated) {
+        var p: ViewParent? = bar.parent
+        while (p != null) {
+            if (p is View && p.id == android.R.id.list) { list = p; break }
+            p = p.parent
+        }
+    }
+    val container = if (seated) list?.parent as? ViewGroup else direct
+    // my_search_bar is not home-only; same fails-closed guard as [extendList], but a third layout must not vanish in silence.
+    if (container == null || !WaIds.classIs(container, "ConversationsContainer")) {
+        logOnce(
+            "big title declined: container=${container?.javaClass?.simpleName ?: "none"}" +
+                " parent=${direct.javaClass.simpleName} seated=$seated"
+        )
+        return
+    }
     if (container.getTag(titleTag) != null) return
     val barLp = bar.layoutParams as? ViewGroup.MarginLayoutParams ?: return
     container.setTag(titleTag, true)
 
-    // The clearance the search bar was holding for the header now belongs to the title.
-    val headerClearance = barLp.topMargin
+    // The chrome clearance moves onto the title: the bar's own margin, or the list's padding once the bar is a row.
+    val headerClearance =
+        if (seated) (list?.paddingTop ?: 0) + container.dp(4f).toInt() else barLp.topMargin
     val ctx = container.context
     val tv = TextView(ctx).apply {
         text = navLabel() ?: "Chats"
@@ -679,9 +698,13 @@ internal fun injectBigTitle(bar: View) {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = headerClearance },
     )
-    barLp.topMargin = container.dp(2f).toInt()
-    bar.layoutParams = barLp
-    XposedBridge.log("[$TAG] big title '${tv.text}' inserted (clearance=$headerClearance)")
+    // A seated bar keeps its margin: it is the list's row inset, and the extension recurrence lands the rows under the title.
+    if (!seated) {
+        barLp.topMargin = container.dp(2f).toInt()
+        bar.layoutParams = barLp
+    }
+    val where = if (seated) "bar seated in the list" else "bar beside the list"
+    XposedBridge.log("[$TAG] big title '${tv.text}' inserted (clearance=$headerClearance, $where)")
 }
 
 private var loggedHomeSyncThrow = false

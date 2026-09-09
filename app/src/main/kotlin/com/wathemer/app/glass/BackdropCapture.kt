@@ -8,13 +8,12 @@ import android.graphics.Shader
 import android.os.Build
 import android.util.Log
 import android.view.View
-import android.view.ViewGroup
 import android.view.ViewParent
 import kotlin.math.ceil
 
 /**
- * Captures the content behind a glass view into a [RenderNode], blurred. [source] must be a
- * sibling drawn before the host, never an ancestor: that makes capture recursion impossible.
+ * Captures the content behind a glass view into a [RenderNode], blurred. A source that holds this
+ * pane, directly or through another pane's capture, is refused per capture: the render tree would loop.
  */
 class BackdropCapture(
     private val host: View,
@@ -23,22 +22,26 @@ class BackdropCapture(
 
     companion object {
         /**
-         * True only while live views are being drawn into a pane's own RenderNode. A ripple drawn
-         * there arms its animator against that node, and the frame's real draw then throws
-         * IllegalStateException("Target already set!") from RenderNodeAnimator.setTarget.
+         * True only while live views are drawn into a pane's own RenderNode: a ripple drawn there arms its
+         * animator against that node, and the frame's real draw throws "Target already set!".
          */
         @Volatile
         @JvmStatic
         var capturing: Boolean = false
             private set
+
+        /** Every attached capture, main thread only; the cycle guard walks it on each capture. */
+        private val live = ArrayList<BackdropCapture>()
+        private val stack = ArrayList<BackdropCapture>()
+        private val visited = ArrayList<BackdropCapture>()
+
+        /** Set by the hook side so a refusal reaches the module log; the engine has no Xposed. */
+        @JvmStatic
+        var onRefused: ((String) -> Unit)? = null
     }
 
-    /** The subtree to blur. Must not be an ancestor of [host]. Null disables capture. */
+    /** The subtree to blur; null disables capture. Not checked here: wiring runs before the host has a parent. */
     var source: View? = null
-        set(value) {
-            assertNotAncestor(value)
-            field = value
-        }
 
     /** Views painted beneath [source] at their own screen positions; no legal backdrop contains the wallpaper. */
     var underlay: List<View> = emptyList()
@@ -83,8 +86,7 @@ class BackdropCapture(
 
     /** Capture [source] into [node] at 1/downsample, region behind [host] at the origin; true when drawable. */
     fun capture(): Boolean {
-        val src = source
-        verifyAncestryOnce(src)
+        val src = source?.takeIf { safeToCapture(it) }
         // Underlay-only panes are legal: for some panes every capturable subtree is an ancestor.
         if (src == null && underlay.isEmpty()) return false.also { hasContent = false }
         if (src != null && !src.isLaidOut) return false
@@ -284,41 +286,67 @@ class BackdropCapture(
         )
     }
 
-    /** One-shot latch so [verifyAncestryOnce] only walks the tree on the first draw. */
-    private var ancestryChecked = false
-
-    /** The setter checked while host.parent was null; re-verify attached, log and drop rather than throw mid-draw. */
-    private fun verifyAncestryOnce(candidate: View?) {
-        if (ancestryChecked || candidate == null || !host.isAttachedToWindow) return
-        ancestryChecked = true
-        var p: ViewParent? = host.parent
-        while (p is ViewGroup) {
-            if (p === candidate) {
-                Log.w(
-                    "WaThemer.Capture",
-                    "BackdropCapture: source ${candidate.javaClass.simpleName} IS an ancestor of " +
-                        "this pane; capture disabled to avoid recursing into an already-recording " +
-                        "node. The pane will draw its underlay only.",
-                )
-                source = null
-                return
-            }
-            p = p.parent
-        }
+    /** Register while attached and [unregister] on detach. Main thread only. */
+    fun register() {
+        if (!live.contains(this)) live.add(this)
     }
 
-    /** The core invariant: an ancestor backdrop would recurse and crash, so throw at wiring time. */
-    private fun assertNotAncestor(candidate: View?) {
-        if (candidate == null) return
-        var p = host.parent
-        while (p is ViewGroup) {
-            check(p !== candidate) {
-                "BackdropCapture.source must not be an ancestor of the glass view; " +
-                    "capturing it would recurse. Make the backdrop a SIBLING drawn before " +
-                    "the glass view instead. See the class kdoc."
+    fun unregister() {
+        live.remove(this)
+    }
+
+    private var refusedFor: View? = null
+
+    /** False when drawing [src] would put this pane's node inside its own capture; HWUI never stops that recursion. */
+    private fun safeToCapture(src: View): Boolean {
+        if (!host.isAttachedToWindow) return false
+        val reason = when {
+            isAncestorOf(src, host) -> "it is an ancestor of the pane"
+            reachesBack(src) -> "a pane inside it captures this one"
+            else -> null
+        }
+        if (reason == null) {
+            refusedFor = null
+            return true
+        }
+        // Once per source: the sync that re-arms it runs every layout and would otherwise flood the log.
+        if (refusedFor !== src) {
+            refusedFor = src
+            val where = (host.parent as? View)?.let { describe(it) } ?: "?"
+            onRefused?.invoke("capture of ${describe(src)} refused for the pane in $where: $reason; underlay only")
+        }
+        return false
+    }
+
+    /** True when some pane under [src] captures a subtree holding this pane: the chain would come back round. */
+    private fun reachesBack(src: View): Boolean {
+        stack.clear()
+        visited.clear()
+        for (c in live) if (c !== this && c.source != null && isAncestorOf(src, c.host)) stack.add(c)
+        while (stack.isNotEmpty()) {
+            val q = stack.removeAt(stack.size - 1)
+            if (visited.contains(q)) continue
+            visited.add(q)
+            val qs = q.source ?: continue
+            if (isAncestorOf(qs, host)) return true
+            for (c in live) {
+                if (c !== this && c.source != null && !visited.contains(c) && isAncestorOf(qs, c.host)) stack.add(c)
             }
+        }
+        return false
+    }
+
+    private fun isAncestorOf(a: View, v: View): Boolean {
+        var p: ViewParent? = v.parent
+        while (p != null) {
+            if (p === a) return true
             p = p.parent
         }
-        check(candidate !== host) { "BackdropCapture.source cannot be the glass view itself." }
+        return false
+    }
+
+    private fun describe(v: View): String {
+        val name = runCatching { v.resources.getResourceEntryName(v.id) }.getOrNull() ?: v.id.toString()
+        return "${v.javaClass.simpleName}#$name"
     }
 }

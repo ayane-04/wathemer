@@ -3,6 +3,7 @@ package com.wathemer.app
 import android.os.Handler
 import android.os.Looper
 import com.wathemer.app.hooks.ActionModeColors
+import com.wathemer.app.hooks.ActivityLifecycle
 import com.wathemer.app.hooks.BubbleAlbumClipping
 import com.wathemer.app.hooks.BubbleColors
 import com.wathemer.app.hooks.BubbleShapes
@@ -65,6 +66,9 @@ class ModernEntry : XposedModule() {
                 val pi = app.packageManager.getPackageInfo(app.packageName, 0)
                 XposedBridge.log("[$TAG] host ${app.packageName} ${pi.versionName} (${pi.longVersionCode})")
             }
+            // Registers the one Activity callback set; every lifecycle client rides it, whenever it registered.
+            try { ActivityLifecycle.attach(app) }
+            catch (t: Throwable) { HookLog.fail("lifecycle/activity", t) }
             // Order here is not load-bearing; anything that must run after all installers must be posted, not placed last.
             try { WallpaperImage.install(classLoader); HookLog.arm("install/WallpaperImage") }
             catch (t: Throwable) { HookLog.fail("install/WallpaperImage", t) }

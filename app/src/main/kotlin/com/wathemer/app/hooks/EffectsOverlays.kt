@@ -9,15 +9,12 @@ import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
-import android.os.Bundle
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.wathemer.app.settings.prefs.Prefs
-import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
 import java.util.Random
 import kotlin.math.cos
 import kotlin.math.sin
@@ -31,16 +28,12 @@ object EffectsOverlays {
     fun install() {
         val xprefs = ModulePrefs.open()
         if (!xprefs.getBoolean(Prefs.KEY_EFFECT_SNOW, false)) return
-        XposedHelpers.findAndHookMethod(
-            Activity::class.java, "onPostCreate", Bundle::class.java,
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(p: MethodHookParam) {
-                    val a = p.thisObject as? Activity ?: return
-                    if (a.packageName != "com.whatsapp") return
-                    runCatching { attach(a) }
-                }
-            },
-        )
+        // Dispatched after the wallpaper client; the flakes sit in content, above the wallpaper, whichever attaches first.
+        ActivityLifecycle.onCreated("snow") { a ->
+            if (a.packageName == "com.whatsapp") {
+                runCatching { attach(a) }
+            }
+        }
         XposedBridge.log("$TAG: snow armed")
     }
 

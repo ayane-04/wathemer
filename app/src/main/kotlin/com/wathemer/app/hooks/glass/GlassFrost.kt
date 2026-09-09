@@ -25,6 +25,8 @@ internal fun frost(
     ignorePadding: Boolean = false,
     /** Force the radius: half the height suits a pill, but an inner corner rounder than its outer one reads as a mistake. */
     radiusOverride: Float? = null,
+    /** Named, the frost is re-asserted by the setBackgroundDrawable interceptor; for views the app repaints without a layout. */
+    forceLabel: String? = null,
 ) {
     if (v.width <= 0 || v.height <= 0) return
     // Taller than wide is a divider, not a chip, and the test must use the padded box or real chips like "All" get skipped.
@@ -59,7 +61,7 @@ internal fun frost(
         ignorePadding = ignorePadding,
     )
     v.setTag(frostTag, d)
-    v.background = d
+    if (forceLabel != null) forceBg(v, d, forceLabel) else v.background = d
 }
 
 internal val frostListenerTag = tagKey("wathemer-frost-listener")
@@ -144,12 +146,12 @@ internal fun frostCircleOnLayout(v: View) {
 }
 
 /** Chip treatment kept on layout: guard the registration, never the paint; recycled rows re-bind without a fresh attach. */
-internal fun frostOnLayout(v: View) {
-    runCatching { frost(v) }
+internal fun frostOnLayout(v: View, forceLabel: String? = null) {
+    runCatching { frost(v, forceLabel = forceLabel) }
     if (v.getTag(frostListenerTag) == null) {
         v.setTag(frostListenerTag, true)
         v.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
-            runCatching { frost(view) }
+            runCatching { frost(view, forceLabel = forceLabel) }
         }
     }
 }
@@ -247,9 +249,8 @@ private val stockPadById = HashMap<Int, Rect>()
 private const val UNREAD_PILL_PAD_DP = 6f
 
 /**
- * The unread label ships with `background="@null"` and no vertical padding: the pill and the air
- * around it were the parent band's, which glass clears. Font padding goes too, or the leading is
- * heavier above than below and the text sits low in its own pill.
+ * The unread label ships with `background="@null"` and no vertical padding; the pill and its air were the band's, which glass clears.
+ * Font padding goes too, or the text sits low in its own pill.
  */
 internal fun padUnreadPill(v: View) {
     val tv = v as? TextView ?: return

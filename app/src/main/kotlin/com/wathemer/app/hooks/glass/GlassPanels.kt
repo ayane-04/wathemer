@@ -119,6 +119,7 @@ internal fun panelGlass(panel: View, what: String) {
         )
         panel.setTag(panelGlassTag, glass)
         clearBg(panel, what)
+        clearWindowShells(panel, host, what)
         XposedBridge.log(
             "[$TAG] $what: backdrop=${back?.javaClass?.simpleName ?: "NONE"}" +
                 " ownRadius=${own?.toInt() ?: -1}px"
@@ -137,6 +138,20 @@ internal fun panelGlass(panel: View, what: String) {
 }
 
 // UI-thread scratch, reused like popupRowGlass's paneRect: this runs per pre-draw while any panel shows.
+/** A dialog window's own fill is a shell behind the pane, and the pane's wider corners leave it showing. */
+private fun clearWindowShells(panel: View, host: ViewGroup, what: String) {
+    val act = activityOf(panel) ?: return
+    val root = panel.rootView
+    // Its own window only: an inline panel's root is the Activity's decor, which the wallpaper already clears.
+    if (root === act.window?.decorView) return
+    var v: View? = host
+    while (v != null) {
+        if (v.background != null) clearBg(v, "$what window shell ${v.javaClass.simpleName}")
+        if (v === root) return
+        v = v.parent as? View
+    }
+}
+
 private val panelScratchRect = Rect()
 
 private fun syncPanelGlass(panel: View) {
@@ -235,7 +250,7 @@ private fun glassPopup(pw: PopupWindow) {
 }
 
 /** A menu floats over content, not the wallpaper, so a white tint over a white image leaves white text on white. */
-private const val MENU_SCRIM = 0xB80E1418.toInt()
+internal const val MENU_SCRIM = 0xB80E1418.toInt()
 
 /** GlassBubblePane, not panelGlass: cost stays flat as the menu grows, and one union rect avoids scalloped seams between items. */
 private fun popupRowGlass(content: View, radiusPx: Float?) {
@@ -435,13 +450,14 @@ internal fun glassSelfSheet(v: View, name: String) {
         return
     }
     sheet.setTag(innerGlassTag, true)
-    clearBg(sheet, name)
-    sheet.background = FrostDrawable(
+    // Forced, never assigned after a clear: the interceptor swaps a plain assignment back to the cleared transparent.
+    val stamp = FrostDrawable(
         sheet, bubbleBackdrop(contentRef?.get() ?: sheet),
         sheet.dp(CARD_RADIUS_DP), glassTintColor,
         strokeWidth = sheet.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
         ignorePadding = true,
     )
+    forceBg(sheet, stamp, name)
     logOnce("self sheet glassed: $name (${sheet.javaClass.simpleName})")
 }
 

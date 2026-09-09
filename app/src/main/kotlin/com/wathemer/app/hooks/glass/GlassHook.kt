@@ -21,9 +21,11 @@ import android.view.ViewStub
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import com.wathemer.app.glass.BackdropCapture
 import com.wathemer.app.glass.FrostDrawable
 import com.wathemer.app.glass.GlassParams
 import com.wathemer.app.glass.GlassView
+import com.wathemer.app.hooks.ActivityLifecycle
 import com.wathemer.app.hooks.HookLog
 import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.WaIds
@@ -50,6 +52,12 @@ object GlassHook {
         }
         // Before any pane exists: every capture draws live views, and a ripple in one crashes the frame.
         ensureSelectorGuard()
+        // A refused capture must reach the module log; the engine's own Log.w never does.
+        BackdropCapture.onRefused = { msg ->
+            XposedBridge.log("[$TAG] $msg")
+            HookLog.hit("guard/captureCycle", msg)
+        }
+        HookLog.arm("guard/captureCycle")
         val res = app.resources
         // Density is only available here, so the dp to px conversion cannot live in loadGlassPrefs.
         GlassParams.defaultRimStrokePx =
@@ -141,34 +149,28 @@ object GlassHook {
             }
         }
         // Sub-pages have few stable list ids, but their Activity names are manifest names and never obfuscate.
-        // Attach is per Activity; the card machinery is idempotent and an already treated scroller skips by tag.
-        XposedHelpers.findAndHookMethod(
-            Activity::class.java, "onPostCreate", Bundle::class.java,
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val a = param.thisObject as? Activity ?: return
-                    val name = a.javaClass.name
-                    if (CARDED_ACTIVITY_PREFIXES.none { name.startsWith(it) }) return
-                    // Sheet activities already carry the sheet pane; a card under a sheet is buried work.
-                    if (a.javaClass.simpleName.endsWith("BottomSheetActivity")) return
-                    if (a.javaClass.simpleName.endsWith("Sheet")) return
-                    // Both draw a full-screen doodle SIBLING under the content; a sibling is invisible to the ancestor walk, so they are named.
-                    if (a.javaClass.simpleName == "About" || a.javaClass.simpleName == "Licenses") return
-                    val label = "${name.split('.').getOrElse(2) { "page" }}/${a.javaClass.simpleName}"
-                    // The breadcrumb that separates "hook never fired" from a silent guard.
-                    logOnce("card path armed: $label")
-                    val content =
-                        a.findViewById<ViewGroup>(android.R.id.content) ?: return
-                    content.post {
-                        runCatching {
-                            findPageScroller(content)?.let {
-                                injectContentCard(it, label)
-                            } ?: watchForPageScroller(content, label)
-                        }.onFailure { XposedBridge.log("[$TAG] $label card threw: $it") }
-                    }
-                }
-            },
-        )
+        // Rides the lifecycle callbacks, never Activity.onPostCreate; the card machinery is idempotent and a treated scroller skips by tag.
+        ActivityLifecycle.onCreated("glassCards") { a ->
+            val name = a.javaClass.name
+            if (CARDED_ACTIVITY_PREFIXES.none { name.startsWith(it) }) return@onCreated
+            // Sheet activities already carry the sheet pane; a card under a sheet is buried work.
+            if (a.javaClass.simpleName.endsWith("BottomSheetActivity")) return@onCreated
+            if (a.javaClass.simpleName.endsWith("Sheet")) return@onCreated
+            // Both draw a full-screen doodle SIBLING under the content; a sibling is invisible to the ancestor walk, so they are named.
+            if (a.javaClass.simpleName == "About" || a.javaClass.simpleName == "Licenses") return@onCreated
+            val label = "${name.split('.').getOrElse(2) { "page" }}/${a.javaClass.simpleName}"
+            // The breadcrumb that separates "hook never fired" from a silent guard.
+            logOnce("card path armed: $label")
+            val content =
+                a.findViewById<ViewGroup>(android.R.id.content) ?: return@onCreated
+            content.post {
+                runCatching {
+                    findPageScroller(content)?.let {
+                        injectContentCard(it, label)
+                    } ?: watchForPageScroller(content, label)
+                }.onFailure { XposedBridge.log("[$TAG] $label card threw: $it") }
+            }
+        }
 
         // ── The media gallery's per-tab grids ──────────────────────────────────────────
         // Each tab inflates its grid from a stub that keeps the generic id, so the Activity scopes it.
@@ -206,7 +208,12 @@ object GlassHook {
             f.post {
                 runCatching {
                     clearBg(f, "snackbar")
-                    frost(f, allowSquare = true, ignorePadding = true, radiusOverride = f.dp(10f))
+                    // The menu's scrim, not the wallpaper tint: a bar floats over content and carries no blur of its own.
+                    // Forced: Material's snackbar bridges setBackground to setBackgroundDrawable, and the interceptor sees that path.
+                    frost(
+                        f, tintOverride = MENU_SCRIM, allowSquare = true, ignorePadding = true,
+                        radiusOverride = f.dp(10f), forceLabel = "snackbar",
+                    )
                     logOnce("snackbar frosted")
                 }
             }
@@ -540,13 +547,13 @@ object GlassHook {
         }
 
         // ── The community info page's slab dividers ────────────────────────────────────
-        // INVISIBLE rather than GONE keeps the 23px of separation, and the gap shows wallpaper.
+        // INVISIBLE rather than GONE keeps the separation, and the gap shows wallpaper.
         for (n in listOf(
             "community_home_top_divider",
             "community_home_header_bottom_divider_admin",
             "community_home_header_bottom_divider_non_admin",
             "community_description_bottom_divider",
-            // Slips hideSlabsByShape by construction (16dp side margins), so it is hidden by name like the pair above.
+            // Slips hideSlabsByShape by construction (its side margins), so it is hidden by name like the pair above.
             "community_description_top_divider",
         )) {
             val did = res.waId(n, pkg)
@@ -664,7 +671,7 @@ object GlassHook {
         // No toolbar_holder here; the pane host is the toolbar's own parent, a FrameLayout subclass.
         val commAppBarId = res.waId("community_navigation_app_bar", pkg)
         if (commAppBarId != 0) ViewThemeDispatcher.onId(commAppBarId) { v ->
-            // Measured fully opaque; cleared rather than replaced, so nothing here fights a colour theme.
+            // Opaque in stock; cleared rather than replaced, so nothing here fights a colour theme.
             clearBg(v, "community_navigation_app_bar")
         }
         val commToolbarId = res.waId("community_navigation_toolbar", pkg)
@@ -1132,8 +1139,7 @@ object GlassHook {
 
         // ── Inline opaque panels ───────────────────────────────────────────────────────
         // parentPanel is AppCompat's dialog container, so this reaches every AlertDialog in the app.
-        // The expressions tray stays stock, a legible grid needs its fill; its id is emoji_edit_text_with_expressions_tray_linear_layout.
-        // The editors' body shares ContactInfo's fill, so the catchall strips it and a dialog has nothing behind.
+        // The expressions tray stays stock (a legible grid needs its fill); the editors' body is in because the catchall strips its fill.
         for (n in listOf("media_picker_popup_content", "parentPanel", "emoji_edit_text_layout")) {
             val pid = res.waId(n, pkg)
             if (pid == 0) continue
@@ -1257,8 +1263,7 @@ object GlassHook {
             }
         }
 
-        // The AppCompat SearchView is a different component and gets its own path; it declines the
-        // pages whose host cannot carry a pane rather than clearing a fill it cannot replace.
+        // The AppCompat SearchView gets its own path: it declines hosts that cannot carry a pane rather than clearing a fill it cannot replace.
         // search_bar_layout too: where search_view sits in a LinearLayout, that layout's parent can carry the pane.
         for (sn in listOf("search_view", "search_bar_layout")) {
         val searchViewId = res.waId(sn, pkg)
@@ -1366,7 +1371,8 @@ object GlassHook {
         // The chips' treatment, never a pane: Material animates the pill by transform, the reaction bar's killer.
         val pillId = res.waId("navigation_bar_item_active_indicator_view", pkg)
         if (pillId != 0 && !tokenTabPillSet) {
-            ViewThemeDispatcher.onId(pillId) { v -> frostOnLayout(v) }
+            // Forced: the menu view re-applies its own indicator drawable on every refresh, and that fires no layout.
+            ViewThemeDispatcher.onId(pillId) { v -> frostOnLayout(v, forceLabel = "active tab pill") }
         }
 
         // A seam across the pill; hide it INVISIBLE so the nav's height does not change under us.

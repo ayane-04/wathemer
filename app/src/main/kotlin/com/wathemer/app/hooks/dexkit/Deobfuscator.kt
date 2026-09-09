@@ -192,8 +192,10 @@ object Deobfuscator {
                 m != bubbleDrawableMethod
         }?.also { it.isAccessible = true }
 
+        // Arg 1 pinned: the direction is read from it, and a future 3-arg drawable method would otherwise match on count alone.
         balloonBorderDrawableMethod = drawableMethods.firstOrNull { m ->
             m.parameterCount == 3 &&
+                m.parameterTypes[1] == intType &&
                 m != bubbleDrawableMethod &&
                 m != balloonDateDrawableMethod
         }?.also { it.isAccessible = true }

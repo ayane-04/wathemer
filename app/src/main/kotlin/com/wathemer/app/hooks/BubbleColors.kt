@@ -32,7 +32,7 @@ object BubbleColors {
 
     private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
-    /** Wire bubble theming into the WA process. Called from XposedEntry after Application.onCreate. */
+    /** Wire bubble theming into the WA process. Called from ModernEntry at app create. */
     fun install(app: Application, classLoader: ClassLoader) {
         xprefs.reload()
         val leftBg = xprefs.getInt(Prefs.BUBBLE_LEFT_BG, 0)

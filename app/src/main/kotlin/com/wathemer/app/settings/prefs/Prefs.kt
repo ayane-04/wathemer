@@ -362,10 +362,7 @@ class Prefs(
         return ok
     }
 
-    /**
-     * Snapshots the store to filesDir, the one place that survives an update. It carried the move
-     * off the old store, and it stays: a snapshot import is the recovery path for a framework swap.
-     */
+    /** Snapshots the store to filesDir, the one place that survives an update; a snapshot import is the recovery path for a framework swap. */
     fun exportForMigration(): Int? {
         // A snapshot of the private fallback would be empty and would overwrite a good one.
         if (!moduleStoreActive) return null

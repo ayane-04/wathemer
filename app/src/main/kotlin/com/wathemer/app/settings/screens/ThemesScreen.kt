@@ -69,7 +69,7 @@ import kotlinx.coroutines.withContext
 
 private const val MAX_THEME_NAME = 48
 
-/** The themes list, and everything you can do to one. Liquid Glass stays out of a theme, so a shared file never changes it. */
+/** The themes list, and everything you can do to one. A theme carries the glass sliders, never whether glass is on. */
 @Composable
 fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
     val context = LocalContext.current
@@ -207,7 +207,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
             ) {
                 SectionHeader(
                     title = "Your themes",
-                    subtitle = "A theme carries your colours, bubble shapes, icons, font and wallpaper.",
+                    subtitle = "Your colours, bubble shapes, icons, font, wallpaper and glass sliders.",
                 )
                 MenuRow(
                     title = "Save what you have now",
@@ -239,7 +239,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                 }
 
                 Spacer(Modifier.size(4.dp))
-                StubNote("Liquid Glass is not part of a theme. Yours stays as you set it.")
+                StubNote("A theme carries the Liquid Glass sliders. Whether glass is on stays yours.")
                 StubNote("Applied when WhatsApp starts. Restart it from the button below.")
             }
         }
@@ -297,10 +297,12 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
 
     applying?.let { slot ->
         val carriesWallpaper = slot.doc.wallpaper?.hasImage == true
+        val carriesGlass = slot.doc.glass != null
         ConfirmDialog(
             title = "Apply ${slot.doc.name}?",
             body = buildString {
                 append("Your colours, bubble shapes, icons and font are replaced by this theme's.")
+                if (carriesGlass) append(" Its Liquid Glass sliders replace yours.")
                 if (carriesWallpaper) append(" Your current wallpaper image is replaced too.")
                 append(" You can undo it straight afterwards.")
             },

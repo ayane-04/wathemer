@@ -23,8 +23,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * A pane of glass: draws a blurred, tinted copy of [backdrop] behind its own children. Point it
- * at a sibling drawn before it, never an ancestor; on API 33+ the refraction pass runs too.
+ * A pane of glass: draws a blurred, tinted copy of [backdrop] behind its own children. Point it at a
+ * sibling drawn before it; an ancestor is refused at capture time. On API 33+ the refraction pass runs too.
  */
 class GlassView @JvmOverloads constructor(
     context: Context,
@@ -36,7 +36,7 @@ class GlassView @JvmOverloads constructor(
 
     private val capture = BackdropCapture(this, params)
 
-    /** The subtree to blur. Must be a sibling (or otherwise not an ancestor of this view). */
+    /** The subtree to blur; an ancestor is refused per capture and the pane draws its underlay only. */
     var backdrop: View?
         get() = capture.source
         set(value) {
@@ -138,6 +138,7 @@ class GlassView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        capture.register()
         viewTreeObserver.addOnPreDrawListener(preDrawListener)
         viewTreeObserver.addOnScrollChangedListener(activityListener)
         // Attach counts as activity, so the first frames are live rather than a heartbeat late.
@@ -149,6 +150,7 @@ class GlassView @JvmOverloads constructor(
         viewTreeObserver.removeOnScrollChangedListener(activityListener)
         materializeAnim?.cancel()
         pressAnim?.cancel()
+        capture.unregister()
         capture.release()
         super.onDetachedFromWindow()
     }

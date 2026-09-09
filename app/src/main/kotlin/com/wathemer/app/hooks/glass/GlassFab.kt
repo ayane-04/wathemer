@@ -55,8 +55,8 @@ internal fun glassChatFab(fab: View, label: String) {
     val sync = Runnable {
         if (d.width <= 0 || d.height <= 0) return@Runnable
         host.rootView?.findViewById<View>(android.R.id.list)?.let { l ->
-            // Guarded like the search-field twin: the setter throws on an ancestor.
-            if (glass.backdrop !== l) runCatching { glass.backdrop = l }.onFailure { logOnce("chat-FAB backdrop rejected: $it") }
+            // Resolve, don't remember: the list can be replaced under the pane; an ancestor is refused per capture.
+            if (glass.backdrop !== l) glass.backdrop = l
         }
         val lp = glass.layoutParams as? FrameLayout.LayoutParams ?: return@Runnable
         if (lp.width != d.width || lp.height != d.height ||

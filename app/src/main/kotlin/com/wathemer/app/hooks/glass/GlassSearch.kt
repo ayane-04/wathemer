@@ -480,7 +480,7 @@ private fun syncSearchPanel() {
     }
 }
 
-/** Pane in my_search_bar sized to the field (the field cannot stack); backdrop is id/list, never an ancestor. */
+/** Pane in my_search_bar sized to the field (the field cannot stack); backdrop is id/list, refused per frame once WhatsApp seats the bar inside it. */
 internal fun injectSearchFieldGlass(inner: View) {
     val bar = inner.parent as? FrameLayout ?: return
     if (bar.getTag(innerGlassTag) != null) return
@@ -505,8 +505,7 @@ internal fun injectSearchFieldGlass(inner: View) {
     val sync = Runnable {
         if (inner.width <= 0 || inner.height <= 0) return@Runnable
         // Resolve, don't remember: a backdrop bound once at construction can end up a detached list, frozen or blank.
-        // Guarded: the setter throws on an ancestor, and a WA reshuffle would turn that into a per-layout crash.
-        listRef?.get()?.let { l -> if (glass.backdrop !== l) runCatching { glass.backdrop = l }.onFailure { logOnce("search-field backdrop rejected: $it") } }
+        listRef?.get()?.let { l -> if (glass.backdrop !== l) glass.backdrop = l }
         val lp = glass.layoutParams as? FrameLayout.LayoutParams ?: return@Runnable
         if (lp.width != inner.width || lp.height != inner.height ||
             lp.leftMargin != inner.left || lp.topMargin != inner.top
@@ -660,7 +659,7 @@ internal fun ensurePagerFadeHook() {
     }.onFailure { XposedBridge.log("[$TAG] cross-fade hook FAILED: $it") }
 }
 
-/** Defer the hide and dissolve: WhatsApp's hide lands 5ms after attach, no room to race; panes bound to [v] fade too, they inherit nothing. */
+/** Defer the hide and dissolve: WhatsApp's own hide lands right after attach, no room to race; panes bound to [v] fade too, they inherit nothing. */
 private fun startHideFade(v: View, want: Int) {
     if (synchronized(fadeOnHide) { hideInProgress[v] } == true) return
     synchronized(fadeOnHide) { hideInProgress[v] = true }

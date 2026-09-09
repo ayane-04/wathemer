@@ -18,11 +18,12 @@ object WallpaperShellClearer {
 
     private const val TAG = "WaThemer.WPShells"
 
-    /** WA dark literals: 0xff0f1014 list items, 0xff12181c dividers/spacers, 0xff0a1014 ContactInfo cards. Add new ones here. */
+    /** WA dark literals: 0xff0f1014 list items, 0xff12181c dividers/spacers, 0xff0a1014 ContactInfo cards, 0xff0b1014 page roots. Add new ones here. */
     private val LITERAL_COLORS = setOf(
         0xff0f1014.toInt(),
         0xff12181c.toInt(),
         0xff0a1014.toInt(),
+        0xff0b1014.toInt(),
     )
 
     /** Containers cleared at inject. An id can occur at several depths (two id/content), so the walk covers the whole tree. */
@@ -42,10 +43,14 @@ object WallpaperShellClearer {
     @Volatile
     private var catchallInstalled = false
 
+    private var pagerId = 0
+
+    private var pagerIdTried = false
+
     @Volatile
     private var interceptorInstalled = false
 
-    /** One-shot clear at onPostCreate. Must not be a layout listener, that causes a redraw loop; late shells go per-id. */
+    /** One-shot clear at inject. Must not be a layout listener, that causes a redraw loop; late shells go per-id. */
     fun clearKnownShells(activity: Activity, decor: ViewGroup) {
         val pkg = activity.packageName
         val res = activity.resources
@@ -85,9 +90,19 @@ object WallpaperShellClearer {
         catchallInstalled = true
         ViewThemeDispatcher.onView { v ->
             if (WallpaperImage.INSTANCE?.isWallpaperActive() != true) return@onView false
-            val bg = v.background
-            if (bg is ColorDrawable && bg.color in LITERAL_COLORS) {
+            val bg = v.background as? ColorDrawable ?: return@onView false
+            if (bg.color in LITERAL_COLORS) {
                 v.setBackgroundColor(0)
+                return@onView false
+            }
+            // A pager page root is a shell whatever colour it wears, and the Updates page's root carries no id.
+            if (!pagerIdTried) {
+                pagerIdTried = true
+                pagerId = v.resources.waId("pager", v.context.packageName)
+            }
+            if (pagerId != 0 && (bg.color ushr 24) == 0xFF && (v.parent as? View)?.id == pagerId) {
+                v.setBackgroundColor(0)
+                XposedBridge.log("$TAG: pager page root cleared (#%08X)".format(bg.color))
             }
             false
         }

@@ -101,9 +101,11 @@ object WallpaperAsset {
             Log.w(TAG, "reconcile: master is readable but restoring $path failed; keeping the pref")
             return path
         }
-        // Only now, and only when we can actually tell that it is missing.
+        // Only now, and only when the file is provably missing.
         if (!hasAllFilesAccess()) return path
         prefs.wallpaperPath = null
+        // The gate both toggles enforce: glass with no wallpaper is blank panes, so it goes with the path.
+        if (prefs.glassEnabled) prefs.glassEnabled = false
         return null
     }
 

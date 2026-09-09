@@ -1,5 +1,5 @@
-// The hook side's one view of the settings store, now the framework's remote preferences.
-// New XSharedPreferences is gone from the frameworks this module supports; nothing here touches files.
+// The hook side's one view of the settings store: the framework's remote preferences.
+// No XSharedPreferences here: the modern API reads the framework's store, never a file.
 package com.wathemer.app.hooks
 
 import android.content.SharedPreferences

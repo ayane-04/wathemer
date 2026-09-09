@@ -113,11 +113,27 @@ private fun syncConvBannerPill(banner: ViewGroup) {
     for (i in 0 until strip.childCount) {
         (strip.getChildAt(i) as? ViewGroup)?.let { clearBg(it, "conversation pinned strip inner") }
     }
+    // Two levels down the strip ends in a plain hairline View, WhatsApp's divider; it would rule across the pill's bottom edge.
+    val hairline = (4f * banner.resources.displayMetrics.density).toInt()
+    clearHairlines(strip, strip.width / 2, hairline, depth = 3)
     val inset = (CONV_PILL_INSET_DP * banner.resources.displayMetrics.density).toInt()
     val r = banner.width - inset
     if (r - inset <= 0) return
     // The list, never the coordinator: the strip is the coordinator's own child and would capture itself.
-    pill(banner, strip, inset, 0, r, banner.height, source = convListHostRef?.get())
+    // No fallback while the list is unknown: an underlay-only pill re-points once it resolves, a refused ancestor never does.
+    pill(banner, strip, inset, 0, r, banner.height, source = convListHostRef?.get(), coordinatorFallback = false)
+}
+
+/** Plain Views at most [maxH] tall and at least [minW] wide, anywhere under [root] to [depth]; dividers carry no id. */
+private fun clearHairlines(root: ViewGroup, minW: Int, maxH: Int, depth: Int) {
+    for (i in 0 until root.childCount) {
+        val c = root.getChildAt(i)
+        if (c is ViewGroup) {
+            if (depth > 1) clearHairlines(c, minW, maxH, depth - 1)
+        } else if (c.height in 1..maxH && c.width >= minW) {
+            clearBg(c, "conversation pinned strip divider")
+        }
+    }
 }
 
 /** RelativeLayout here, so the negative margin goes on the list host; the footer draws later and needs no lift. */
@@ -284,12 +300,11 @@ private val mentionPaneTag = tagKey("wathemer-mention-pane")
 
 private val mentionPreDrawTag = tagKey("wathemer-mention-predraw")
 
-/** The mention list blurs the conversation behind it; its own painted fill goes. */
+/** A wallpaper film under the mention list, and its painted fill goes; no source, because the conversation holds this pane. */
 internal fun syncMentionPane(host: FrameLayout) {
     var pane = host.getTag(mentionPaneTag) as? GlassView
     if (pane == null || pane.parent !== host) {
         pane = GlassView(host.context).apply {
-            backdrop = convCoordRef?.get()
             underlay = wallpaperUnderlay(host)
             params.apply {
                 downsample = DOWNSAMPLE
@@ -312,8 +327,6 @@ internal fun syncMentionPane(host: FrameLayout) {
         )
         host.setTag(mentionPaneTag, pane)
         HookLog.hit("pane/mention")
-    } else if (pane.backdrop == null) {
-        pane.backdrop = convCoordRef?.get()
     }
     // WhatsApp repaints the picker's fill per data pass with no layout to catch, so pre-draw it away.
     if (host.getTag(mentionPreDrawTag) == null) {
@@ -482,10 +495,13 @@ private fun containsList(v: View, depth: Int): Boolean {
 }
 
 /** Keyed by the element, not by index: the ActionMenuView's children change when the menu inflates. */
-internal fun pill(holder: ViewGroup, owner: View, l: Int, t: Int, r: Int, b: Int, source: View? = null) {
+internal fun pill(
+    holder: ViewGroup, owner: View, l: Int, t: Int, r: Int, b: Int,
+    source: View? = null, coordinatorFallback: Boolean = true,
+) {
     if (r <= l || b <= t) return
     // A holder inside the coordinator has to name its own source, or the capture would contain the pane.
-    val src = source ?: convCoordRef?.get()
+    val src = source ?: if (coordinatorFallback) convCoordRef?.get() else null
     var glass = convPanes[owner]
     if (glass == null || glass.parent !== holder) {
         glass = GlassView(holder.context).apply {
@@ -505,8 +521,8 @@ internal fun pill(holder: ViewGroup, owner: View, l: Int, t: Int, r: Int, b: Int
         holder.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
         convPanes[owner] = glass
         HookLog.hit("pane/convCapsule")
-    } else if (glass.backdrop == null) {
-        // The coordinator may have attached after the pill did.
+    } else if (glass.backdrop == null && src != null) {
+        // The coordinator, or the banner's list host, may have attached after the pill did.
         glass.backdrop = src
     }
     // Re-asserted: the band may arrive after the pill, and the split depends on whether it exists.
@@ -706,5 +722,5 @@ private fun composePane(
 /** How far the compose pill is grown past `input_layout` so its icons are not flush. */
 private const val COMPOSE_PILL_PAD_DP = 5f
 
-/** Ceiling on the compose pill's corner radius: half of the single-row height (136px). */
+/** Ceiling on the compose pill's corner radius: half the single-row height. */
 private const val COMPOSE_MAX_RADIUS_DP = 24f

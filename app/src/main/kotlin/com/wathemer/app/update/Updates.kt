@@ -25,6 +25,8 @@ data class Release(
     val notes: String,
     val assetUrl: String,
     val assetName: String,
+    /** From the release listing; zero for a release read back from the cache, which skips the length check. */
+    val size: Long = 0L,
 )
 
 object Updates {
@@ -59,6 +61,7 @@ object Updates {
                         notes = release.optString("body").trim(),
                         assetUrl = asset.optString("browser_download_url"),
                         assetName = name,
+                        size = asset.optLong("size"),
                     )
                 }
             }
@@ -72,17 +75,30 @@ object Updates {
         dir.mkdirs()
         dir.listFiles()?.forEach { it.delete() }
         val target = File(dir, release.assetName)
+        // Staged then renamed: a process death mid-copy must not leave a stub that the Install row offers.
+        val part = File(dir, release.assetName + ".part")
         return runCatching {
             open(release.assetUrl).use { c ->
                 if (c.responseCode != HttpURLConnection.HTTP_OK) {
                     Log.w(TAG, "download returned ${c.responseCode}")
                     return null
                 }
-                c.inputStream.use { input -> target.outputStream().use(input::copyTo) }
+                c.inputStream.use { input -> part.outputStream().use(input::copyTo) }
+            }
+            if (release.size > 0L && part.length() != release.size) {
+                Log.w(TAG, "download is ${part.length()} bytes, the listing said ${release.size}")
+                part.delete()
+                return null
+            }
+            if (!part.renameTo(target)) {
+                Log.w(TAG, "could not rename the finished download into place")
+                part.delete()
+                return null
             }
             target
         }.onFailure {
             Log.w(TAG, "download failed: $it")
+            part.delete()
             target.delete()
         }.getOrNull()
     }

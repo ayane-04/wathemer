@@ -37,6 +37,8 @@ object ThemeHook {
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] Theme hook install FAILED: $t")
             XposedBridge.log(t)
+            // The catch keeps the stack, so the ledger has to be told here or the entry arms as if nothing happened.
+            HookLog.fail("install/ThemeHook", t)
         }
     }
 

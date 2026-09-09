@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,11 +62,16 @@ import com.wathemer.app.settings.components.ToggleItem
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.prefs.FontLibrary
 import com.wathemer.app.settings.prefs.Prefs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Dividers, overlay effects and the font swap. Everything here is read once at hook install, so changes need a WhatsApp restart. */
 @Composable
 fun ExtrasScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var importing by remember { mutableStateOf(false) }
     var divider by remember { mutableStateOf(prefs.chatListDivider) }
     var snow by remember { mutableStateOf(prefs.effectSnow) }
     var fontChoice by remember { mutableStateOf(prefs.customFont) }
@@ -154,13 +160,19 @@ fun ExtrasScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                         ActivityResultContracts.GetContent(),
                     ) { uri ->
                         if (uri == null) return@rememberLauncherForActivityResult
-                        val outcome = FontLibrary.import(context, prefs, uri)
-                        when {
-                            outcome == null -> onMessage("Couldn't read that font file. TTF, OTF and TTC work.")
-                            outcome.duplicate -> onMessage("${outcome.entry.name} is already in your fonts.")
-                            else -> {
-                                library = FontLibrary.list(context, prefs)
-                                onMessage("${outcome.entry.name} added to your fonts.")
+                        // Off main: the picker accepts any file of any size, and the copy plus the Typeface parse both block.
+                        if (importing) return@rememberLauncherForActivityResult
+                        importing = true
+                        scope.launch {
+                            val outcome = withContext(Dispatchers.IO) { FontLibrary.import(context, prefs, uri) }
+                            importing = false
+                            when {
+                                outcome == null -> onMessage("Couldn't read that font file. TTF, OTF and TTC work.")
+                                outcome.duplicate -> onMessage("${outcome.entry.name} is already in your fonts.")
+                                else -> {
+                                    library = FontLibrary.list(context, prefs)
+                                    onMessage("${outcome.entry.name} added to your fonts.")
+                                }
                             }
                         }
                     }

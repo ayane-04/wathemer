@@ -23,7 +23,6 @@ import com.wathemer.app.hooks.waId
 import de.robv.android.xposed.XposedBridge
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
-import kotlin.math.abs
 
 /** Half the gap between picker cards; without it adjacent groups share an edge and read as one shape. */
 private const val PICKER_CARD_GAP_DP = 6f
@@ -651,8 +650,7 @@ internal fun syncWdsSearchBar(bar: FrameLayout) {
         owner.getLocationOnScreen(wdsOwnerAt)
         val covers = wdsBackAt[1] <= wdsOwnerAt[1]
         if (covers && glass.backdrop !== list) {
-            runCatching { glass.backdrop = list }
-                .onFailure { logOnce("wds search backdrop rejected: $it") }
+            glass.backdrop = list
         } else if (!covers && glass.backdrop != null) {
             glass.backdrop = null
         }

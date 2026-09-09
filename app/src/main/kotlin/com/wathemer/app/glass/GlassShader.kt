@@ -398,7 +398,7 @@ object GlassShader {
 
     /** The band after the corner-radius cap, shared so nothing disagrees; wider grows corner hemispheres. */
     fun effectiveBevel(params: GlassParams, w: Int, h: Int): Float {
-        // 12dp with the surface's own density; a hard-coded density made the floor wrong off-device.
+        // 12dp at the surface's own density; a hard-coded density mis-sizes the floor off-device.
         val radiusCap = maxOf(params.cornerRadius, 12f * params.density)
         return params.bevelThickness
             .coerceAtMost(radiusCap)

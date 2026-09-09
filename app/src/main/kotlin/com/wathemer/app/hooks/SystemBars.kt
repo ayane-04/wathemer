@@ -1,9 +1,8 @@
-// Status-bar theming: A15 kills the legacy colour setters, so we draw our own inset-height strip
-// and set icon contrast via WindowInsetsController. No nav theming; the wallpaper wins the bars.
+// Status-bar theming: A15 kills the legacy colour setters, so the module draws its own inset-height strip
+// and sets icon contrast via WindowInsetsController. No nav theming; the wallpaper wins the bars.
 package com.wathemer.app.hooks
 
 import android.app.Activity
-import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -13,9 +12,7 @@ import android.view.WindowInsetsController
 import android.widget.FrameLayout
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
 import com.wathemer.app.settings.prefs.Prefs
-import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
 
 object SystemBars {
 
@@ -32,42 +29,35 @@ object SystemBars {
     private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     fun install() {
-        // Hook unconditionally; the gates live in the callbacks so toggling applies on the next Activity create.
-        XposedHelpers.findAndHookMethod(
-            Activity::class.java, "onPostCreate", Bundle::class.java,
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(p: MethodHookParam) {
-                    val a = p.thisObject as? Activity ?: return
-                    if (!shouldTheme(a)) return
-                    runCatching { apply(a, paintStrips = true) }
-                        .onFailure { Log.w(LOGTAG, "apply(onPostCreate ${a.javaClass.simpleName}) failed: ${it.message}") }
-                }
-            },
-        )
-        // Re-apply after WA's own onResume appearance writes; cheap.
-        XposedHelpers.findAndHookMethod(
-            Activity::class.java, "onResume",
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(p: MethodHookParam) {
-                    val a = p.thisObject as? Activity ?: return
-                    if (!shouldTheme(a)) return
-                    runCatching { apply(a, paintStrips = true) }.onFailure { /* silent */ }
-                }
-            },
-        )
-        XposedHelpers.findAndHookMethod(
-            Activity::class.java, "onWindowFocusChanged", Boolean::class.javaPrimitiveType,
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(p: MethodHookParam) {
-                    if (p.args.getOrNull(0) as? Boolean != true) return   // only on gaining focus
-                    val a = p.thisObject as? Activity ?: return
-                    if (!shouldTheme(a)) return
-                    runCatching { applyIcons(a, resolveStatusColor()) }.onFailure { /* silent */ }
-                }
-            },
-        )
-        Log.i(LOGTAG, "installed (Activity onPostCreate/onResume/onWindowFocusChanged)")
+        // Never hook an Activity lifecycle method here: WhatsApp reaches them only by invoke-super, which ART can inline away.
+        // The gates live in the callbacks so toggling applies on the next Activity create.
+        ActivityLifecycle.onCreated("systemBars") { a ->
+            if (shouldTheme(a)) {
+                runCatching { apply(a, paintStrips = true) }
+                    .onFailure { Log.w(LOGTAG, "apply(created ${a.javaClass.simpleName}) failed: ${it.message}") }
+            }
+            if (a.packageName == WHATSAPP_PKG) runCatching { watchFocus(a) }
+        }
+        // Re-applied on every resume too; this runs at the top of onResume, so the focus listener is what lands after WhatsApp's own writes.
+        ActivityLifecycle.onResumed("systemBars") { a ->
+            if (shouldTheme(a)) {
+                runCatching { apply(a, paintStrips = true) }.onFailure { /* silent */ }
+            }
+        }
+        HookLog.arm("lifecycle/windowFocus")
         XposedBridge.log("[$TAG] installed")
+    }
+
+    /** Icons on every focus gain, from the observer list: it runs after WhatsApp's own focus chain, unlike a hook on the empty framework method. */
+    private fun watchFocus(a: Activity) {
+        val decor = a.window?.decorView ?: return
+        // Registered before attach, on the floating observer; the framework merges it into the window's at attach.
+        decor.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
+            if (!hasFocus) return@addOnWindowFocusChangeListener
+            HookLog.hit("lifecycle/windowFocus")
+            if (!shouldTheme(a)) return@addOnWindowFocusChangeListener
+            runCatching { applyIcons(a, resolveStatusColor()) }.onFailure { /* silent */ }
+        }
     }
 
     /** Checks the pref, not just the active flag, which is still false on the first Activity (hook-order race). */

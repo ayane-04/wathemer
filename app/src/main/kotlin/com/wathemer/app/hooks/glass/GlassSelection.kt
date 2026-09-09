@@ -81,7 +81,7 @@ private var quoteMaskHookInstalled = false
 internal fun installQuoteMaskKill(frameId: Int) {
     if (quoteMaskHookInstalled) return
     quoteMaskHookInstalled = true
-    // Through the shared dispatcher, this setter had three interceptors; the gate must be evaluated per call.
+    // One shared setForeground interceptor for every gate; the gate is evaluated per call, not at arming.
     ForegroundKillDispatcher.kill(frameId) { !quoteColored }
     logOnce("quote corner-mask kill armed")
 }
@@ -91,7 +91,7 @@ private const val MSG_SELECT_ALPHA = 62
 
 private const val MSG_SELECT_RIM_ALPHA = 70
 
-/** Measured: the pill is a 159x501 stadium, so half its width, 29dp; the pane clamps anyway. */
+/** Half the lock pill's width; the pane clamps anyway. */
 private const val LOCK_PILL_RADIUS_DP = 29f
 
 private const val MSG_SELECT_INSET_X_DP = 8f
@@ -419,14 +419,15 @@ internal fun ensureBgHook() {
     if (bgHookInstalled) return
     bgHookInstalled = true
     runCatching {
+        // setBackgroundDrawable, not setBackground: the latter is a one-line delegate to it, and WhatsApp calls the former directly.
         XposedHelpers.findAndHookMethod(
-            View::class.java, "setBackground", Drawable::class.java,
+            View::class.java, "setBackgroundDrawable", Drawable::class.java,
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val v = param.thisObject as? View ?: return
                     val incoming = param.args[0] as? Drawable
 
-                    // Selection rows must see null too (WhatsApp clears them with it) and stay in this hook; a second interceptor started the foreground fights.
+                    // Selection rows must see null too (WhatsApp clears them with it) and stay in this hook; a second interceptor fights over the foreground.
                     // Two ids: the Calls tab's rows are call_row_container, not the chat list's. Selected message rows are deliberately not handled.
                     if ((rowContainerId != 0 && v.id == rowContainerId) ||
                         (callRowContainerId != 0 && v.id == callRowContainerId)
@@ -454,9 +455,9 @@ internal fun ensureBgHook() {
                 }
             },
         )
-    }.onFailure { XposedBridge.log("[$TAG] setBackground hook failed: $it") }
+    }.onFailure { XposedBridge.log("[$TAG] setBackgroundDrawable hook failed: $it") }
 
-    // setBackgroundColor mutates an existing ColorDrawable in place and never reaches setBackground, so both setters are hooked.
+    // setBackgroundColor mutates an existing ColorDrawable in place and reaches neither setter, so it is hooked as well.
     runCatching {
         XposedHelpers.findAndHookMethod(
             View::class.java, "setBackgroundColor", Int::class.javaPrimitiveType,

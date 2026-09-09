@@ -69,8 +69,17 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
     // Self-repair once per entry; keyed on the path so a re-pick re-checks.
     LaunchedEffect(snap.wallpaperPath) {
         // The restore copy must run off main; the pref write after it must stay on main for Compose state.
+        val hadGlass = prefs.glassEnabled
         val settled = withContext(Dispatchers.IO) { WallpaperAsset.reconcile(context, prefs) }
         if (settled != snap.wallpaperPath) snapshot.updateWallpaperPath(prefs, settled)
+        // The prune takes glass with it, so say so here; the toggle below announces the same thing.
+        if (hadGlass && !prefs.glassEnabled) {
+            Toast.makeText(
+                context,
+                "Liquid Glass turned off too, it needs a wallpaper.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 
     val cropLauncher = rememberLauncherForActivityResult(

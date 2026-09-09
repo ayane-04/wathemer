@@ -66,7 +66,7 @@ object HomeActivityHook {
     }
 
     private fun installInternal(app: Application, classLoader: ClassLoader) {
-        // Resolves ~40 WA ids, the most anywhere; startup ordering matters, see WaIds.logSummary in XposedEntry.
+        // Resolves ~40 WA ids, the most anywhere; startup ordering matters, see WaIds.logSummary in ModernEntry.
         XposedBridge.log("[$TAG] installing")
         xprefs.reload()
         val pkg = app.packageName

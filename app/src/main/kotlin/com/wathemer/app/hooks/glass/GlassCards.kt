@@ -149,7 +149,7 @@ internal fun syncUpdatesCard() {
     if (tlp.topMargin != clearance) {
         tlp.topMargin = clearance
         title.layoutParams = tlp
-        // The title is re-created on every visit, so this branch is what re-introduced the offset each time.
+        // The title is re-created on every visit, so the repin has to ride this branch each time.
         if (wasAtTop) repinToTop(list)
         return              // re-enter once the title has been laid out at its new place
     }

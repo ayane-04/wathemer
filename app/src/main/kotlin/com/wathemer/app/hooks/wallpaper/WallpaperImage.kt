@@ -1,4 +1,4 @@
-// A single static image behind every WhatsApp Activity, injected at index 0 of content's parent on onPostCreate.
+// A single static image behind every WhatsApp Activity, injected at index 0 of content's parent at the first resume.
 // The package check must stay equality, not startsWith, or WhatsApp Business (com.whatsapp.w4b) matches.
 package com.wathemer.app.hooks.wallpaper
 
@@ -8,11 +8,11 @@ import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
-import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
+import com.wathemer.app.hooks.ActivityLifecycle
 import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.WaIds
 import com.wathemer.app.hooks.glass.GlassHook
@@ -31,36 +31,32 @@ class WallpaperImage private constructor(
     @Volatile
     private var wallpaperActive = false
 
-    /** Log keys: every Activity's onPostCreate lands in the inject path, so per-screen printing is pure spam. */
+    /** Log keys: every Activity create lands in the inject path, so per-screen printing is pure spam. */
     private var lastInjectLogKey = ""
     private var lastLoggedBlur = Int.MIN_VALUE
 
     fun isWallpaperActive(): Boolean = wallpaperActive
 
     private fun installInternal() {
+        // Never hook Activity.onPostCreate: it is reached only by invoke-super, which ART can inline away.
         // Enabled check lives in the callback so a toggle applies on the next Activity create.
-        XposedHelpers.findAndHookMethod(
-            Activity::class.java, "onPostCreate", Bundle::class.java,
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(p: MethodHookParam) {
-                    val activity = p.thisObject as? Activity ?: return
-                    // Equality, not startsWith: WhatsApp Business is com.whatsapp.w4b and would match startsWith.
-                    if (activity.packageName != WHATSAPP_PKG) return
-                    runCatching { injectFor(activity) }
-                        .onFailure {
-                            XposedBridge.log(
-                                "$TAG: injectFor(${activity.javaClass.simpleName}) failed: ${it.message}"
-                            )
-                        }
-                }
-            },
-        )
+        ActivityLifecycle.onCreated("wallpaper") { activity ->
+            // Equality, not startsWith: WhatsApp Business is com.whatsapp.w4b and would match startsWith.
+            if (activity.packageName == WHATSAPP_PKG) {
+                runCatching { injectFor(activity) }
+                    .onFailure {
+                        XposedBridge.log(
+                            "$TAG: injectFor(${activity.javaClass.simpleName}) failed: ${it.message}"
+                        )
+                    }
+            }
+        }
         // Register the catch-all literal-color predicate once; it survives every inject.
         WallpaperShellClearer.installLiteralColorCatchall()
         // Core transparency mechanism: intercept setBackground at the assignment chokepoint; see WallpaperShellClearer.
         val userBg = xprefs.getInt(Prefs.KEY_BACKGROUND, Prefs.DEFAULT_BACKGROUND)
         WallpaperShellClearer.installBackgroundInterceptor(userBg)
-        XposedBridge.log("$TAG: hook installed (Activity.onPostCreate) + catchall + bg-interceptor")
+        XposedBridge.log("$TAG: armed (activity lifecycle) + catchall + bg-interceptor")
     }
 
     private fun injectFor(activity: Activity) {
@@ -103,7 +99,7 @@ class WallpaperImage private constructor(
             )
             content
         }
-        // Idempotent: a second onPostCreate from a config-change replay is a no-op.
+        // Idempotent: a second create from a config-change replay is a no-op.
         if (parent.findViewWithTag<View?>(WALLPAPER_TAG) != null) {
             wallpaperActive = true
             return

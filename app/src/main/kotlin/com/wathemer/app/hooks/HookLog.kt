@@ -66,16 +66,6 @@ object HookLog {
         line("FAIL  $name  $t")
     }
 
-    /** Run [body], recording HIT or FAIL against [name]. Never rethrows: a hook must not crash WA. */
-    inline fun guard(name: String, body: () -> Unit) {
-        try {
-            body()
-            hit(name)
-        } catch (t: Throwable) {
-            fail(name, t)
-        }
-    }
-
     /** True once this surface has done its work, for callers that want to log a state change only. */
     fun isHit(name: String): Boolean = entries[name]?.state == State.HIT
 
@@ -83,7 +73,7 @@ object HookLog {
      * The whole ledger in one block, grouped by state. ARMED means registered and never fired,
      * which on a screen the user has visited is the line worth reading.
      */
-    fun dump(reason: String, force: Boolean = false) {
+    fun dump(reason: String) {
         val all = entries.values.sortedBy { it.name }
         if (all.isEmpty()) {
             line("SUMMARY ($reason): nothing registered")
@@ -91,7 +81,7 @@ object HookLog {
         }
         val byState = all.groupBy { it.state }
         val signature = all.joinToString(",") { "${it.name}=${it.state}${it.hits.get()}" }
-        if (!force && signature == lastSignature) {
+        if (signature == lastSignature) {
             line("SUMMARY ($reason): unchanged since the last dump")
             return
         }

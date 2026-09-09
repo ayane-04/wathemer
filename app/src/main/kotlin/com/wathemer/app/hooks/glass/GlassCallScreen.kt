@@ -20,7 +20,7 @@ import de.robv.android.xposed.XposedBridge
 import java.lang.ref.WeakReference
 import kotlin.math.abs
 
-/** Uniform gap between the call card's content and the pane border; WA's own audio card measures the same 24dp. */
+/** Uniform gap between the call card's content and the pane border, matching WA's own audio card. */
 private const val CALL_CARD_PAD_DP = 24f
 
 private val callGlassTag = tagKey("wathemer-call-glass")

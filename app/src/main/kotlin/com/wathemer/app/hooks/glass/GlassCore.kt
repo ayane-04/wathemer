@@ -62,7 +62,7 @@ internal var RIM_ALPHA = GlassDefaults.RIM
 internal var RIM_WIDTH_DP = GlassDefaults.RIM_WIDTH.toFloat()
 
 // ── The chat-list card ────────────────────────────────────────────────────────────
-// CARD_GAP_DP mirrors my_search_bar's own 8dp bottom margin, so the card sits symmetrically between the two.
+// CARD_GAP_DP matches the gap my_search_bar keeps below itself when it sits beside the list, so the card sits symmetrically.
 /** Every card's corner radius; CardOutline's clip must get the same value or content corners sit proud. */
 internal var CARD_RADIUS_DP = GlassDefaults.RADIUS.toFloat()
 
@@ -109,10 +109,10 @@ internal const val ROW_SELECT_RADIUS_DP = 18f
 /** Downscale of the row's wallpaper copy; the downscale is the blur, 6 keeps shapes legible under text. */
 internal const val ROW_SELECT_SHRINK = 6
 
-/** 1.2% is ~14px across a 1164px row: inside the 28px it is already inset from the card. */
+/** Grows the pressed row a hair without escaping the card's own inset. */
 internal const val ROW_SELECT_SCALE = 1.012f
 
-/** Measured off WhatsApp's own FAB squircle (43px corner = 15.2dp); 16 is the round number. */
+/** Rounded from WhatsApp's own FAB corner. */
 internal const val FAB_RADIUS_DP = 16f
 
 /** Brighter than the card so the buttons read; the ratio to TINT_ALPHA is what matters, not the absolute. */
@@ -121,7 +121,7 @@ internal const val FAB_ALPHA = 32
 /** The large title; 41sp matches the iOS reference's letter height, 44 matches its width; the bigger figure is deliberate. */
 internal const val TITLE_SP = 44f
 
-/** Toolbar title size. */
+/** One clear step above WhatsApp's own title size. */
 internal const val TOOLBAR_TITLE_SP = 23f
 
 /** Pane growth and toolbar padding work as a pair; horizontal only, vertical growth just clamps to the appbar. */
@@ -241,7 +241,6 @@ internal fun resolveGlassTint(views: List<View>) {
             n++
         }
     }
-    if (n == 0) return
     val dim = (views.getOrNull(1)?.alpha ?: 0f).coerceIn(0f, 1f)
     val luma = (sum / n) * (1f - dim)
 
