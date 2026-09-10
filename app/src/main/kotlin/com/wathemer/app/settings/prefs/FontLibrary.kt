@@ -22,6 +22,16 @@ object FontLibrary {
     /** [duplicate] means the pick matched an existing entry and nothing was written. */
     data class ImportOutcome(val entry: Entry, val duplicate: Boolean)
 
+    /** Why a pick produced no entry, kept apart so the message never blames the file for the wrong reason. */
+    sealed class ImportResult {
+        class Done(val outcome: ImportOutcome) : ImportResult()
+        object Unreadable : ImportResult()
+        class TooLarge(val bytes: Long) : ImportResult()
+    }
+
+    /** The copy stops here: the largest CJK collections fit under it, a mistaken video pick does not. */
+    const val MAX_FONT_BYTES = 32L * 1024 * 1024
+
     fun dir(context: Context): File = File(context.filesDir, "fonts")
 
     fun fileOf(context: Context, entry: Entry): File = File(dir(context), entry.file)
@@ -34,18 +44,31 @@ object FontLibrary {
     fun typeface(context: Context, entry: Entry): Typeface? =
         runCatching { Typeface.Builder(fileOf(context, entry)).build() }.getOrNull()
 
-    /** Copy the pick into the library. Null = unparseable file; does not change the selection. */
-    fun import(context: Context, prefs: Prefs, uri: Uri): ImportOutcome? {
+    /** Copy the pick into the library, capped at [MAX_FONT_BYTES]; does not change the selection. */
+    fun import(context: Context, prefs: Prefs, uri: Uri): ImportResult {
         val tmp = File(context.cacheDir, "font-import.tmp")
+        var total = 0L
+        var overflow = false
         val copied = runCatching {
             context.contentResolver.openInputStream(uri)!!.use { input ->
-                tmp.outputStream().use { out -> input.copyTo(out) }
+                tmp.outputStream().use { out ->
+                    // Bounded by hand: the picker takes any file, and a provider need not declare a size up front.
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        total += n
+                        if (total > MAX_FONT_BYTES) { overflow = true; break }
+                        out.write(buf, 0, n)
+                    }
+                }
             }
         }.isSuccess
-        if (!copied) { tmp.delete(); return null }
+        if (overflow) { tmp.delete(); return ImportResult.TooLarge(total) }
+        if (!copied) { tmp.delete(); return ImportResult.Unreadable }
         val outcome = importFile(context, prefs, tmp, displayNameStem(context, uri))
         tmp.delete()
-        return outcome
+        return outcome?.let { ImportResult.Done(it) } ?: ImportResult.Unreadable
     }
 
     /** Remove an entry and its file; a selected entry also resets the font choice to stock. */

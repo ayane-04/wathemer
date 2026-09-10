@@ -20,13 +20,14 @@ object BubbleAlbumClipping {
 
     fun install(app: Application, classLoader: ClassLoader) {
         xprefs.reload()
-        // Gate on the bubble bg colour: no point clipping if the user has not themed bubbles.
+        // Gate on a themed bubble, a colour or the glass pane: stock bubbles clip their own album.
         val active = xprefs.getInt(Prefs.BUBBLE_LEFT_BG, 0) != 0 ||
-                     xprefs.getInt(Prefs.BUBBLE_RIGHT_BG, 0) != 0
+                     xprefs.getInt(Prefs.BUBBLE_RIGHT_BG, 0) != 0 ||
+                     xprefs.getBoolean(Prefs.KEY_GLASS_ENABLED, false)
         if (!active) {
             // Every pref-gated installer logs when it stands down, or the log cannot explain its absence.
-            XposedBridge.log("$TAG: no bubble background colour set; album clipping not installed")
-            HookLog.skip("install/BubbleAlbumClipping", "no bubble background colour set")
+            XposedBridge.log("$TAG: no bubble colour and glass off; album clipping not installed")
+            HookLog.skip("install/BubbleAlbumClipping", "no bubble colour and glass off")
             return
         }
 

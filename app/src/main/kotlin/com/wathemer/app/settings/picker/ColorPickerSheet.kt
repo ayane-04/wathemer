@@ -507,7 +507,8 @@ private fun HexEntryDialog(
     val focus = remember { FocusRequester() }
     // Nothing else opens the keyboard here, so the field asks for focus as the dialog appears.
     LaunchedEffect(Unit) { focus.requestFocus() }
-    val confirm = { if (valid && parsed != 0) onConfirm(parsed) }
+    // Eight valid digits are enough: 00000000 is a real colour, the same one the opacity slider can apply.
+    val confirm = { if (valid) onConfirm(parsed) }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -572,7 +573,7 @@ private fun HexEntryDialog(
                 ) { Text("Cancel", color = Color.White, fontWeight = FontWeight.SemiBold) }
                 Button(
                     onClick = confirm,
-                    enabled = valid && parsed != 0,
+                    enabled = valid,
                     modifier = Modifier.weight(1f),
                 ) { Text("Set", fontWeight = FontWeight.Bold) }
             }

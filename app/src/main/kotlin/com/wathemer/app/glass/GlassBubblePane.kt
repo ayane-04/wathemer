@@ -9,7 +9,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewTreeObserver
 
-/** A growable, allocation-free rect list reused every frame; 20 RectF per frame is 1200 a second. */
+/** A growable, allocation-free rect list reused every frame; a fresh RectF per bubble is garbage on the scroll path. */
 class RectList {
     private val items = ArrayList<RectF>()
     private var flags = IntArray(8)
@@ -97,7 +97,7 @@ class GlassBubblePane(context: Context) : View(context) {
         setWillNotDraw(false)
     }
 
-    /** Refresh in pre-draw: onDraw only runs when already dirty, and a frame late is 180px of fling. */
+    /** Refresh in pre-draw: onDraw only runs when already dirty, and a frame late visibly trails a fling. */
     private val preDraw = ViewTreeObserver.OnPreDrawListener {
         // Guarded: collect and backdrop walk live WhatsApp views, and an escape here takes the traversal down.
         try {

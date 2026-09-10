@@ -349,7 +349,7 @@ class GlassView @JvmOverloads constructor(
         val fading = params.fadeBottomPx > 0f || params.fadeTopLenPx > 0f ||
             params.edgeExpandLeft > 0f || params.edgeExpandTop > 0f ||
             params.edgeExpandRight > 0f || params.edgeExpandBottom > 0f
-        // Not worth splitting when the band covers most of the surface, the normal case for pills.
+        // Skip the split only when the bands would leave almost no plateau, which only a pane a few pixels tall does.
         // A pressed surface runs the program everywhere too: the pool crosses the plateau, which the flat rect cannot show.
         if (fading || pressAmp > 0f || band * 2f + 4f >= minOf(w, h)) {
             canvas.drawRect(0f, 0f, w, h, lightPaint)

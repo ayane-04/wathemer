@@ -6,8 +6,8 @@
         <package android:name="com.whatsapp" />
     </queries>
 
-    <!-- Required for ActivityManager.killBackgroundProcesses("com.whatsapp"). Non-root
-         primary path for the "Restart WhatsApp" button. Root (su) is used as fallback. -->
+    <!-- For ActivityManager.killBackgroundProcesses("com.whatsapp"). Both kills always run; Android 14
+         and later ignores this one for other apps, so the su force-stop is what actually works there. -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
     <!-- The update check and its download. Only the settings app reaches the network; the code
@@ -66,6 +66,14 @@
         <provider
             android:name=".FontProvider"
             android:authorities="${applicationId}.fonts"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
+
+        <!-- Serves chat wallpapers to the WhatsApp hook. Exported like the font provider and jailed to its
+             own dir, and it answers only WhatsApp and this app: these pictures are per contact. -->
+        <provider
+            android:name=".ChatWallpaperProvider"
+            android:authorities="${applicationId}.wallpapers"
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
 

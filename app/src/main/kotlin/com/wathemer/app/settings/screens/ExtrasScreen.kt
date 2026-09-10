@@ -164,14 +164,21 @@ fun ExtrasScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                         if (importing) return@rememberLauncherForActivityResult
                         importing = true
                         scope.launch {
-                            val outcome = withContext(Dispatchers.IO) { FontLibrary.import(context, prefs, uri) }
+                            val result = withContext(Dispatchers.IO) { FontLibrary.import(context, prefs, uri) }
                             importing = false
-                            when {
-                                outcome == null -> onMessage("Couldn't read that font file. TTF, OTF and TTC work.")
-                                outcome.duplicate -> onMessage("${outcome.entry.name} is already in your fonts.")
-                                else -> {
-                                    library = FontLibrary.list(context, prefs)
-                                    onMessage("${outcome.entry.name} added to your fonts.")
+                            when (result) {
+                                is FontLibrary.ImportResult.Unreadable ->
+                                    onMessage("Couldn't read that font file. TTF, OTF and TTC work.")
+                                is FontLibrary.ImportResult.TooLarge ->
+                                    onMessage("That file is over 32 MB, the limit for a font here.")
+                                is FontLibrary.ImportResult.Done -> {
+                                    val outcome = result.outcome
+                                    if (outcome.duplicate) {
+                                        onMessage("${outcome.entry.name} is already in your fonts.")
+                                    } else {
+                                        library = FontLibrary.list(context, prefs)
+                                        onMessage("${outcome.entry.name} added to your fonts.")
+                                    }
                                 }
                             }
                         }

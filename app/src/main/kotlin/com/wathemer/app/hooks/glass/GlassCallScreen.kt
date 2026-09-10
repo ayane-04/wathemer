@@ -129,7 +129,7 @@ internal fun callCardGlass(card: ViewGroup) {
     }
     g.tint = { glassTintColor }
     g.backdrop = { bubbleBackdrop(g) }
-    g.placement = { bubbleWpPlacement }
+    g.placement = { bubblePlacement(g) }
     g.dim = { 0f }
     g.rimColor = glassTint(BUBBLE_RIM_ALPHA)
     g.rimWidth = d
@@ -231,7 +231,7 @@ internal fun callMoreMenuGlass(label: View) {
     val radius = readCornerRadius(frame) ?: (d * CARD_RADIUS_DP)
     // Straight assignment, never clearBg: its keep-clear re-assert kills the stamp.
     frame.background = FrostDrawable(
-        frame, bubbleBackdrop(frame),
+        frame, { host -> wallpaperRecordOf(host) },
         radius, glassTintColor,
         strokeWidth = frame.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
         ignorePadding = true,

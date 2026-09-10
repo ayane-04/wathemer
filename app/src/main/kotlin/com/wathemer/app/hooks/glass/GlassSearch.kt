@@ -561,9 +561,9 @@ private fun insertSearchRowPane(list: View) {
             tintColor = glassTintColor
         }
         tint = { glassTintColor }
-        // Via the activity's content view: the search fragment's own root holds no wallpaper, the same trap as the popup path.
-        backdrop = { contentRef?.get()?.let { c -> bubbleBackdrop(c) } }
-        placement = { bubbleWpPlacement }
+        // Through the list's Activity: the search fragment's own root holds no wallpaper, the same trap as the popup path.
+        backdrop = { bubbleBackdrop(list) }
+        placement = { bubblePlacement(list) }
         dim = { 0f }
         rimColor = glassTint(BUBBLE_RIM_ALPHA)
         rimWidth = d

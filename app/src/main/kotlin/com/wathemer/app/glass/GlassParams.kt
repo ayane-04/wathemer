@@ -11,7 +11,22 @@ class GlassParams(var density: Float) {
     /** Notified after any property changes, so the view can invalidate itself. */
     var onChanged: (() -> Unit)? = null
 
-    private fun <T> set(current: T, new: T, assign: (T) -> Unit): Boolean {
+    private inline fun <T> set(current: T, new: T, assign: (T) -> Unit): Boolean {
+        if (current == new) return false
+        assign(new)
+        onChanged?.invoke()
+        return true
+    }
+
+    // Typed twins: the generic form boxes both operands before comparing, which is garbage on the bubble path.
+    private inline fun set(current: Float, new: Float, assign: (Float) -> Unit): Boolean {
+        if (current == new) return false
+        assign(new)
+        onChanged?.invoke()
+        return true
+    }
+
+    private inline fun set(current: Int, new: Int, assign: (Int) -> Unit): Boolean {
         if (current == new) return false
         assign(new)
         onChanged?.invoke()

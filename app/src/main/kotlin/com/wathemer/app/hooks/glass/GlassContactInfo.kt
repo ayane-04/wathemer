@@ -228,9 +228,9 @@ private fun insertInfoCardPane(stack: ViewGroup) {
             tintColor = glassTintColor
         }
         tint = { glassTintColor }
-        // This window first, contentRef only as fallback: contentRef is home's decor and resolves the wrong screen here.
-        backdrop = { bubbleBackdrop(stack) ?: contentRef?.get()?.let { c -> bubbleBackdrop(c) } }
-        placement = { bubbleWpPlacement }
+        // Through this window's Activity; home's decor is the wrong screen here.
+        backdrop = { bubbleBackdrop(stack) }
+        placement = { bubblePlacement(stack) }
         dim = { 0f }
         rimColor = glassTint(BUBBLE_RIM_ALPHA)
         rimWidth = d
@@ -274,9 +274,9 @@ internal fun memberSheetPane(sheet: View) {
                     tintColor = glassTintColor
                 }
                 tint = { glassTintColor }
-                // Local root first, `contentRef` second. See [insertInfoCardPane].
-                backdrop = { bubbleBackdrop(sheet) ?: contentRef?.get()?.let { c -> bubbleBackdrop(c) } }
-                placement = { bubbleWpPlacement }
+                // Through the sheet's own Activity, never home's decor. See [insertInfoCardPane].
+                backdrop = { bubbleBackdrop(sheet) }
+                placement = { bubblePlacement(sheet) }
                 dim = { 0f }
                 rimColor = glassTint(BUBBLE_RIM_ALPHA)
                 rimWidth = d
@@ -320,18 +320,21 @@ private fun collectInfoCardRects(list: ViewGroup, out: RectList) {
     val insetY = list.dp(INFO_CARD_GAP_DP)
     var tailL = 0f
     var tailR = 0f
-    var tailTop = infoTailSeed
-    var tailBottom = infoTailSeedBottom
-    infoTailSeed = Float.NaN
-    if (!tailTop.isNaN()) {
-        tailL = infoTailSeedL
-        tailR = infoTailSeedR
-    }
+    var tailTop = Float.NaN
+    var tailBottom = Float.NaN
     for (i in 0 until list.childCount) {
         val child = list.getChildAt(i) ?: continue
         if (!child.isShown || child.height <= 0 || child.width <= 0) continue
         if (child.getTag(infoCardStackTag) != null) {
             collectStackCards(child as? ViewGroup ?: continue, out, insetX, insetY)
+            // Take the participants seed this frame, not the next: a frame late trails the fling.
+            if (!infoTailSeed.isNaN()) {
+                tailTop = infoTailSeed
+                tailBottom = infoTailSeedBottom
+                tailL = infoTailSeedL
+                tailR = infoTailSeedR
+                infoTailSeed = Float.NaN
+            }
             continue
         }
         child.getLocationOnScreen(infoCardAt)

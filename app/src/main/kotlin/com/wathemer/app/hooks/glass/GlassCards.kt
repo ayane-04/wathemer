@@ -378,7 +378,8 @@ private fun syncFolderCard() {
 // ── List pages whose own root cannot host a pane ───────────────────────────────────
 // None of their roots stack, so android.R.id.content hosts: a later sibling of the wallpaper, its index 0 sits above it and below the page.
 // A framework id, not a WhatsApp one, so it is looked up directly and never through waId.
-private val contentCards = WeakHashMap<View, GlassView>()
+// Weak values here and below: the pane sits in the key's own window, and a strong value would pin a dead window's tree.
+private val contentCards = WeakHashMap<View, WeakReference<GlassView>>()
 
 private val contentCardTag = tagKey("wathemer-content-card")
 
@@ -435,7 +436,7 @@ internal fun injectContentCard(list: View, label: String, frameCard: Boolean = f
     list.setTag(contentCardTag, true)
     val glass = newCardGlass(host)
     host.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
-    contentCards[list] = glass
+    contentCards[list] = WeakReference(glass)
     if (!frameCard) {
         (list as? ViewGroup)?.clipToPadding = false
         // A ListView's own divider reads as a seam over glass; transparent rather than null keeps the spacing.
@@ -606,7 +607,7 @@ private fun alignIconlessRows(v: View, gutter: Int, want: Int, depth: Int) {
 
 /** Wraps the list itself, so an empty page whose list is GONE gets no slab. */
 private fun syncContentCard(list: View, label: String, frameCard: Boolean = false) {
-    val glass = contentCards[list] ?: return
+    val glass = contentCards[list]?.get() ?: return
     val host = glass.parent as? ViewGroup ?: return
     if (host.width <= 0 || host.height <= 0) return
     // Before the empty early-out: the header band belongs to the window, not to the list's content.
@@ -736,7 +737,7 @@ private fun syncContentCard(list: View, label: String, frameCard: Boolean = fals
 // Its own pad: these blocks are dense ink to every edge, and the shared 8dp read cramped on sight.
 private const val BLOCK_CONTENT_PAD_DP = 10f
 
-private val blockCards = WeakHashMap<View, GlassView>()
+private val blockCards = WeakHashMap<View, WeakReference<GlassView>>()
 
 private val blockCardTag = tagKey("wathemer-block-card")
 
@@ -751,7 +752,7 @@ internal fun injectBlockCard(block: View, label: String) {
     block.setTag(blockCardTag, true)
     val glass = newCardGlass(host)
     host.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
-    blockCards[block] = glass
+    blockCards[block] = WeakReference(glass)
     val ref = WeakReference(block)
     host.viewTreeObserver.addOnGlobalLayoutListener {
         runCatching { ref.get()?.let { syncBlockCard(it, label) } }
@@ -761,7 +762,7 @@ internal fun injectBlockCard(block: View, label: String) {
 
 /** Sides pinned to the list card's inset so the two edges align; top and bottom hug the block's ink. */
 private fun syncBlockCard(block: View, label: String) {
-    val glass = blockCards[block] ?: return
+    val glass = blockCards[block]?.get() ?: return
     val host = glass.parent as? ViewGroup ?: return
     if (host.width <= 0 || host.height <= 0) return
     if (!block.isShown || block.width <= 0 || block.height <= 0) {
@@ -847,7 +848,7 @@ private fun repinToTop(list: View) {
 internal fun extendList(list: View) {
     if (list.getTag(doneTag) != null) return
     val parent = list.parent as? ViewGroup ?: return
-    // android.R.id.list is generic; this guard fails closed, so a renamed class kills the extension silently.
+    // android.R.id.list is generic; this guard fails closed, and classIs reports a suspected rename after enough rejections.
     if (!WaIds.classIs(parent, "ConversationsContainer")) return
     // Archived inflates this container too; only the window that has header is home.
     if (headerIdPin != 0 && list.rootView?.findViewById<View>(headerIdPin) == null) return
@@ -1179,15 +1180,15 @@ internal fun syncChannelCard() {
 
 // ── Folder header: the chat screen's band and capsule, one pair per window ─────────
 // One band only: two abutting panes cannot be seamless, each blur kernel is clipped to its own capture.
-internal val folderBands = WeakHashMap<View, GlassView>()
+internal val folderBands = WeakHashMap<View, WeakReference<GlassView>>()
 
-private val folderCapsules = WeakHashMap<View, GlassView>()
+private val folderCapsules = WeakHashMap<View, WeakReference<GlassView>>()
 
 /** Whether this window's whole toolbar already carries [ensureFolderHeader]'s capsule. */
 internal fun folderCapsuleOwns(v: View): Boolean {
     if (actionBarRootId == 0) return false
     val abr = v.rootView?.findViewById<View>(actionBarRootId) ?: return false
-    return folderCapsules[abr]?.parent != null
+    return folderCapsules[abr]?.get()?.parent != null
 }
 
 private val folderHeaderAt = IntArray(2)
@@ -1217,7 +1218,7 @@ private fun ensureFolderHeader(anchor: View, label: String) {
     if (solid <= 0) return
     val total = solid
 
-    var band = folderBands[abr]
+    var band = folderBands[abr]?.get()
     if (band == null || band.parent !== abr) {
         band = GlassView(abr.context).apply {
             underlay = under
@@ -1254,7 +1255,7 @@ private fun ensureFolderHeader(anchor: View, label: String) {
                 gravity = Gravity.TOP
             },
         )
-        folderBands[abr] = band
+        folderBands[abr] = WeakReference(band)
         XposedBridge.log("[$TAG] $label band inserted (solid=${solid}px)")
     }
     band.params.tintColor = glassTint(convBandAlpha())
@@ -1264,7 +1265,7 @@ private fun ensureFolderHeader(anchor: View, label: String) {
 
     // No capsule without a shown toolbar; the settings search pill is its own surface.
     if (toolbar == null) return
-    var cap = folderCapsules[abr]
+    var cap = folderCapsules[abr]?.get()
     if (cap == null || cap.parent !== abr) {
         cap = GlassView(abr.context).apply {
             underlay = under
@@ -1280,7 +1281,7 @@ private fun ensureFolderHeader(anchor: View, label: String) {
         }
         // Directly above the band, still under every app view.
         abr.addView(cap, abr.indexOfChild(band) + 1, FrameLayout.LayoutParams(0, 0))
-        folderCapsules[abr] = cap
+        folderCapsules[abr] = WeakReference(cap)
         XposedBridge.log("[$TAG] $label capsule inserted")
     }
     // The remainder of the tint budget; band plus capsule sum to TINT_ALPHA exactly, including 0.

@@ -10,18 +10,16 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.view.View
+import java.lang.ref.WeakReference
 
 /**
  * Frosted glass as a background drawable, for surfaces a GlassView child cannot serve. Static
  * by design: the wallpaper does not move, and the blur is a downscale/upscale, not a convolution.
  */
 class FrostDrawable(
-    private val view: View,
-    /**
-     * Pre-blurred wallpaper to sample; null is correct over a live glass surface, which already
-     * supplies the blur. No InsetDrawable here: setBackground folds its padding in and it runs away.
-     */
-    private val small: Bitmap?,
+    view: View,
+    /** The window's wallpaper record, resolved per draw through the view; null is right over a live glass surface, which supplies the blur. */
+    private val source: ((View) -> WallpaperRecord?)?,
     private var radius: Float,
     private var tint: Int,
     /** A 1px-ish rim, echoing the Fresnel highlight the GlassView panes draw. 0 disables it. */
@@ -30,6 +28,9 @@ class FrostDrawable(
     /** Fill the full bounds; the Calls tab discs' own ripple ignores their padding. */
     private val ignorePadding: Boolean = false,
 ) : Drawable() {
+
+    // Weak: forcedBg holds this drawable, and a strong view here would pin its own map key.
+    private val viewRef = WeakReference(view)
 
     private val loc = IntArray(2)
     private val clip = RectF()
@@ -60,19 +61,28 @@ class FrostDrawable(
     }
 
     override fun draw(canvas: Canvas) {
+        val view = viewRef.get() ?: return
         val b = bounds
         if (b.width() <= 0 || b.height() <= 0) return
         val dm = view.resources.displayMetrics
 
+        // Read once per draw: a wallpaper swap changes the record, and the bitmap and its matrix must come from one record.
+        val rec = source?.invoke(view)
+        val small = rec?.bubble
         // Matrix, not an integer src rect: the bitmap is not screen-sized and rounding jumped layouts.
         // Screen, not window, position: in a dialog getLocationInWindow sampled well below itself.
         if (small != null) {
             view.getLocationOnScreen(loc)
-            matrix.reset()
-            matrix.setScale(
-                dm.widthPixels / small.width.toFloat(),
-                dm.heightPixels / small.height.toFloat(),
-            )
+            val place = rec.bubblePlacement
+            if (place != null) {
+                // The wallpaper view is CENTER_CROP, so only its own matrix lands the patch that sits behind this view.
+                matrix.set(place)
+            } else {
+                matrix.setScale(
+                    dm.widthPixels / small.width.toFloat(),
+                    dm.heightPixels / small.height.toFloat(),
+                )
+            }
             matrix.postTranslate(-loc[0].toFloat(), -loc[1].toFloat())
         }
 
@@ -111,35 +121,19 @@ class FrostDrawable(
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
     companion object {
-        /** Blur strength via downscale. Do not cut it to fix blockiness; the mapping, not this, causes that. */
-        private const val BLUR_SHRINK = 20
+        /** The copy's size: a quarter of the wallpaper, so the screen stretches it four times at most. */
+        private const val FROST_SHRINK = 4
 
-        /** Rebuild at 1/4 before use: one bilinear step from 1/20 to full size leaves visible facets. */
-        private const val SMOOTH_FRACTION = 4
+        /** Three box passes of this radius at a quarter size: a Gaussian at the frost's strength. */
+        private const val FROST_RADIUS = 2
+        private const val FROST_PASSES = 3
 
-        /** Build the shared blurred copy by progressive halving; one big jump leaves blocky facets. */
+        /** Build the shared blurred copy: halve to a quarter, then a real blur; a stretched shrink shows its grid. */
         fun shrinkOf(source: Bitmap): Bitmap? = runCatching {
-            var cur = source
-            var w = source.width
-            var h = source.height
-            val floor = (source.width / BLUR_SHRINK).coerceAtLeast(1)
-            while (w / 2 >= floor && h / 2 >= 1) {
-                val next = Bitmap.createScaledBitmap(cur, w / 2, (h / 2).coerceAtLeast(1), true)
-                if (cur !== source) cur.recycle()
-                cur = next
-                w = cur.width
-                h = cur.height
-            }
-            val ceiling = (source.width / SMOOTH_FRACTION).coerceAtLeast(1)
-            while (w * 2 <= ceiling) {
-                val next = Bitmap.createScaledBitmap(cur, w * 2, h * 2, true)
-                if (cur !== source) cur.recycle()
-                cur = next
-                w = cur.width
-                h = cur.height
-            }
-            if (cur === source) Bitmap.createScaledBitmap(source, ceiling, source.height / SMOOTH_FRACTION, true)
-            else cur
+            val small = BitmapBlur.halveTo(source, FROST_SHRINK)
+            val blurred = BitmapBlur.boxBlur(small, FROST_RADIUS, FROST_PASSES)
+            if (small !== source) small.recycle()
+            blurred
         }.getOrNull()
     }
 }

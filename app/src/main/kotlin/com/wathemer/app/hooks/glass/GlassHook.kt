@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Rect
@@ -13,6 +14,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -24,7 +27,9 @@ import android.widget.TextView
 import com.wathemer.app.glass.BackdropCapture
 import com.wathemer.app.glass.FrostDrawable
 import com.wathemer.app.glass.GlassParams
+import com.wathemer.app.glass.GlassShader
 import com.wathemer.app.glass.GlassView
+import com.wathemer.app.glass.WallpaperLook
 import com.wathemer.app.hooks.ActivityLifecycle
 import com.wathemer.app.hooks.HookLog
 import com.wathemer.app.hooks.ModulePrefs
@@ -58,6 +63,9 @@ object GlassHook {
             HookLog.hit("guard/captureCycle", msg)
         }
         HookLog.arm("guard/captureCycle")
+        // A program that fails to compile falls back silently; the ledger has to say so.
+        GlassShader.onCompileFailure = { what, t -> HookLog.fail("glass/agsl/$what", t) }
+        GlassShader.onCompiled = { what -> HookLog.hit("glass/agsl/$what") }
         val res = app.resources
         // Density is only available here, so the dp to px conversion cannot live in loadGlassPrefs.
         GlassParams.defaultRimStrokePx =
@@ -191,7 +199,7 @@ object GlassHook {
         }
 
         // ── Snackbars ────────────────────────────────────────────────────────────────────
-        // Material's slab cleared and frosted; found from the text view, the layout's one stable id.
+        // Material's slab frosted in place; found from the text view, the layout's one stable id.
         val snackTextId = res.waId("snackbar_text", pkg)
         val snackFrostTag = tagKey("wathemer-snackbar-frost")
         if (snackTextId != 0) ViewThemeDispatcher.onId(snackTextId) { v ->
@@ -207,7 +215,7 @@ object GlassHook {
             // Posted: the bar measures on the frame after attach, and frost needs a real size.
             f.post {
                 runCatching {
-                    clearBg(f, "snackbar")
+                    // No clear first: the forced frost replaces the fill, and a clear that outlives a zero-size bail leaves the bar bare.
                     // The menu's scrim, not the wallpaper tint: a bar floats over content and carries no blur of its own.
                     // Forced: Material's snackbar bridges setBackground to setBackgroundDrawable, and the interceptor sees that path.
                     frost(
@@ -816,7 +824,7 @@ object GlassHook {
                         }
                         // Blurred wallpaper as the fill: a film lets the bubble edge bleed through these.
                         val d = FrostDrawable(
-                            v, bubbleBackdrop(v), v.height / 2f, glassTint(CHIP_ALPHA),
+                            v, { host -> wallpaperRecordOf(host) }, v.height / 2f, glassTint(CHIP_ALPHA),
                             strokeWidth = v.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
                             ignorePadding = true,
                         )
@@ -830,12 +838,6 @@ object GlassHook {
                     v.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply.run() }
                 }
             }
-        }
-
-        // ── Top chat banners ─────────────────────────────────────────────────────────────
-        val chatBannerId = res.waId("banner_content", pkg)
-        if (chatBannerId != 0) ViewThemeDispatcher.onId(chatBannerId) { v ->
-            frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(16f))
         }
 
         // The forward picker's send bar, an opaque strip under the recipients.
@@ -1155,8 +1157,13 @@ object GlassHook {
             // A drawable, never a pane: this coordinator orders touch by child index; the appbar has no id.
             val holder = (v.parent as? View)
                 ?.takeIf { it.javaClass.name.contains("AppBarLayout") } ?: v
-            runCatching { liquidFrostOnLayout(holder, CARD_RADIUS_DP, TINT_ALPHA) }
-                .onFailure { logOnce("emoji edit toolbar frost threw: $it") }
+            // Forced on the bar itself: it is kept cleared above, and a plain frost there is swapped straight back.
+            runCatching {
+                liquidFrostOnLayout(
+                    holder, CARD_RADIUS_DP, TINT_ALPHA,
+                    forceLabel = if (holder === v) "emoji_edit_text_toolbar" else null,
+                )
+            }.onFailure { logOnce("emoji edit toolbar frost threw: $it") }
         }
         // The tray draws no fill of its own, so in a dialog it shows the window behind straight through.
         val trayViewId = res.waId("expressions_tray_view_id", pkg)
@@ -1336,8 +1343,8 @@ object GlassHook {
             clearBg(v, "toolbar")
             // Pad the toolbar's end or the pane clips at the screen edge; 8dp, tighter than the free-floating surfaces.
             val side = (8 * v.resources.displayMetrics.density).toInt()
-            if (v.paddingRight != side) {
-                v.setPadding(v.paddingLeft, v.paddingTop, side, v.paddingBottom)
+            if (v.paddingEnd != side) {
+                v.setPaddingRelative(v.paddingStart, v.paddingTop, side, v.paddingBottom)
             }
         }
         if (toolbarContainerId != 0) ViewThemeDispatcher.onId(toolbarContainerId) { v ->
@@ -1576,6 +1583,28 @@ object GlassHook {
         armed = true
         XposedBridge.log("[$TAG] armed (header=$headerId pagerHolder=$pagerHolderId)")
         HookLog.arm("glass/engine", "blur=${BLUR_DP}dp tint=$TINT_ALPHA radius=${CARD_RADIUS_DP}dp")
+        // A global wallpaper decoded before this point waited here; the wallpaper installer runs first.
+        pendingGlobal?.let { resolveGlassTintFrom(it, pendingGlobalDim) }
+        pendingGlobal = null
+    }
+
+    private var pendingGlobal: Bitmap? = null
+    private var pendingGlobalDim = 0f
+
+    /** The global wallpaper's bitmap as soon as the cache has it; any thread. Resolves the tint before any pane bakes it. */
+    fun noteGlobalWallpaper(bitmap: Bitmap, dim: Float) {
+        Handler(Looper.getMainLooper()).post {
+            if (armed) resolveGlassTintFrom(bitmap, dim) else { pendingGlobal = bitmap; pendingGlobalDim = dim }
+        }
+    }
+
+    /** Invalidates every frosted view under [decor]; a swapped wallpaper reaches pills that already recorded. */
+    private fun invalidateFrosts(decor: View) {
+        fun walk(v: View) {
+            if (v.getTag(frostTag) != null) v.invalidate()
+            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i) ?: continue)
+        }
+        runCatching { walk(decor) }
     }
 
 
@@ -1586,10 +1615,21 @@ object GlassHook {
     fun badgeGlassText(): Int = if (armed) 0xFFFFFFFF.toInt() else 0
 
 
-    /** WallpaperImage calls this at inject, so the channel resolves before the first pane bakes it. */
-    fun noteWallpaperInjected(image: View, dim: View?) {
+    /** WallpaperImage calls this at inject: the tags the draw path reads, and the tint resolve for the global wallpaper only. */
+    fun noteWallpaperInjected(decor: View, image: ImageView, dim: View?, look: WallpaperLook) {
+        image.setTag(wallpaperLookTag, look)
+        noteWallpaperViews(decor, image, dim)
         if (!armed) return
-        resolveGlassTint(listOfNotNull(image, dim))
+        if (look.global) resolveGlassTint(listOfNotNull(image, dim))
+    }
+
+    /** WallpaperImage calls this after swapping a window's image in place; the record rebuilds on its next read. */
+    fun noteWallpaperSwapped(decor: View, image: ImageView, dim: View?, look: WallpaperLook) {
+        image.setTag(wallpaperLookTag, look)
+        noteWallpaperViews(decor, image, dim)
+        if (!armed) return
+        markWallpaperGeometryDirty()
+        invalidateFrosts(decor)
     }
 
 

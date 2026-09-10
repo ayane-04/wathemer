@@ -190,7 +190,8 @@ internal fun applyLifts() {
 /** Fully transparent: the pane behind it is the button, not a tint on top of it. */
 private val fabTint = ColorStateList.valueOf(Color.TRANSPARENT)
 
-private val fabGlass = WeakHashMap<View, GlassView>()
+// Weak values here and below: the pane sits in the key's own window, and a strong value would pin a dead window's tree.
+private val fabGlass = WeakHashMap<View, WeakReference<GlassView>>()
 
 /** The glyph ships dark; whitened through the A04 field because WDSFab's setImageTintList ignores its argument. */
 private val fabIconTint = ColorStateList.valueOf(Color.WHITE)
@@ -231,7 +232,7 @@ private fun glassFab(v: View) {
     syncFabPane(v)
 }
 
-private val pageFabPanes = WeakHashMap<View, GlassView>()
+private val pageFabPanes = WeakHashMap<View, WeakReference<GlassView>>()
 
 /** [glassFab] outside the home window: same transparent fill and white glyph, pane from [syncPageFabPane]. */
 internal fun glassPageFab(v: View) {
@@ -256,7 +257,7 @@ internal fun glassPageFab(v: View) {
 private fun syncPageFabPane(fab: View) {
     val parent = fab.parent as? ViewGroup ?: return
     val content = fab.rootView?.findViewById<ViewGroup>(android.R.id.content) ?: return
-    var glass = pageFabPanes[fab]
+    var glass = pageFabPanes[fab]?.get()
     if (glass == null || glass.parent !== parent) {
         val backdrop = backdropFor(fab, parent, wallpaperUnderlay(content)) ?: return
         glass = GlassView(parent.context).apply {
@@ -279,7 +280,7 @@ private fun syncPageFabPane(fab: View) {
             glass, parent.indexOfChild(fab).coerceAtLeast(0),
             ViewGroup.LayoutParams(fab.width, fab.height),
         )
-        pageFabPanes[fab] = glass
+        pageFabPanes[fab] = WeakReference(glass)
         bindPane(glass, fab, "page fab")
         XposedBridge.log("[$TAG] page fab pane inserted (${fab.width}x${fab.height})")
     }
@@ -323,7 +324,7 @@ private fun flattenFab(v: View) {
 private fun syncFabPane(fab: View) {
     val content = contentRef?.get() ?: return
     val backdrop = pagerHolderRef?.get() ?: return
-    var glass = fabGlass[fab]
+    var glass = fabGlass[fab]?.get()
     if (glass == null || glass.parent !== content) {
         glass = GlassView(content.context).apply {
             this.backdrop = backdrop
@@ -345,7 +346,7 @@ private fun syncFabPane(fab: View) {
             glass, content.indexOfChild(fab).coerceAtLeast(0),
             FrameLayout.LayoutParams(0, 0),
         )
-        fabGlass[fab] = glass
+        fabGlass[fab] = WeakReference(glass)
         // Registered even though the visibility line below overlaps: a detached button never lays out again.
         bindPane(glass, fab, "fab pane")
         XposedBridge.log("[$TAG] fab pane inserted (${fab.width}x${fab.height})")
@@ -391,7 +392,7 @@ internal fun folderFab(fab: View, label: String) {
         }
         XposedBridge.log("[$TAG] $label fab cleared (${fab.width}x${fab.height})")
     }
-    var glass = fabGlass[fab]
+    var glass = fabGlass[fab]?.get()
     if (glass == null || glass.parent !== content) {
         glass = GlassView(content.context).apply {
             underlay = wallpaperUnderlay(content)
@@ -408,7 +409,7 @@ internal fun folderFab(fab: View, label: String) {
             }
         }
         content.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
-        fabGlass[fab] = glass
+        fabGlass[fab] = WeakReference(glass)
         bindPane(glass, fab, "$label fab pane")
         XposedBridge.log("[$TAG] $label fab pane inserted (${fab.width}x${fab.height})")
     }

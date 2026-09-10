@@ -35,7 +35,8 @@ private val convBannerTag = tagKey("wathemer-conv-banner")
 /** Where the header capsule ends inside the holder; the strip hangs off this, not off the holder's full height. */
 private var convCapsuleBottom = -1
 
-private val convPanes = WeakHashMap<View, GlassView>()
+// Weak values: a pane reaches its owner through the view tree, and a strong value would pin every dead chat's tree.
+private val convPanes = WeakHashMap<View, WeakReference<GlassView>>()
 
 private val convRect = Rect()
 
@@ -206,6 +207,7 @@ internal fun syncConvBand(holder: ViewGroup) {
     holder.getLocationOnScreen(at)
     abr.getLocationOnScreen(abrAt)
     val pillBottom = convPanes.values
+        .mapNotNull { it.get() }
         .filter { it.parent === holder }
         .mapNotNull { it.layoutParams as? FrameLayout.LayoutParams }
         .maxOfOrNull { it.topMargin + it.height }
@@ -343,7 +345,8 @@ internal fun syncMentionPane(host: FrameLayout) {
 
 /** Zero every header pane but the one taking the capsule now, or two pills stack. */
 private fun collapseHeaderPanes(holder: ViewGroup, keep: View) {
-    for ((owner, g) in convPanes.entries) {
+    for ((owner, ref) in convPanes.entries) {
+        val g = ref.get() ?: continue
         if (g.parent !== holder || owner === keep) continue
         val glp = g.layoutParams ?: continue
         if (glp.width != 0 || glp.height != 0) {
@@ -502,7 +505,7 @@ internal fun pill(
     if (r <= l || b <= t) return
     // A holder inside the coordinator has to name its own source, or the capture would contain the pane.
     val src = source ?: if (coordinatorFallback) convCoordRef?.get() else null
-    var glass = convPanes[owner]
+    var glass = convPanes[owner]?.get()
     if (glass == null || glass.parent !== holder) {
         glass = GlassView(holder.context).apply {
             backdrop = src
@@ -519,7 +522,7 @@ internal fun pill(
             }
         }
         holder.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
-        convPanes[owner] = glass
+        convPanes[owner] = WeakReference(glass)
         HookLog.hit("pane/convCapsule")
     } else if (glass.backdrop == null && src != null) {
         // The coordinator, or the banner's list host, may have attached after the pill did.
@@ -596,7 +599,8 @@ internal fun syncConvFooter() {
     if (convPanes.isNotEmpty()) {
         // parent === footer only: the header capsule shares this map and belongs to syncConvToolbar.
         val gone = ArrayList<View>()
-        for ((owner, glass) in convPanes) {
+        for ((owner, ref) in convPanes) {
+            val glass = ref.get() ?: continue
             if (glass.parent !== footer) continue
             if (owner === input || owner === send) continue
             // Departed, not merely unmeasured: a live owner reads zero-size on animation frames.
@@ -613,7 +617,7 @@ internal fun syncConvFooter() {
             }
         }
         for (o in gone) {
-            convPanes.remove(o)?.let { g -> (g.parent as? ViewGroup)?.removeView(g) }
+            convPanes.remove(o)?.get()?.let { g -> (g.parent as? ViewGroup)?.removeView(g) }
         }
     }
 
@@ -662,7 +666,8 @@ private fun goneAbove(v: View?, stop: View): Boolean {
 
 /** Zero-size, never hide: syncPaneVisibility is the only visibility writer. Scoped by parent, the map also holds the header capsule. */
 private fun collapseConvPanes(footer: ViewGroup) {
-    for (glass in convPanes.values) {
+    for (ref in convPanes.values) {
+        val glass = ref.get() ?: continue
         if (glass.parent !== footer) continue
         val lp = glass.layoutParams ?: continue
         if (lp.width != 0 || lp.height != 0) {
@@ -683,7 +688,7 @@ private fun composePane(
     backdropView: ViewGroup?,
 ) {
     if (r <= l || b <= t) return
-    var glass = convPanes[owner]
+    var glass = convPanes[owner]?.get()
     if (glass == null || glass.parent !== footer) {
         glass = GlassView(footer.context).apply {
             backdrop = backdropView
@@ -701,7 +706,7 @@ private fun composePane(
         }
         // Index 0, so WhatsApp's own icons and the text field keep painting on top of it.
         footer.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
-        convPanes[owner] = glass
+        convPanes[owner] = WeakReference(glass)
         HookLog.hit("pane/convCompose")
     } else if (glass.backdrop == null && backdropView != null) {
         glass.backdrop = backdropView

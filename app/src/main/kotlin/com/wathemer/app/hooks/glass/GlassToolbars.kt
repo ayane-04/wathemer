@@ -88,8 +88,8 @@ internal fun syncAltToolbarGlass() {
     val bar = group.parent as? ViewGroup ?: return
     val padStart = holder.dp(CARD_INSET_DP).toInt()
     val padEnd = holder.dp(CARD_INSET_DP + ALT_PANE_PAD_DP).toInt()
-    if (bar.paddingLeft != padStart || bar.paddingRight != padEnd) {
-        bar.setPadding(padStart, bar.paddingTop, padEnd, bar.paddingBottom)
+    if (bar.paddingStart != padStart || bar.paddingEnd != padEnd) {
+        bar.setPaddingRelative(padStart, bar.paddingTop, padEnd, bar.paddingBottom)
     }
 
     // Scale the glyphs only, layout bounds keep the touch targets; scoped to bar or the community photo would shrink too.

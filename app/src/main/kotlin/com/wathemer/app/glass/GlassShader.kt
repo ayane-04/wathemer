@@ -7,8 +7,8 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 
 /**
- * Two AGSL programs, because the blur must sit between them: refraction needs a sharp backdrop
- * and is blurred after; the light pass reads no image and runs at full resolution, never blurred.
+ * Three programs from shared fragments: the panes split refraction and light around their blur;
+ * a bubble's blur is baked into its bitmap, so it runs both in one pass.
  */
 object GlassShader {
 
@@ -142,22 +142,39 @@ object GlassShader {
         }
     """.trimIndent()
 
-    /** Transmission: refract the sharp capture. Outputs colour only, no lighting and no tint. */
-    val REFRACT_AGSL: String = """
+    /** The transmission's uniforms, one text for the pane and the bubble programs. */
+    private val REFRACT_UNIFORMS = """
         uniform shader content;
         uniform float ior;
         uniform float dispersion;
         uniform float magnify;
         uniform float maxDisplace;    // px, soft ceiling on the bend
         uniform float transGamma;     // <1 lifts the transmitted darks; 1 is off
+    """.trimIndent()
 
-        $COMMON
+    /** The light pass's uniforms, one text for the pane and the bubble programs. */
+    private val LIGHT_UNIFORMS = """
+        uniform float4 tint;             // straight (non-premultiplied) rgba
+        uniform float  specStrength;
+        uniform float  specPower;
+        uniform float  specPower2;
+        uniform float2 light1;
+        uniform float2 light2;
+        uniform float  fresnelStrength;
+        uniform float  fresnelPower;
+        uniform float  microAmp;         // normal-tilt noise amplitude; 0 disables
+        uniform float  microScale;       // noise period, px
+        uniform float  innerShadow;      // dark band just inside the rim; 0 disables
+        uniform float  sheenStrength;    // broad third lobe; 0 disables
+        uniform float  sheenPower;
+        uniform float2 light3;
+        uniform float2 pressPos;         // surface-local px; a press pools light here
+        uniform float  pressAmp;         // added to the light scalar; 0 disables
+        uniform float  pressR;           // pool radius, px
+    """.trimIndent()
 
-        half4 main(float2 fragCoord) {
-            float4 sf = surfaceAt(fragCoord);
-            float3 n = float3(sf.xy, normalZ(sf.xy));
-            float  t = sf.z;
-
+    /** Snell through the slab to the displacement `off`; needs `n`, `t`, `fragCoord` in scope. */
+    private val TRANSMIT_BEND = """
             // Snell, then walk the bent ray down through the slab to the backdrop plane. On the
             // flat plateau n = +z, the ray comes straight back out and the displacement is exactly
             // zero, so the readable middle falls out of the maths rather than being a special case.
@@ -187,7 +204,10 @@ object GlassShader {
                 float2 nd = (fragCoord - size * 0.5) / halfSize;
                 off -= nd * halfSize * magnify * (1.0 - clamp(dot(nd, nd), 0.0, 1.0));
             }
+    """.trimIndent()
 
+    /** The pane's three reads into `outc`; the fringe always runs because the panes keep dispersion on. */
+    private val TAPS_PANE = """
             // Per-channel spread, gated by edge weight so the fringe only exists at the rim.
             float  w  = 1.0 - t;
             float2 dR = off * (1.0 - dispersion * w);
@@ -199,7 +219,28 @@ object GlassShader {
             half  cr = content.eval(clamp(fragCoord + dR,  lo, hi)).r;
             half  cb = content.eval(clamp(fragCoord + dB,  lo, hi)).b;
             half4 outc = half4(cr, cg.g, cb, cg.a);
+    """.trimIndent()
 
+    /** The bubble's reads into `outc`; the fringe reads are skipped when dispersion is 0. */
+    private val TAPS_BUBBLE = """
+            float2 lo = float2(0.5, 0.5);
+            float2 hi = size - float2(0.5, 0.5);
+            half4 cg = content.eval(clamp(fragCoord + off, lo, hi));
+            half  cr = cg.r;
+            half  cb = cg.b;
+            // Uniform branch, so it costs nothing; a bubble with dispersion 0 pays one read, not three.
+            if (dispersion > 0.0) {
+                float  w  = 1.0 - t;
+                float2 dR = off * (1.0 - dispersion * w);
+                float2 dB = off * (1.0 + dispersion * w);
+                cr = content.eval(clamp(fragCoord + dR, lo, hi)).r;
+                cb = content.eval(clamp(fragCoord + dB, lo, hi)).b;
+            }
+            half4 outc = half4(cr, cg.g, cb, cg.a);
+    """.trimIndent()
+
+    /** Transmission gamma on `outc`, before any coverage multiply or the premultiplication breaks. */
+    private val TRANSMIT_GAMMA = """
             // Transmission gamma, which is what stops the backdrop reading as frosted. See
             // GlassParams.transGamma for the measurements behind the default.
             //
@@ -212,33 +253,10 @@ object GlassShader {
             if (transGamma < 0.999 && outc.a > 0.99) {
                 outc = half4(half3(pow(float3(outc.rgb), float3(transGamma))), outc.a);
             }
-            // Premultiplied, so one multiply fades colour and alpha together and correctly.
-            return outc * half(fadeAt(fragCoord));
-        }
     """.trimIndent()
 
-    /** Lighting and tint. Reads no image, so it runs at full resolution and stays crisp. */
-    val LIGHT_AGSL: String = """
-        uniform float4 tint;             // straight (non-premultiplied) rgba
-        uniform float  specStrength;
-        uniform float  specPower;
-        uniform float  specPower2;
-        uniform float2 light1;
-        uniform float2 light2;
-        uniform float  fresnelStrength;
-        uniform float  fresnelPower;
-        uniform float  microAmp;         // normal-tilt noise amplitude; 0 disables
-        uniform float  microScale;       // noise period, px
-        uniform float  innerShadow;      // dark band just inside the rim; 0 disables
-        uniform float  sheenStrength;    // broad third lobe; 0 disables
-        uniform float  sheenPower;
-        uniform float2 light3;
-        uniform float2 pressPos;         // surface-local px; a press pools light here
-        uniform float  pressAmp;         // added to the light scalar; 0 disables
-        uniform float  pressR;           // pool radius, px
-
-        $COMMON
-
+    /** Hash and value noise for the micro-distortion window. */
+    private val NOISE_FNS = """
         /**
          * Hash and value noise for the micro-distortion window. Written out rather than looped,
          * because AGSL only accepts compile-time unrollable loops, and kept in the light program
@@ -268,11 +286,10 @@ object GlassShader {
             float d = hash21(i + float2(1.0, 1.0));
             return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
         }
+    """.trimIndent()
 
-        half4 main(float2 fragCoord) {
-            float4 sf = surfaceAt(fragCoord);
-            float2 nxy = sf.xy;
-
+    /** Micro distortion of `nxy`; needs `sf`, `nxy`, `fragCoord` in scope. */
+    private val MICRO_STEPS = """
             // Micro distortion, windowed to zero at both ends of the band.
             //
             // At t == 1 it is correctness: GlassView draws this program only over the bevel band and
@@ -298,15 +315,10 @@ object GlassShader {
                     nxy += j * (2.0 * microAmp * w);
                 }
             }
+    """.trimIndent()
 
-            float3 n = float3(nxy, normalZ(nxy));
-            float  d = sf.w;
-
-            // Coverage from the SDF gives a properly antialiased rounded rect, so the pane
-            // needs no explicit clip of its own.
-            float cov = clamp(0.5 - d, 0.0, 1.0) * fadeAt(fragCoord);
-            if (cov <= 0.002) return half4(0.0);
-
+    /** Lighting from `n` and `sf` into premultiplied `rgb` and `a`; the caller applies coverage. */
+    private val LIGHT_STEPS = """
             // Suppress the highlight on the flat interior. n.z is 1 there, so `rim` is 0.
             //
             // Squared, not `min(rim * 6, 1)` as the reference has it. That form saturates as soon
@@ -361,13 +373,100 @@ object GlassShader {
             // alpha so it brightens without darkening what shows through.
             float3 rgb = clamp(tint.rgb * tint.a + float3(light), 0.0, 1.0);
             float  a   = clamp(tint.a + light + shade, 0.0, 1.0);
+    """.trimIndent()
+
+    /** Transmission: refract the sharp capture. Outputs colour only, no lighting and no tint. */
+    val REFRACT_AGSL: String = """
+        $REFRACT_UNIFORMS
+
+        $COMMON
+
+        half4 main(float2 fragCoord) {
+            float4 sf = surfaceAt(fragCoord);
+            float3 n = float3(sf.xy, normalZ(sf.xy));
+            float  t = sf.z;
+
+            $TRANSMIT_BEND
+            $TAPS_PANE
+            $TRANSMIT_GAMMA
+            // Premultiplied, so one multiply fades colour and alpha together and correctly.
+            return outc * half(fadeAt(fragCoord));
+        }
+    """.trimIndent()
+
+    /** Lighting and tint. Reads no image, so it runs at full resolution and stays crisp. */
+    val LIGHT_AGSL: String = """
+        $LIGHT_UNIFORMS
+
+        $COMMON
+
+        $NOISE_FNS
+        half4 main(float2 fragCoord) {
+            float4 sf = surfaceAt(fragCoord);
+            float2 nxy = sf.xy;
+
+            $MICRO_STEPS
+            float3 n = float3(nxy, normalZ(nxy));
+            float  d = sf.w;
+
+            // Coverage from the SDF gives a properly antialiased rounded rect, so the pane
+            // needs no explicit clip of its own.
+            float cov = clamp(0.5 - d, 0.0, 1.0) * fadeAt(fragCoord);
+            if (cov <= 0.002) return half4(0.0);
+
+            $LIGHT_STEPS
             return half4(half3(rgb), half(a)) * half(cov);
+        }
+    """.trimIndent()
+
+    /** A bubble in one pass: the same transmission and light steps as the panes, composited in the shader. */
+    val BUBBLE_AGSL: String = """
+        $REFRACT_UNIFORMS
+        uniform float dim;               // black at this alpha over the transmission; 0 once the dim is inside the bitmap
+
+        $LIGHT_UNIFORMS
+
+        $COMMON
+
+        $NOISE_FNS
+        half4 main(float2 fragCoord) {
+            float4 sf = surfaceAt(fragCoord);
+            float  d = sf.w;
+            // Coverage from the distance field shapes the whole pass, so the painter needs no clip.
+            float cov = clamp(0.5 - d, 0.0, 1.0) * fadeAt(fragCoord);
+            if (cov <= 0.002) return half4(0.0);
+            float3 n = float3(sf.xy, normalZ(sf.xy));
+            float  t = sf.z;
+
+            $TRANSMIT_BEND
+            $TAPS_BUBBLE
+            $TRANSMIT_GAMMA
+            // Float from here: the dim and the composite mix half and float, which AGSL need not accept.
+            float4 tr = float4(outc);
+            if (dim > 0.0) tr = float4(tr.rgb * (1.0 - dim), tr.a * (1.0 - dim) + dim);
+
+            float2 nxy = sf.xy;
+            $MICRO_STEPS
+            n = float3(nxy, normalZ(nxy));
+
+            $LIGHT_STEPS
+            // Light over transmission, premultiplied source-over; one coverage for everything, applied last.
+            float3 crgb = rgb + tr.rgb * (1.0 - a);
+            float  ca   = a + tr.a * (1.0 - a);
+            return half4(half3(crgb), half(ca)) * half(cov);
         }
     """.trimIndent()
 
     /** Latched once a program fails to compile, so the failure is not retried per surface. */
     private var refractFailed = false
     private var lightFailed = false
+    private var bubbleFailed = false
+
+    /** The hook's ledger hears a compile failure; logcat alone is invisible from the module log. */
+    var onCompileFailure: ((what: String, t: Throwable) -> Unit)? = null
+
+    /** And a success, so a device check can tell which program actually drew. */
+    var onCompiled: ((what: String) -> Unit)? = null
 
     /** True when this device can run the refraction tier at all. */
     val supported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
@@ -375,7 +474,11 @@ object GlassShader {
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun compile(src: String, what: String): RuntimeShader? =
         runCatching { RuntimeShader(src) }
-            .onFailure { Log.e(TAG, "AGSL $what failed to compile; falling back", it) }
+            .onSuccess { runCatching { onCompiled?.invoke(what) } }
+            .onFailure {
+                Log.e(TAG, "AGSL $what failed to compile; falling back", it)
+                runCatching { onCompileFailure?.invoke(what, it) }
+            }
             .getOrNull()
 
     /** A fresh transmission shader per surface, never shared: uniforms live on the shader, last caller wins. */
@@ -393,6 +496,15 @@ object GlassShader {
         if (lightFailed) return null
         val rs = compile(LIGHT_AGSL, "light")
         if (rs == null) lightFailed = true
+        return rs
+    }
+
+    /** A fresh one-pass bubble shader; null falls the painter back to the two pane programs. */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    fun newBubbleShader(): RuntimeShader? {
+        if (bubbleFailed) return null
+        val rs = compile(BUBBLE_AGSL, "bubble")
+        if (rs == null) bubbleFailed = true
         return rs
     }
 
@@ -419,8 +531,8 @@ object GlassShader {
         }
         rs.setFloatUniform("bevel", bevel / es)
         rs.setFloatUniform("depth", (bevel * params.depthRatio / es).coerceAtLeast(0.01f))
-        // Round the corner ridges over about a third of the band; capped, smoothing bulges the field ~k/4.
-        rs.setFloatUniform("cornerSmooth", ((bevel * 0.35f) / es).coerceIn(2f, 64f))
+        // Round the corner ridges over about a third of the band, clamped in screen px so every pass agrees.
+        rs.setFloatUniform("cornerSmooth", (bevel * 0.35f).coerceIn(2f, 64f) / es)
         // Scaled by es like every other length, or a fade in full-res px covers the wrong rows.
         rs.setFloatUniform(
             "expand",
@@ -512,5 +624,13 @@ object GlassShader {
         rs.setFloatUniform("pressPos", pressX, pressY)
         rs.setFloatUniform("pressAmp", pressAmp)
         rs.setFloatUniform("pressR", pressRadiusPx)
+    }
+
+    /** Both uniform sets plus the dim, through the same two functions, so a bubble cannot drift from a pane. */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    fun applyBubbleUniforms(rs: RuntimeShader, params: GlassParams, w: Int, h: Int, density: Float, dim: Float) {
+        applyRefractUniforms(rs, params, w, h)
+        applyLightUniforms(rs, params, w, h, density = density)
+        rs.setFloatUniform("dim", dim.coerceIn(0f, 1f))
     }
 }

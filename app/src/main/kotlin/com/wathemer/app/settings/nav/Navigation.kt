@@ -22,6 +22,7 @@ enum class Screen {
     Backdrop,
     Wallpaper,                  // custom wallpaper: toggle / pick / dim / blur
     LiquidGlass,                // the glass engine: master toggle + tuning
+    ChatWallpapers,             // one chat, its own image, dim and blur; entries arrive from WhatsApp's chat menu
 
     // Homescreen tree
     Homescreen,
@@ -74,6 +75,13 @@ class NavController(initial: List<Screen> = listOf(Screen.CategoryList)) {
         if (!canPop()) return false
         _stack.removeAt(_stack.lastIndex)
         return true
+    }
+
+    /** Replaces the whole stack: a hand-off from WhatsApp must not land on top of wherever the user last was. */
+    fun replaceAll(screens: List<Screen>) {
+        val next = screens.ifEmpty { listOf(Screen.CategoryList) }
+        _stack.clear()
+        _stack.addAll(next)
     }
 
     /** Snapshot for [NavSaver]. A copy, so the saver cannot hand out the live list. */

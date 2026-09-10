@@ -107,6 +107,8 @@ internal fun liquidFrostOnLayout(
     tintAlpha: Int = CHIP_ALPHA,
     /** For a wrap_content pill whose width comes from the stock drawable's own padding. */
     keepPadding: Boolean = false,
+    /** Named, the frost goes through forceBg; needed on a view the interceptor already keeps cleared. */
+    forceLabel: String? = null,
 ) {
     watchFrostPosition(v)
     val apply = Runnable {
@@ -120,12 +122,12 @@ internal fun liquidFrostOnLayout(
                 return@runCatching
             }
             val d = FrostDrawable(
-                v, bubbleBackdrop(v), radius, glassTint(tintAlpha),
+                v, { host -> wallpaperRecordOf(host) }, radius, glassTint(tintAlpha),
                 strokeWidth = v.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
                 ignorePadding = true,
             )
             v.setTag(frostTag, d)
-            v.background = d
+            if (forceLabel != null) forceBg(v, d, forceLabel) else v.background = d
         }
     }
     apply.run()

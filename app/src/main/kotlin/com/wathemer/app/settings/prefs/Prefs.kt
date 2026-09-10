@@ -232,6 +232,21 @@ class Prefs(
         get() = sp.getString(KEY_UPDATE_ASSET, "") ?: ""
         set(value) { commitStringOrRemove(KEY_UPDATE_ASSET, value.ifBlank { null }) }
 
+    /** Byte length from the release listing, so a cached release keeps its download length check. An Int: a small Long re-imports as an Int and then fails to read. */
+    var updateSize: Int
+        get() = sp.getInt(KEY_UPDATE_SIZE, 0)
+        set(value) { commitInt(KEY_UPDATE_SIZE, value) }
+
+    /** JSON list of chat wallpapers, written here and parsed by the hook through the same library; never part of a theme. */
+    var chatWallpapers: String
+        get() = sp.getString(KEY_CHAT_WALLPAPERS, "") ?: ""
+        set(value) { commitStringOrRemove(KEY_CHAT_WALLPAPERS, value.ifBlank { null }) }
+
+    /** Monotonic chat wallpaper stamp. A removal must never free a stamp: WhatsApp names its cached copy by it. */
+    var chatWallpaperSeq: Int
+        get() = sp.getInt(KEY_CHAT_WALLPAPER_SEQ, 0)
+        set(value) { commitInt(KEY_CHAT_WALLPAPER_SEQ, value) }
+
     /** App-wide iOS icon pack toggle. Glyphs are colour templates, so tint tokens still colour them. false = stock icons. */
     var iosIconPack: Boolean
         get() = sp.getBoolean(KEY_IOS_ICON_PACK, false)
@@ -619,6 +634,11 @@ class Prefs(
         const val KEY_UPDATE_NOTES      = "update_notes"
         const val KEY_UPDATE_URL        = "update_url"
         const val KEY_UPDATE_ASSET      = "update_asset"
+        const val KEY_UPDATE_SIZE       = "update_size"
+
+        // Per-chat wallpapers. A jid is a fact about one phone, so neither key joins a theme set.
+        const val KEY_CHAT_WALLPAPERS    = "chat_wallpapers"
+        const val KEY_CHAT_WALLPAPER_SEQ = "chat_wallpaper_seq"
 
         /** Every colour override key, the one list [applyPresetFull] clears. Every new colour key must be added here; structural keys stay out so presets keep them. */
         val ALL_COLOR_OVERRIDE_KEYS: List<String> = listOf(

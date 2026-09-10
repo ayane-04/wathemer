@@ -5,6 +5,7 @@ package com.wathemer.app.hooks.glass
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
@@ -24,6 +25,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import com.wathemer.app.glass.BackdropCapture
 import com.wathemer.app.glass.GlassParams
+import com.wathemer.app.glass.WallpaperLook
 import com.wathemer.app.hooks.HookLog
 import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.waId
@@ -105,9 +107,6 @@ internal const val ROW_SELECT_INSET_X_DP = 8f
 internal const val ROW_SELECT_INSET_Y_DP = 5f
 
 internal const val ROW_SELECT_RADIUS_DP = 18f
-
-/** Downscale of the row's wallpaper copy; the downscale is the blur, 6 keeps shapes legible under text. */
-internal const val ROW_SELECT_SHRINK = 6
 
 /** Grows the pressed row a hair without escaping the card's own inset. */
 internal const val ROW_SELECT_SCALE = 1.012f
@@ -210,9 +209,10 @@ internal fun logOnce(msg: String) {
 private val loggedOnce = Collections.synchronizedSet(HashSet<String>())
 
 /** The tint channel, from wallpaper luma: white over dark, black over bright; never store a finished colour. */
-private var glassTintChannel = 255
+@Volatile private var glassTintChannel = 255
 
-private var glassTintResolved = false
+// Volatile: the early resolve runs off the main thread and the draw path reads both without a lock.
+@Volatile private var glassTintResolved = false
 
 /** The shared pane tint: the resolved channel at the user's alpha. */
 internal val glassTintColor: Int get() = glassTint(TINT_ALPHA)
@@ -224,8 +224,18 @@ internal fun glassTint(alpha: Int): Int =
 internal fun resolveGlassTint(views: List<View>) {
     if (glassTintResolved) return
     val image = views.firstOrNull() as? ImageView ?: return
+    // Only the global wallpaper sets the channel; a chat's own image must not decide it for the whole process.
+    val look = image.getTag(wallpaperLookTag) as? WallpaperLook
+    if (look != null && !look.global) return
     val bmp = (image.drawable as? BitmapDrawable)?.bitmap ?: return
-    if (bmp.width <= 0 || bmp.height <= 0) return
+    val dim = (views.getOrNull(1)?.let { dimAlpha255(it) } ?: 0) / 255f
+    resolveGlassTintFrom(bmp, dim)
+}
+
+/** The same resolve from a bitmap the cache decoded, before any window shows it. Needs a software bitmap. */
+internal fun resolveGlassTintFrom(bmp: Bitmap, dim: Float) {
+    if (glassTintResolved) return
+    if (bmp.width <= 0 || bmp.height <= 0 || bmp.config == Bitmap.Config.HARDWARE) return
     glassTintResolved = true
 
     var sum = 0.0
@@ -241,7 +251,6 @@ internal fun resolveGlassTint(views: List<View>) {
             n++
         }
     }
-    val dim = (views.getOrNull(1)?.alpha ?: 0f).coerceIn(0f, 1f)
     val luma = (sum / n) * (1f - dim)
 
     // Crossfade the channel, not the alpha: 110..150 luma slides through grey instead of snapping.
@@ -306,7 +315,13 @@ internal val forcedBgLabels = WeakHashMap<View, String>()
 
 // forceBg keeps re-asserting its drawable; never pair this with a background you set yourself, it will null yours too.
 /** A TRANSPARENT ColorDrawable, never null: Material reads its background back, and mutate() on null crashes WhatsApp. */
-internal fun clearBg(v: View, what: String) = forceBg(v, ColorDrawable(Color.TRANSPARENT), what)
+internal fun clearBg(v: View, what: String) {
+    synchronized(forcedBgLabels) { forcedBgLabels[v] = what }
+    val cur = synchronized(forcedBg) { forcedBg[v] }
+    // Reuse this view's own transparent fill: a fresh one per layout is a real setBackground and its invalidate.
+    if (cur is ColorDrawable && cur.color == Color.TRANSPARENT && v.background === cur) return
+    forceBg(v, ColorDrawable(Color.TRANSPARENT), what)
+}
 
 internal fun forceBg(v: View, d: Drawable, what: String) {
     synchronized(forcedBgLabels) { forcedBgLabels[v] = what }
@@ -416,6 +431,18 @@ internal fun wallpaperUnderlay(anyView: View): List<View> = runCatching {
 /** Wallpaper views from the activity, not the caller's root: a sheet's root is its dialog DecorView. */
 internal fun wallpaperUnderlayGlobal(): List<View> =
     contentRef?.get()?.let { wallpaperUnderlay(it) } ?: emptyList()
+
+/** The wallpaper views of the Activity that owns [v]'s window; a sheet or popup root holds none, home's decor is the last resort. */
+internal fun wallpaperUnderlayOf(v: View): List<View> {
+    val own = wallpaperUnderlay(v)
+    if (own.isNotEmpty()) return own
+    val decor = activityOf(v)?.window?.decorView
+    if (decor != null && decor !== v.rootView) {
+        val viaActivity = wallpaperUnderlay(decor)
+        if (viaActivity.isNotEmpty()) return viaActivity
+    }
+    return wallpaperUnderlayGlobal()
+}
 
 /** "Chats", localised, read off the bottom nav's first item. */
 internal fun navLabel(): CharSequence? = navLabel(0)

@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -58,6 +59,8 @@ import com.yalantis.ucrop.UCrop
 import java.io.File
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -65,6 +68,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
     val context = LocalContext.current
     val snapshot = LocalThemeSnapshot.current
     val snap by snapshot
+    val scope = rememberCoroutineScope()
 
     // Self-repair once per entry; keyed on the path so a re-pick re-checks.
     LaunchedEffect(snap.wallpaperPath) {
@@ -89,20 +93,22 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
         when {
             result.resultCode == Activity.RESULT_OK && result.data != null -> {
                 val cropped = UCrop.getOutput(result.data!!)
-                val dest = cropped?.let { src ->
-                    WallpaperAsset.persist(context) { context.contentResolver.openInputStream(src) }
-                }
-                when {
-                    cropped == null -> {
-                        Log.w(LOGTAG, "crop returned OK with no output Uri")
-                        Toast.makeText(context, "Couldn't read the cropped image.", Toast.LENGTH_LONG).show()
-                    }
-                    dest == null ->
-                        Toast.makeText(context, "Couldn't save the wallpaper. Storage may be full.", Toast.LENGTH_LONG).show()
-                    else -> {
-                        snapshot.updateWallpaperPath(prefs, dest.absolutePath)
-                        if (!snap.wallpaperEnabled) {
-                            snapshot.updateWallpaperEnabled(prefs, true)
+                if (cropped == null) {
+                    Log.w(LOGTAG, "crop returned OK with no output Uri")
+                    Toast.makeText(context, "Couldn't read the cropped image.", Toast.LENGTH_LONG).show()
+                } else scope.launch {
+                    // Off main, the save copies the image twice; NonCancellable, or leaving the screen saves the file and skips the setting.
+                    withContext(NonCancellable) {
+                        val app = context.applicationContext
+                        val dest = withContext(Dispatchers.IO) {
+                            WallpaperAsset.persist(app) { app.contentResolver.openInputStream(cropped) }
+                                .also { cropped.path?.let { p -> File(p).delete() } }
+                        }
+                        if (dest == null) {
+                            Toast.makeText(app, "Couldn't save the wallpaper. Storage may be full.", Toast.LENGTH_LONG).show()
+                        } else {
+                            snapshot.updateWallpaperPath(prefs, dest.absolutePath)
+                            if (!snapshot.value.wallpaperEnabled) snapshot.updateWallpaperEnabled(prefs, true)
                         }
                     }
                 }
@@ -118,6 +124,8 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
         ActivityResultContracts.GetContent(),
     ) { uri: Uri? ->
         if (uri != null) {
+            // Sweep earlier crops first: a pick that never came back left its temp behind.
+            context.cacheDir.listFiles()?.forEach { if (it.name.startsWith("ucrop_wallpaper_")) it.delete() }
             val tempDest = File(context.cacheDir, "ucrop_wallpaper_${System.currentTimeMillis()}.png")
             val dm = context.resources.displayMetrics
             val cropIntent = UCrop.of(uri, Uri.fromFile(tempDest))

@@ -8,6 +8,7 @@ import com.wathemer.app.hooks.BubbleAlbumClipping
 import com.wathemer.app.hooks.BubbleColors
 import com.wathemer.app.hooks.BubbleShapes
 import com.wathemer.app.hooks.ChatHeaderColors
+import com.wathemer.app.hooks.ChatWallpaperMenu
 import com.wathemer.app.hooks.HookLog
 import com.wathemer.app.hooks.ComposeBarColors
 import com.wathemer.app.hooks.EffectsOverlays
@@ -23,6 +24,7 @@ import com.wathemer.app.hooks.WaIds
 import com.wathemer.app.hooks.dexkit.Deobfuscator
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
 import com.wathemer.app.hooks.glass.GlassHook
+import com.wathemer.app.hooks.wallpaper.ChatWallpapers
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
 import de.robv.android.xposed.XposedBridge
 import io.github.libxposed.api.XposedModule
@@ -72,6 +74,10 @@ class ModernEntry : XposedModule() {
             // Order here is not load-bearing; anything that must run after all installers must be posted, not placed last.
             try { WallpaperImage.install(classLoader); HookLog.arm("install/WallpaperImage") }
             catch (t: Throwable) { HookLog.fail("install/WallpaperImage", t) }
+            try { ChatWallpapers.install(app); HookLog.arm("install/ChatWallpapers") }
+            catch (t: Throwable) { HookLog.fail("install/ChatWallpapers", t) }
+            try { ChatWallpaperMenu.install(app, classLoader); HookLog.arm("install/ChatWallpaperMenu") }
+            catch (t: Throwable) { HookLog.fail("install/ChatWallpaperMenu", t) }
             try { EffectsOverlays.install(); HookLog.arm("install/EffectsOverlays") }
             catch (t: Throwable) { HookLog.fail("install/EffectsOverlays", t) }
             try { BubbleColors.install(app, classLoader); HookLog.arm("install/BubbleColors") }

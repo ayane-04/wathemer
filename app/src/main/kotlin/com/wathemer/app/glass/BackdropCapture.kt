@@ -21,6 +21,16 @@ class BackdropCapture(
 ) {
 
     companion object {
+        /** Skia caps the linear blur kernel at sigma 4 and rescales above it; stay under with margin. */
+        private const val NODE_SIGMA_CAP = 3.9f
+
+        /** Past this the transmission is too coarse to bend anything; a huge blur takes one rescale pass instead. */
+        private const val MAX_EFFECT_SCALE = 8f
+
+        /** HWUI's radius to sigma mapping for createBlurEffect, and its inverse. */
+        private fun sigmaOf(radiusPx: Float): Float = if (radiusPx > 0f) 0.57735f * radiusPx + 0.5f else 0f
+        private fun radiusOf(sigma: Float): Float = if (sigma > 0.5f) (sigma - 0.5f) / 0.57735f else 0f
+
         /**
          * True only while live views are drawn into a pane's own RenderNode: a ripple drawn there arms its
          * animator against that node, and the frame's real draw throws "Target already set!".
@@ -54,7 +64,7 @@ class BackdropCapture(
 
     /**
      * [node] keeps the capture sharp: refraction can only bend detail that still exists.
-     * [glassNode] redraws it at 1/[effectScale] and carries the shader, blur chained after.
+     * [glassNode] redraws it at the divisor effectScaleFor picks and carries the shader, blur chained after.
      */
     val node = RenderNode("wathemer-backdrop")
     private val glassNode = RenderNode("wathemer-glass")
@@ -63,9 +73,15 @@ class BackdropCapture(
     private val sourceLocation = IntArray(2)
 
     // Rebuilt only on input change (per-frame effects allocate); effectDirty stands in for ten uniforms.
-    /** Halves the transmission's two offscreen layers on large surfaces; blur hides it. */
-    private val effectScale: Float
-        get() = if (host.width.toLong() * host.height > 600_000L) 2f else 1f
+    /** Transmission divisor: coarse enough that the blur's sigma stays under Skia's cap, so no rescale passes; large surfaces never below 2. */
+    private fun effectScaleFor(): Float {
+        val large = if (host.width.toLong() * host.height > 600_000L) 2f else 1f
+        return maxOf(large, sigmaOf(params.blurRadius) / NODE_SIGMA_CAP).coerceAtMost(MAX_EFFECT_SCALE)
+    }
+
+    // The node's size, kept from the capture for the draw: the divisor is derived once, never twice.
+    private var nodeW = 0
+    private var nodeH = 0
 
     private var effectRadius = -1f
     private var effectScaleUsed = -1f
@@ -95,6 +111,7 @@ class BackdropCapture(
         val scale = params.downsample
         val w = ceil(host.width / scale).toInt().coerceAtLeast(1)
         val h = ceil(host.height / scale).toInt().coerceAtLeast(1)
+        val es = effectScaleFor()
 
         // Screen, not window, coordinates: a bottom sheet is its own window with its own origin.
         host.getLocationOnScreen(hostLocation)
@@ -112,7 +129,7 @@ class BackdropCapture(
             }
         }
 
-        logGeometryOnce(w, h, dx, dy, src)
+        logGeometryOnce(w, h, dx, dy, src, es)
 
         node.setPosition(0, 0, w, h)
         val canvas = node.beginRecording(w, h)
@@ -153,16 +170,18 @@ class BackdropCapture(
             node.endRecording()
         }
 
-        applyEffectIfNeeded(scale, w, h)
+        applyEffectIfNeeded(scale, w, h, es)
 
-        // Second pass at 1/effectScale: upscale sharp, refract, then blur; order is the whole point.
-        val es = effectScale
+        // Second pass at 1/es: redraw the capture, refract, then blur; order is the whole point.
         val fw = ceil(host.width / es).toInt().coerceAtLeast(1)
         val fh = ceil(host.height / es).toInt().coerceAtLeast(1)
+        nodeW = fw
+        nodeH = fh
         glassNode.setPosition(0, 0, fw, fh)
         val c = glassNode.beginRecording(fw, fh)
         try {
-            c.scale(scale / es, scale / es)
+            // Fill the node exactly: a fractional divisor would leave its last column empty for the clamp blur to smear inward.
+            c.scale(fw.toFloat() / w, fh.toFloat() / h)
             c.drawRenderNode(node)
         } finally {
             glassNode.endRecording()
@@ -181,12 +200,15 @@ class BackdropCapture(
     /** Draw [glassNode] at [host]'s size; it carries both effects, so no path may skip it. */
     fun draw(canvas: RecordingCanvas) {
         if (!hasContent) return
-        val es = effectScale
-        if (es == 1f) {
+        val fw = nodeW
+        val fh = nodeH
+        if (fw <= 0 || fh <= 0) return
+        if (fw == host.width && fh == host.height) {
             canvas.drawRenderNode(glassNode)
         } else {
             val save = canvas.save()
-            canvas.scale(es, es)
+            // The node's own size back over the host, never the divisor: the two differ by the ceil.
+            canvas.scale(host.width.toFloat() / fw, host.height.toFloat() / fh)
             canvas.drawRenderNode(glassNode)
             canvas.restoreToCount(save)
         }
@@ -208,7 +230,7 @@ class BackdropCapture(
     private var loggedSrcId = 0
     private var lastUnderlayDy = 0
 
-    private fun logGeometryOnce(w: Int, h: Int, dx: Float, dy: Float, src: View?) {
+    private fun logGeometryOnce(w: Int, h: Int, dx: Float, dy: Float, src: View?, es: Float) {
         val srcId = System.identityHashCode(src)
         if (w == loggedW && h == loggedH && host.width == loggedHostW &&
             host.height == loggedHostH && srcId == loggedSrcId
@@ -222,7 +244,7 @@ class BackdropCapture(
         loggedSrcId = srcId
         Log.i(
             "WaThemer.Capture",
-            "host=${host.width}x${host.height} node=${w}x$h scale=${params.downsample} " +
+            "host=${host.width}x${host.height} node=${w}x$h scale=${params.downsample} es=$es " +
                 "offset=($dx,$dy) underlayDy=$lastUnderlayDy " +
                 "src=${src?.width}x${src?.height} srcLaidOut=${src?.isLaidOut}",
         )
@@ -232,9 +254,8 @@ class BackdropCapture(
      * Refract the sharp capture, then blur. Never blur first: blur removes the detail
      * refraction bends. Lighting stays out of this graph or it would be blurred too.
      */
-    private fun applyEffectIfNeeded(scale: Float, w: Int, h: Int) {
+    private fun applyEffectIfNeeded(scale: Float, w: Int, h: Int, es: Float) {
         val radius = params.blurRadius
-        val es = effectScale
         val refracting = params.refractionEnabled && GlassShader.supported
         val unchanged = radius == effectRadius &&
             es == effectScaleUsed &&
@@ -253,9 +274,9 @@ class BackdropCapture(
         effectRefracting = refracting
         effectDirty = false
 
-        // Divide the radius by effectScale only, never by downsample, so the on-screen blur is exact.
+        // Divide the sigma, not the radius: HWUI's mapping has a constant term, and only this keeps the on-screen blur exact at any es.
         // CLAMP, not DECAL: decal fades to transparent and leaves a dark halo at the glass edge.
-        val nodeRadius = if (radius <= 0f) 0f else (radius / es).coerceAtLeast(1f)
+        val nodeRadius = if (radius <= 0f) 0f else radiusOf(sigmaOf(radius) / es).coerceAtLeast(1f)
         val blur = if (nodeRadius <= 0f) {
             null
         } else {

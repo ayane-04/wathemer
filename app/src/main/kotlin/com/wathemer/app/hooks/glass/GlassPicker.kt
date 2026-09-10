@@ -76,7 +76,7 @@ internal fun pickerGlass(root: ViewGroup) {
         }
         g.tint = { glassTintColor }
         g.backdrop = { bubbleBackdrop(g) }
-        g.placement = { bubbleWpPlacement }
+        g.placement = { bubblePlacement(g) }
         g.dim = { 0f }
         g.rimColor = glassTint(BUBBLE_RIM_ALPHA)
         g.rimWidth = d
@@ -124,14 +124,14 @@ private class PickerRowKind(val kind: Int, val height: Int, val name: CharSequen
 private val pickerRowKinds = WeakHashMap<View, PickerRowKind>()
 
 /** The name view per row. Cached because the subtree walk is the cost; its text is a field read. */
-private val pickerNameViews = WeakHashMap<View, TextView>()
+private val pickerNameViews = WeakHashMap<View, WeakReference<TextView>>()
 
 private var loggedGlyph = false
 
 private fun pickerNameOf(row: View): CharSequence? {
     if (pickerNameId == 0) return null
-    val tv = pickerNameViews[row] ?: (row.findViewById<View>(pickerNameId) as? TextView)
-        ?.also { pickerNameViews[row] = it } ?: return null
+    val tv = pickerNameViews[row]?.get() ?: (row.findViewById<View>(pickerNameId) as? TextView)
+        ?.also { pickerNameViews[row] = WeakReference(it) } ?: return null
     return tv.text
 }
 
@@ -440,7 +440,7 @@ internal fun ensureMeTabCard(container: View) {
     }
     g.tint = { glassTintColor }
     g.backdrop = { bubbleBackdrop(g) }
-    g.placement = { bubbleWpPlacement }
+    g.placement = { bubblePlacement(g) }
     g.dim = { 0f }
     g.rimColor = glassTint(BUBBLE_RIM_ALPHA)
     g.rimWidth = d
@@ -503,7 +503,8 @@ private fun collectMeTabCard(out: RectList) {
     out.add(meTabAt[0] + side, top, meTabAt[0] + c.width - side, bottom)
 }
 
-private val wdsBarPanes = WeakHashMap<ViewGroup, GlassView>()
+// Weak values: the pane is a child of its key, and a strong value would pin a dead window's tree.
+private val wdsBarPanes = WeakHashMap<ViewGroup, WeakReference<GlassView>>()
 
 private val wdsBackAt = IntArray(2)
 
@@ -517,7 +518,7 @@ internal val wdsBarTag = tagKey("wathemer-wds-search-bar")
 private fun headerBandBehind(bar: View): Boolean {
     val abrId = bar.resources.waId("action_bar_root", bar.context.packageName)
     val abr = if (abrId != 0) bar.rootView?.findViewById<View>(abrId) else null
-    if (abr != null && folderBands[abr]?.parent != null) return true
+    if (abr != null && folderBands[abr]?.get()?.parent != null) return true
     return pickerBandRef?.get()?.parent != null
 }
 
@@ -528,7 +529,7 @@ internal fun syncSearchViewGlass(field: View) {
     val res = field.resources
     val pkg = field.context.packageName
 
-    var glass = wdsBarPanes[host]
+    var glass = wdsBarPanes[host]?.get()
     if (glass == null || glass.parent !== host) {
         val under = wallpaperUnderlay(host)
         if (under.isEmpty()) return
@@ -545,7 +546,7 @@ internal fun syncSearchViewGlass(field: View) {
             }
         }
         host.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
-        wdsBarPanes[host] = glass
+        wdsBarPanes[host] = WeakReference(glass)
         XposedBridge.log("[$TAG] search view capsule inserted")
     }
     // Only now, with a pane behind it, is the fill safe to take; two unlike families share this id.
@@ -612,11 +613,11 @@ internal fun syncWdsSearchBar(bar: FrameLayout) {
     // One capsule per header: where the folder header already carries the pill, clearing the fills is the whole job.
     if (folderCapsuleOwns(bar)) {
         // Gated on a real change, or this per-layout path writes every frame.
-        wdsBarPanes[bar]?.let { if (it.visibility != View.GONE) it.visibility = View.GONE }
+        wdsBarPanes[bar]?.get()?.let { if (it.visibility != View.GONE) it.visibility = View.GONE }
         return
     }
 
-    var glass = wdsBarPanes[bar]
+    var glass = wdsBarPanes[bar]?.get()
     if (glass == null || glass.parent !== bar) {
         val under = wallpaperUnderlay(bar)
         // The fills are already cleared, so a missing pane leaves an invisible bar; never let that be silent.
@@ -638,7 +639,7 @@ internal fun syncWdsSearchBar(bar: FrameLayout) {
         }
         // Index 0 draws behind the bar's own controls.
         bar.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
-        wdsBarPanes[bar] = glass
+        wdsBarPanes[bar] = WeakReference(glass)
         val name = runCatching { res.getResourceEntryName(bar.id) }.getOrNull() ?: "?"
         XposedBridge.log("[$TAG] wds search capsule inserted on " + name)
     }

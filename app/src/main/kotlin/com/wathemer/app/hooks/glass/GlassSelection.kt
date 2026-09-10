@@ -13,6 +13,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewStub
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.AbsListView
@@ -43,7 +44,7 @@ private fun rowSelectionPane(v: View, source: ColorDrawable): Drawable {
         rim = glassTint(ROW_SELECT_RIM_ALPHA),
         rimWidth = v.dp(1f),
         sharp = { selectionBackdrop(v) },
-        placement = { selectionWpPlacement },
+        placement = { selectionPlacement(v) },
     )
 }
 
@@ -234,7 +235,7 @@ internal fun ensureMsgSelectPane(listHost: ViewGroup, list: AbsListView) {
     pane.tint = { glassTintColor }
     // Same wallpaper, mapping and dirty flag as the bubbles: one material that cannot drift.
     pane.backdrop = { bubbleBackdrop(pane) }
-    pane.placement = { bubbleWpPlacement }
+    pane.placement = { bubblePlacement(pane) }
     pane.dim = { 0f }
     pane.rimColor = glassTint(MSG_SELECT_RIM_ALPHA)
     pane.rimWidth = d
@@ -352,6 +353,8 @@ internal var lockPillH = 0
 
 /** The full-screen container is the host, never a frost target; the pill is resolved per frame, not captured. */
 internal fun ensureLockPane(container: View) {
+    // The stub carries the same id and attaches first; the inflated container follows and is the host.
+    if (container is ViewStub) return
     val host = container as? FrameLayout ?: run {
         logOnce("lock pane skipped: ${container.javaClass.simpleName} does not stack")
         return
@@ -373,7 +376,7 @@ internal fun ensureLockPane(container: View) {
     }
     pane.tint = { glassTintColor }
     pane.backdrop = { bubbleBackdrop(pane) }
-    pane.placement = { bubbleWpPlacement }
+    pane.placement = { bubblePlacement(pane) }
     pane.dim = { 0f }
     pane.rimColor = glassTint(BUBBLE_RIM_ALPHA)
     pane.rimWidth = d

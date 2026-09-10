@@ -1,6 +1,6 @@
 # WaThemer
 
-An LSPosed module that lets you restyle WhatsApp: colours, chat bubbles, wallpaper, fonts, icons,
+An Xposed module that lets you restyle WhatsApp: colours, chat bubbles, wallpaper, fonts, icons,
 system bars, and a frosted glass look called Liquid Glass.
 
 Nothing is switched on to begin with. With no settings saved, WhatsApp looks exactly as it would
@@ -10,7 +10,8 @@ without the module installed, so you can try one thing at a time and put it back
 
 - Android 12 or newer
 - An arm64 device
-- LSPosed, with WhatsApp added to this module's scope
+- An Xposed framework with the modern module API (libxposed 101): Vector 2.1 or newer, or a current
+  LSPosed 2.x release, with WhatsApp added to this module's scope
 - Regular WhatsApp, not Business
 
 ## What you can change

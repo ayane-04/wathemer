@@ -1,5 +1,5 @@
 // Per-element overrides for the WhatsApp homescreen, driven by ViewThemeDispatcher and TextColorDispatcher.
-// WDS reflection, decompile-confirmed: WDSFab A03 bg + A04 icon, WDSBadge getBgPaint()/getTextPaint(), WDSIcon A02 filter.
+// WDS reflection, decompile-confirmed: WDSFab A03 bg + A04 icon, WDSBadge getBgPaint()/getTextPaint(); WDSIcon's filter is found by shape.
 package com.wathemer.app.hooks
 
 import android.app.Application
@@ -367,14 +367,15 @@ object HomeActivityHook {
         val backBtnId = view.resources.waId("whatsapp_toolbar_home", view.context.packageName)
         val apply: () -> Unit = {
             if (WallpaperImage.INSTANCE?.isWallpaperActive() == true) {
-                view.background = ColorDrawable(0)
+                // Gated: a fresh transparent per layout is a real setBackground and an invalidate.
+                if ((view.background as? ColorDrawable)?.color != 0) view.background = ColorDrawable(0)
                 view.tag = WP_TOOLBAR_TAG
                 var p: ViewParent? = view.parent
                 var depth = 0
                 while (p is View && depth < 12) {
                     val name = p.javaClass.name
                     if ("AppBar" in name || "CollapsingToolbar" in name || "ActionBar" in name) {
-                        p.background = ColorDrawable(0)
+                        if ((p.background as? ColorDrawable)?.color != 0) p.background = ColorDrawable(0)
                         p.tag = WP_APPBAR_TAG
                     }
                     p = p.parent
@@ -416,13 +417,13 @@ object HomeActivityHook {
         val backBtnId = view.resources.waId("whatsapp_toolbar_home", view.context.packageName)
         // ── Always re-run (idempotent paint work) ──
         if (bg != 0) {
-            view.background = ColorDrawable(bg)
+            if ((view.background as? ColorDrawable)?.color != bg) view.background = ColorDrawable(bg)
             var p: ViewParent? = view.parent
             var depth = 0
             while (p is View && depth < 12) {
                 val name = p.javaClass.name
                 if ("AppBar" in name || "CollapsingToolbar" in name || "ActionBar" in name) {
-                    p.background = ColorDrawable(bg)
+                    if ((p.background as? ColorDrawable)?.color != bg) p.background = ColorDrawable(bg)
                 }
                 p = p.parent
                 depth++
@@ -436,15 +437,18 @@ object HomeActivityHook {
         if (view.getTag(TOOLBAR_HOOKED_TAG_KEY) == null) {
             view.setTag(TOOLBAR_HOOKED_TAG_KEY, true)
             view.viewTreeObserver.addOnGlobalLayoutListener {
-                if (bg != 0) view.background = ColorDrawable(bg)
+                if (bg != 0 && (view.background as? ColorDrawable)?.color != bg) view.background = ColorDrawable(bg)
                 if (iconColor != 0) walkAndTint(view, iconColor, overflowId, extraIconId = backBtnId)
             }
         }
     }
 
-    private fun walkAndTint(view: View, color: Int, overflowId: Int, extraIconId: Int = 0) {
-        val tintList = ColorStateList.valueOf(color)
-        val filter = PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN)
+    // Hoisted defaults: the walk recurses per node, and a filter per node is garbage on every layout pass.
+    private fun walkAndTint(
+        view: View, color: Int, overflowId: Int, extraIconId: Int = 0,
+        tintList: ColorStateList = ColorStateList.valueOf(color),
+        filter: PorterDuffColorFilter = PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN),
+    ) {
         val name = view.javaClass.simpleName
         val isActionMenuItem = name == "ActionMenuItemView" ||
             name.endsWith("ActionMenuItemView") || name.endsWith("MenuItemView")
@@ -473,7 +477,7 @@ object HomeActivityHook {
         }
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
-                walkAndTint(view.getChildAt(i), color, overflowId, extraIconId)
+                walkAndTint(view.getChildAt(i), color, overflowId, extraIconId, tintList, filter)
             }
         }
     }
@@ -575,6 +579,8 @@ object HomeActivityHook {
 
     private const val ROW_BG_LISTENER_TAG = -1167196162
 
+    private const val ROW_BG_DRAWABLE_TAG = -1167196165
+
     private fun installChatRowBgHook(pkg: String, res: Resources, color: Int) {
         val id = res.waId("contact_row_container", pkg)
         if (id == 0) return
@@ -582,7 +588,13 @@ object HomeActivityHook {
         ViewThemeDispatcher.onId(id) { v ->
             val apply = {
                 runCatching {
-                    v.background = RippleDrawable(rippleTint, ColorDrawable(color), null)
+                    // Only when ours is gone: a fresh ripple per layout restarts a press and redraws every row.
+                    val ours = v.getTag(ROW_BG_DRAWABLE_TAG) as? Drawable
+                    if (ours == null || v.background !== ours) {
+                        val d = RippleDrawable(rippleTint, ColorDrawable(color), null)
+                        v.setTag(ROW_BG_DRAWABLE_TAG, d)
+                        v.background = d
+                    }
                 }
             }
             apply()

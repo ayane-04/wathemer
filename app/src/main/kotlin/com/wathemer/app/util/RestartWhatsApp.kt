@@ -30,7 +30,7 @@ object RestartWhatsApp {
         // Hold the application context; the relaunch can land after the caller's Activity is gone.
         val app = context.applicationContext
 
-        // Non-root kill, a cheap binder call; silent no-op if WA is foreground.
+        // Non-root kill, a cheap binder call; a no-op while WA is foreground, and on Android 14 and later always.
         tryKillBackgroundProcesses(context)
 
         Thread({

@@ -8,7 +8,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.widget.Toast
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.FileProvider
 import com.wathemer.app.BuildConfig
 import com.wathemer.app.R
@@ -16,6 +20,7 @@ import org.json.JSONArray
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.Executors
 
 private const val TAG = "WaThemer.Update"
 
@@ -25,7 +30,7 @@ data class Release(
     val notes: String,
     val assetUrl: String,
     val assetName: String,
-    /** From the release listing; zero for a release read back from the cache, which skips the length check. */
+    /** From the release listing or the cache; zero means unknown and skips the length check. */
     val size: Long = 0L,
 )
 
@@ -33,12 +38,44 @@ object Updates {
 
     private const val RELEASES = "https://api.github.com/repos/ayane-04/WaThemer/releases"
 
+    /** Only GitHub, over https: the store that feeds a cached release is not trusted to name the host. */
+    private val ALLOWED_HOSTS = setOf(
+        "api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
+    )
+
     /** Where the download lands. Must stay in step with the cache-path the FileProvider declares. */
     private const val DIR = "updates"
 
     private const val CHANNEL = "updates"
 
     private const val NOTIFICATION = 4201
+
+    /** The asset being fetched, or null. Process-wide: a rebuilt screen must not re-arm the button mid-copy. */
+    val inFlight = mutableStateOf<String?>(null)
+
+    private val main = Handler(Looper.getMainLooper())
+
+    /** One worker: the directory is wiped per download, so two at once would destroy each other whatever their names. */
+    private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "wathemer-update") }
+
+    /** Runs the fetch off the screen's lifetime; the toast and the notification come from here, so leaving the screen loses neither. */
+    fun startDownload(context: Context, release: Release) {
+        if (inFlight.value != null) return
+        inFlight.value = release.assetName
+        val app = context.applicationContext
+        worker.execute {
+            val file = runCatching { download(app, release) }.getOrNull()
+            main.post {
+                inFlight.value = null
+                if (file == null) {
+                    Toast.makeText(app, "Download failed", Toast.LENGTH_SHORT).show()
+                } else {
+                    notifyDownloaded(app, file, release)
+                    Toast.makeText(app, "Downloaded ${release.version}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     /** Blocking, so callers stay on Dispatchers.IO. Null on any failure; the screen reports that as unreachable. */
     fun latest(): Release? = runCatching {
@@ -141,13 +178,17 @@ object Updates {
         File(File(context.cacheDir, DIR), release.assetName).takeIf { it.isFile && it.length() > 0 }
 
     /** GitHub answers 403 to a request with no User-Agent, which reads as a network failure if you do not set one. */
-    private fun open(url: String): HttpURLConnection =
-        (URL(url).openConnection() as HttpURLConnection).apply {
+    private fun open(url: String): HttpURLConnection {
+        val u = URL(url)
+        // Host equality, never a substring: a user-info trick parses github.com out of a foreign host.
+        require(u.protocol == "https" && u.host.lowercase() in ALLOWED_HOSTS) { "refused url host ${u.host}" }
+        return (u.openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
             readTimeout = 20_000
             setRequestProperty("User-Agent", "WaThemer/${BuildConfig.VERSION_NAME}")
             setRequestProperty("Accept", "application/vnd.github+json")
         }
+    }
 
     private inline fun <T> HttpURLConnection.use(body: (HttpURLConnection) -> T): T =
         try { body(this) } finally { disconnect() }

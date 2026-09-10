@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.wathemer.app.settings.components.CategoryRow
 import com.wathemer.app.settings.components.NavTopBar
@@ -18,6 +19,7 @@ import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.StubNote
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.nav.Screen
+import com.wathemer.app.settings.prefs.ChatWallpaperLibrary
 import com.wathemer.app.settings.prefs.Prefs
 
 /** One category on purpose: glass hard-depends on the wallpaper, without one GlassHook draws and samples nothing.
@@ -27,6 +29,7 @@ fun BackdropScreen(nav: NavController, prefs: Prefs) {
     val hasImage = !prefs.wallpaperPath.isNullOrBlank()
     val wallpaperOn = prefs.wallpaperEnabled && hasImage
     val glassOn = prefs.glassEnabled
+    val chatCount = ChatWallpaperLibrary.list(LocalContext.current, prefs).size
 
     Scaffold(containerColor = Palette.Bg) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
@@ -61,6 +64,16 @@ fun BackdropScreen(nav: NavController, prefs: Prefs) {
                     // Show the dependency in the row itself, before the user commits to a tap.
                     trailingHint = if (glassOn) "ON" else if (wallpaperOn) "OFF" else "NEEDS WALLPAPER",
                     onClick = { nav.push(Screen.LiquidGlass) },
+                )
+                CategoryRow(
+                    label = "Chat wallpapers",
+                    description = "One chat, its own picture. Set it from the chat's menu in WhatsApp.",
+                    trailingHint = when {
+                        !wallpaperOn -> "NEEDS WALLPAPER"
+                        chatCount == 0 -> "NONE SET"
+                        else -> "$chatCount SET"
+                    },
+                    onClick = { nav.push(Screen.ChatWallpapers) },
                 )
                 Spacer(Modifier.size(8.dp))
                 StubNote(

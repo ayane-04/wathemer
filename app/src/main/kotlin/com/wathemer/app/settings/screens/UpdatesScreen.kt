@@ -46,7 +46,7 @@ import kotlinx.coroutines.withContext
 /** The cached release, so the screen opens with an answer rather than a spinner. */
 private fun cachedRelease(prefs: Prefs): Release? =
     prefs.updateVersion.takeIf { it.isNotBlank() }?.let {
-        Release(it, prefs.updateNotes, prefs.updateUrl, prefs.updateAsset)
+        Release(it, prefs.updateNotes, prefs.updateUrl, prefs.updateAsset, prefs.updateSize.toLong())
     }
 
 @Composable
@@ -56,7 +56,8 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
 
     var latest by remember { mutableStateOf(cachedRelease(prefs)) }
     var checking by remember { mutableStateOf(false) }
-    var downloading by remember { mutableStateOf(false) }
+    // Read from the process, not remembered here: a rotation rebuilds this screen while the copy is still running.
+    val downloading = Updates.inFlight.value != null
     var auto by remember { mutableStateOf(prefs.updateAutoCheck) }
     // Re-read per recomposition: the file is gone once the installer takes it or the cache is cleared.
     val ready = latest?.let { Updates.downloaded(context, it) }
@@ -83,6 +84,7 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
             prefs.updateNotes = found.notes
             prefs.updateUrl = found.assetUrl
             prefs.updateAsset = found.assetName
+            prefs.updateSize = found.size.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
             latest = found
             if (manual && !isNewerVersion(found.version, BuildConfig.VERSION_NAME)) {
                 onMessage("You are on the newest build")
@@ -153,19 +155,8 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
                             ) {
                                 askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
-                            downloading = true
-                            scope.launch {
-                                val file = withContext(Dispatchers.IO) {
-                                    Updates.download(context, release)
-                                }
-                                downloading = false
-                                if (file == null) {
-                                    onMessage("Download failed")
-                                    return@launch
-                                }
-                                Updates.notifyDownloaded(context, file, release)
-                                onMessage("Downloaded ${release.version}")
-                            }
+                            // Process-scoped: the copy, the toast and the notification outlive this screen and a rotation.
+                            Updates.startDownload(context, release)
                         },
                     )
                 }

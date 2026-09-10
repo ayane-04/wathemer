@@ -44,7 +44,7 @@ private val bubbleTintColor: Int
 /** Fallback rim, drawn only when AGSL is unavailable; otherwise the light pass draws the edge. */
 internal const val BUBBLE_RIM_ALPHA = 46
 
-/** The panes' recipe, field for field; fresh per drawable, a shared GlassParams is last-writer-wins on bevelThickness. */
+/** The panes' recipe, field for field but the fringe; fresh per drawable, a shared GlassParams is last-writer-wins on bevelThickness. */
 private fun bubbleParams(density: Float) = GlassParams(density).apply {
     refractionEnabled = true
     bevelFraction = BEVEL_FRACTION
@@ -52,6 +52,8 @@ private fun bubbleParams(density: Float) = GlassParams(density).apply {
     maxDisplacePx = DISPLACE_DP * density
     fresnelStrength = 0.5f
     cornerRadius = BUBBLE_RADIUS_DP * density
+    // No colour fringe on a bubble: its source is a pre-blurred copy, and the fringe costs two reads per pixel.
+    dispersion = 0f
     // tintColor deliberately unset: it resolves after WhatsApp asks for this drawable, so a provider supplies it.
 }
 
@@ -108,10 +110,8 @@ internal fun installBubbleGlass(app: Application) {
                     density = density,
                     rimColor = glassTint(BUBBLE_RIM_ALPHA),
                     rimWidth = density,
-                    // 0 when the dim is already inside the bitmap, which is the normal case.
-                    dim = if (bubbleDimFolded) 0f else bubbleDim,
-                    backdrop = { host -> bubbleBackdrop(host) },
-                    placement = { bubbleWpPlacement },
+                    // Resolved through the row's own window: a chat with its own wallpaper must not sample another's.
+                    source = { host -> wallpaperRecordOf(host) },
                     rowProvider = { currentRow },
                     // A copy is stored: bounds is the drawable's live Rect and WhatsApp mutates it for the next row.
                     report = { row, bounds, f ->
@@ -208,8 +208,8 @@ internal fun ensureBubblePane(listHost: ViewGroup, list: AbsListView) {
     pane.tint = { bubbleTintColor }
     // The pane is its own backdrop host; convFooterRef can be null and depends on discovery order.
     pane.backdrop = { bubbleBackdrop(pane) }
-    pane.placement = { bubbleWpPlacement }
-    pane.dim = { if (bubbleDimFolded) 0f else bubbleDim }
+    pane.placement = { bubblePlacement(pane) }
+    pane.dim = { bubbleDimOf(pane) }
     pane.rimColor = glassTint(BUBBLE_RIM_ALPHA)
     pane.rimWidth = density
     pane.collect = { out -> collectBubbleRects(out) }

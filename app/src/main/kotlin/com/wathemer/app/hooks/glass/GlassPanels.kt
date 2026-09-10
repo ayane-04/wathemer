@@ -89,7 +89,7 @@ internal fun panelGlass(panel: View, what: String) {
             logOnce("panel glass: no stacking ancestor above $what")
             return
         }
-        val under = wallpaperUnderlay(host).ifEmpty { wallpaperUnderlayGlobal() }
+        val under = wallpaperUnderlayOf(host)
         val back = runCatching { backdropFor(panel, host, under) }.getOrNull()
         val glass = GlassView(host.context).apply {
             // The live content, not just the wallpaper; without it the pane reads as a frosted sheet laid over the app.
@@ -279,8 +279,8 @@ private fun popupRowGlass(content: View, radiusPx: Float?) {
         }
         tint = { MENU_SCRIM }
         // The screen if PixelCopy gave us one, else the wallpaper. Both are screen-space.
-        backdrop = { screenSnap ?: contentRef?.get()?.let { host -> bubbleBackdrop(host) } }
-        placement = { if (screenSnap != null) screenSnapPlace else bubbleWpPlacement }
+        backdrop = { screenSnap ?: bubbleBackdrop(content) }
+        placement = { if (screenSnap != null) screenSnapPlace else bubblePlacement(content) }
         dim = { 0f }
         rimColor = glassTint(BUBBLE_RIM_ALPHA)
         rimWidth = d
@@ -396,7 +396,7 @@ internal fun injectSheetGlass(v: View) {
     clearBg(sheet, "design_bottom_sheet")
 
     val glass = GlassView(sheet.context).apply {
-        underlay = wallpaperUnderlayGlobal()
+        underlay = wallpaperUnderlayOf(sheet)
         params.apply {
             downsample = DOWNSAMPLE
             blurRadius = sheet.dp(BLUR_DP)
@@ -452,7 +452,7 @@ internal fun glassSelfSheet(v: View, name: String) {
     sheet.setTag(innerGlassTag, true)
     // Forced, never assigned after a clear: the interceptor swaps a plain assignment back to the cleared transparent.
     val stamp = FrostDrawable(
-        sheet, bubbleBackdrop(contentRef?.get() ?: sheet),
+        sheet, { host -> wallpaperRecordOf(host) },
         sheet.dp(CARD_RADIUS_DP), glassTintColor,
         strokeWidth = sheet.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
         ignorePadding = true,
@@ -478,7 +478,7 @@ internal fun frostReactionsTray(v: View) {
     if (container == null || content == null) {
         // No stacking child or no activity behind: the stamp fallback, so the tray never shows stock.
         val d = FrostDrawable(
-            tray, bubbleBackdrop(tray), tray.dp(999f), glassTintColor,
+            tray, { host -> wallpaperRecordOf(host) }, tray.dp(999f), glassTintColor,
             strokeWidth = tray.dp(1f), strokeColor = glassTint(BUBBLE_RIM_ALPHA),
         )
         tray.background = d

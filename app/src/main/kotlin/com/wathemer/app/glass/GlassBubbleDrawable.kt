@@ -3,7 +3,6 @@ package com.wathemer.app.glass
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.ColorFilter
-import android.graphics.Matrix
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
@@ -22,11 +21,8 @@ class GlassBubbleDrawable(
     private val density: Float,
     private val rimColor: Int,
     private val rimWidth: Float,
-    /** The wallpaper's dim, and 0 when it is already folded into the backdrop bitmap. */
-    private val dim: Float,
-    private val backdrop: (View) -> Bitmap?,
-    /** Maps backdrop pixels to screen via the ImageView's own imageMatrix; hand-deriving lands it wrong. */
-    private val placement: () -> Matrix?,
+    /** The row's window wallpaper record: the bitmap, its screen matrix and the dim still to paint, read per draw. */
+    private val source: (View) -> WallpaperRecord?,
     /** The row being drawn: the only live route to a screen position; callback and canvas matrix are dead. */
     private val rowProvider: () -> View?,
     /** Hands the row, its bubble's raw bounds and the grouping flag to `GlassHook`, which is what feeds the pane. */
@@ -42,6 +38,12 @@ class GlassBubbleDrawable(
     companion object {
         /** Process-wide latch: the factory builds a fresh drawable per bind, so a per-instance latch logs per message. */
         private var loggedThrow = false
+
+        /** Main thread only, like every draw; the pane already proves one painter serves every bubble. */
+        private val painters = HashMap<Float, BubbleGlassPainter>()
+
+        fun sharedPainter(density: Float): BubbleGlassPainter =
+            painters.getOrPut(density) { BubbleGlassPainter(density) }
 
         /**
          * A bubble's rect inside its row, both ends clamped and inset: overhanging grouped bubbles
@@ -62,8 +64,8 @@ class GlassBubbleDrawable(
     private val loc = IntArray(2)
     private val reported = Rect()
     private val radiiBuf = FloatArray(4)
-    /** Built only if this drawable ever paints: the pane path must not pay for two shader compiles. */
-    private val painter by lazy(LazyThreadSafetyMode.NONE) { BubbleGlassPainter(density) }
+    /** Shared per density and built on first paint: one painter per drawable was two shader compiles per bind. */
+    private val painter: BubbleGlassPainter get() = sharedPainter(density)
 
     private val insetX = rimWidth
     private val insetY = 2f * density
@@ -99,15 +101,16 @@ class GlassBubbleDrawable(
 
         // Resolve the backdrop only beside a row's true screen position, or it is built and never drawn.
         // getLocationOnScreen, never InWindow: those agree only within one window (the frost sampling bug).
-        var bmp: Bitmap? = null
+        var rec: WallpaperRecord? = null
         var screenX = 0f
         var screenY = 0f
         if (row != null) {
             row.getLocationOnScreen(loc)
             screenX = loc[0] + clip.left
             screenY = loc[1] + clip.top
-            bmp = backdrop(row)
+            rec = source(row)
         }
+        val bmp: Bitmap? = rec?.bubble
         var radii: FloatArray? = null
         if (flatRadiusPx > 0f && (flag and GlassBubblePane.FLAG_EXT) != 0) {
             val rr = params.cornerRadius
@@ -119,9 +122,9 @@ class GlassBubbleDrawable(
         }
         painter.paint(
             canvas, clip, params, tint(), bmp,
-            if (bmp != null) placement() else null,
+            if (bmp != null) rec?.bubblePlacement else null,
             screenX = screenX, screenY = screenY,
-            dim = dim, rimColor = rimColor, rimWidth = rimWidth,
+            dim = rec?.bubbleDim ?: 0f, rimColor = rimColor, rimWidth = rimWidth,
             radii = radii,
         )
     }

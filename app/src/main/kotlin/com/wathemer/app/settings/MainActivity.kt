@@ -2,6 +2,7 @@ package com.wathemer.app.settings
 
 import android.app.Activity
 import android.app.Application
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -16,10 +17,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -29,6 +33,7 @@ import com.wathemer.app.settings.components.RestartWhatsAppButton
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.nav.Screen
 import com.wathemer.app.settings.nav.rememberNavController
+import com.wathemer.app.settings.prefs.ChatWallpaperLibrary
 import com.wathemer.app.settings.prefs.FontLibrary
 import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.settings.prefs.ServiceBridge
@@ -36,6 +41,9 @@ import com.wathemer.app.settings.preview.ThemeSnapshotHost
 import com.wathemer.app.settings.screens.BackdropScreen
 import com.wathemer.app.settings.screens.CategoryListScreen
 import com.wathemer.app.settings.screens.ChatBubbleShapesScreen
+import com.wathemer.app.settings.screens.ChatRequest
+import com.wathemer.app.settings.screens.ChatWallpapersScreen
+import com.wathemer.app.settings.screens.pendingChatRequest
 import com.wathemer.app.settings.screens.ChatBubblesScreen
 import com.wathemer.app.settings.screens.ChatHeaderToolbarScreen
 import com.wathemer.app.settings.screens.ChatInputBarScreen
@@ -123,6 +131,8 @@ class MainActivity : ComponentActivity() {
         // Last, so the snapshot holds the reconciled and migrated state rather than what preceded it.
         runCatching { prefs.exportForMigration() }
             .onSuccess { n -> if (n != null) Log.i("WaThemer.Prefs", "migration snapshot: $n settings") }
+        // Only a fresh Activity takes a hand-off: a recreation carries the same Intent and must not replay it.
+        if (savedInstanceState == null) takeChatRequest(intent)
         setContent {
             WaThemerTheme {
                 ThemeSnapshotHost(prefs) {
@@ -140,6 +150,25 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         runCatching { openPrefs?.exportForMigration() }
+    }
+
+    /** A hand-off while this Activity is already on top; singleTop delivers it here instead of recreating. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeChatRequest(intent)
+    }
+
+    /** Reads and consumes the chat extras. Consumed, or a rotation replays them; aged out, or recents re-delivers a task root intent. */
+    private fun takeChatRequest(intent: Intent?) {
+        val jid = intent?.getStringExtra(ChatWallpaperLibrary.EXTRA_JID) ?: return
+        val name = intent.getStringExtra(ChatWallpaperLibrary.EXTRA_NAME)
+        val sentAt = intent.getLongExtra(ChatWallpaperLibrary.EXTRA_SENT_AT, 0L)
+        intent.removeExtra(ChatWallpaperLibrary.EXTRA_JID)
+        intent.removeExtra(ChatWallpaperLibrary.EXTRA_NAME)
+        intent.removeExtra(ChatWallpaperLibrary.EXTRA_SENT_AT)
+        setIntent(intent)
+        if (jid.isBlank() || System.currentTimeMillis() - sentAt > ChatWallpaperLibrary.HANDOFF_MAX_AGE_MS) return
+        pendingChatRequest.value = ChatRequest(jid, ChatWallpaperLibrary.sanitizeName(name, null, jid))
     }
 }
 
@@ -177,7 +206,16 @@ private var importWarn = false
 @Composable
 private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
     // App chrome stays locked to AppAccent no matter which WhatsApp theme is being configured.
-    Column(modifier = Modifier.fillMaxSize()) {
+    // Padded here, not on the banner: the screens' Scaffolds subtract an inset an ancestor took, so the banner clears the clock and the title follows it.
+    val banner = !prefs.moduleStoreActive || importWarn
+    // A hand-off from WhatsApp replaces the stack; landing on top of wherever the user last was leaves back walking through it.
+    val pending by pendingChatRequest
+    LaunchedEffect(pending) {
+        if (pending != null && nav.current != Screen.ChatWallpapers) {
+            nav.replaceAll(listOf(Screen.CategoryList, Screen.Backdrop, Screen.ChatWallpapers))
+        }
+    }
+    Column(modifier = Modifier.fillMaxSize().then(if (banner) Modifier.statusBarsPadding() else Modifier)) {
         // Standing banner, never a toast: with the module inactive every control silently changes nothing.
         if (!prefs.moduleStoreActive) {
             Text(
@@ -228,6 +266,7 @@ private fun ScreenSwitch(nav: NavController, prefs: Prefs, onMessage: (String) -
         Screen.Wallpaper               -> WallpaperScreen(nav, prefs)
         Screen.StatusBar               -> StatusBarScreen(nav, prefs)
         Screen.LiquidGlass             -> LiquidGlassScreen(nav, prefs)
+        Screen.ChatWallpapers          -> ChatWallpapersScreen(nav, prefs, onMessage)
 
         // Homescreen tree
         Screen.Homescreen              -> HomescreenScreen(nav, prefs)

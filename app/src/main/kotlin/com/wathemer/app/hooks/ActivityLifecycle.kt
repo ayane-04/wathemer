@@ -18,7 +18,15 @@ object ActivityLifecycle {
     // Registration and dispatch both run on the main thread, registration first, so plain lists are safe.
     private val created = ArrayList<Client>()
     private val resumed = ArrayList<Client>()
+    private val createdEarly = ArrayList<EarlyClient>()
     private var attached = false
+
+    private class EarlyClient(val name: String, val action: (Activity, Bundle?) -> Unit)
+
+    /** Runs [action] inside the host's super.onCreate, before any layout exists. Read the Intent and hand work off; touch no view. */
+    fun onCreatedEarly(name: String, action: (Activity, Bundle?) -> Unit) {
+        createdEarly.add(EarlyClient(name, action))
+    }
 
     /** Activities whose created-clients have run; weak so a finished Activity leaves no trace. */
     private val createdDone: MutableSet<Activity> = Collections.newSetFromMap(WeakHashMap())
@@ -42,6 +50,14 @@ object ActivityLifecycle {
                 override fun onActivityCreated(a: Activity, saved: Bundle?) {
                     // The ledger line that separates a dead anchor from a feature that declined to run.
                     HookLog.hit("lifecycle/activity", a.javaClass.simpleName)
+                    for (c in createdEarly) {
+                        // Isolated per client: one thrower must not cost the features behind it.
+                        try {
+                            c.action(a, saved)
+                        } catch (t: Throwable) {
+                            HookLog.fail("lifecycle/${c.name}", t)
+                        }
+                    }
                 }
                 override fun onActivityResumed(a: Activity) {
                     // Never post from onCreate: a post before attach runs after the first frame, and the panes miss the wallpaper.
