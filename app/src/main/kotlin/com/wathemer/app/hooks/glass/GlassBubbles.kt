@@ -169,7 +169,7 @@ internal fun roundInnerSurface(v: View, what: String) {
 internal val bubbleBoundsByRow = WeakHashMap<View, BubbleMark>()
 
 /** rowH is a staleness check: a re-bound row re-reports, so a height mismatch means do not trust the rect. */
-internal class BubbleMark(val rect: Rect, var rowH: Int, var flag: Int = 0)
+internal class BubbleMark(val rect: Rect, var rowH: Int, var flag: Int)
 
 /** Roots whose rows carry no bubble: a sticker draws bare, a video note draws a circle. */
 internal var bubblelessRootIds = IntArray(0)

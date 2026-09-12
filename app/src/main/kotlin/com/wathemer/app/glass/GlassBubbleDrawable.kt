@@ -10,10 +10,7 @@ import android.graphics.drawable.Drawable
 import android.util.Log
 import android.view.View
 
-/**
- * WhatsApp's bubble background, replaced: reports (row, bounds) to feed the pane, and paints only
- * when no pane exists, because anything drawn from a row freezes the moment the list scrolls.
- */
+/** WhatsApp's bubble background, replaced: reports (row, bounds) to feed the pane and paints only when no pane exists, because anything drawn from a row freezes the moment the list scrolls. */
 class GlassBubbleDrawable(
     private val params: GlassParams,
     /** Pulled, not pushed: the tint resolves after WhatsApp asks for this drawable. */
@@ -45,10 +42,7 @@ class GlassBubbleDrawable(
         fun sharedPainter(density: Float): BubbleGlassPainter =
             painters.getOrPut(density) { BubbleGlassPainter(density) }
 
-        /**
-         * A bubble's rect inside its row, both ends clamped and inset: overhanging grouped bubbles
-         * draw two rims through each other. A collapsed clamp restores only the raw bottom.
-         */
+        /** A bubble's rect inside its row, both ends clamped and inset so overhanging grouped bubbles do not draw two rims through each other; a collapsed clamp restores only the raw bottom. */
         fun clamp(b: Rect, rowHeight: Int, insetX: Float, insetY: Float, out: RectF) {
             val top = maxOf(b.top, 0).toFloat() + insetY
             var bot = minOf(
@@ -122,10 +116,12 @@ class GlassBubbleDrawable(
         }
         painter.paint(
             canvas, clip, params, tint(), bmp,
-            if (bmp != null) rec?.bubblePlacement else null,
+            if (bmp != null) rec.bubblePlacement else null,
             screenX = screenX, screenY = screenY,
             dim = rec?.bubbleDim ?: 0f, rimColor = rimColor, rimWidth = rimWidth,
             radii = radii,
+            sharp = rec?.src, sharpPlace = rec?.srcPlacement,
+            sharpDim = if (rec != null && rec.bubbleDimFolded) rec.dimAlpha / 255f else 0f,
         )
     }
 

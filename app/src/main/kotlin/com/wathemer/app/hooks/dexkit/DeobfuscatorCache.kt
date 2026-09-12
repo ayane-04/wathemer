@@ -61,7 +61,6 @@ class DeobfuscatorCache {
     }
 
     private fun readWaVersion(app: Application): String = try {
-        @Suppress("DEPRECATION")
         val info = if (Build.VERSION.SDK_INT >= 33) {
             app.packageManager.getPackageInfo(app.packageName, PackageManager.PackageInfoFlags.of(0L))
         } else {

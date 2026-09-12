@@ -1,5 +1,5 @@
 // Pane lifetime. A pane that is not a child of the view it decorates outlives it, so it is bound to
-// an anchor and this is the ONLY writer of a bound pane's visibility; ask paneShouldShow instead.
+// an anchor; one decider, paneShouldShow, and this sweep is the writer of record. Ask it, never re-derive it.
 package com.wathemer.app.hooks.glass
 
 import android.view.View
@@ -9,7 +9,7 @@ import java.lang.ref.WeakReference
 
 // ── Pane lifetime: a pane must not outlive the thing it decorates ──────────────────────
 // Any pane that is not a child of the view it decorates must be bindPane'd to it, or it orphans on fragment swaps.
-// One writer only: nothing but syncPaneVisibility may set a bound pane's visibility; ask paneShouldShow instead.
+// One decider: every writer of a bound pane's visibility (this sweep, GlassFab's per-layout syncs) asks paneShouldShow.
 internal class PaneBinding(
     val pane: WeakReference<View>,
     val anchor: WeakReference<View>,

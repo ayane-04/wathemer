@@ -2,10 +2,7 @@ package com.wathemer.app.glass
 
 import android.graphics.Color
 
-/**
- * Every tunable of the glass in one place; mutable with a listener because a copy per touch-move
- * is garbage. Lengths are screen px unless named otherwise. density has no default on purpose.
- */
+/** Every tunable of the glass in one place, mutable with a listener because a copy per touch-move is garbage; lengths are screen px unless named, and density has no default on purpose. */
 class GlassParams(var density: Float) {
 
     /** Notified after any property changes, so the view can invalidate itself. */
@@ -45,10 +42,7 @@ class GlassParams(var density: Float) {
     var tintColor: Int = Color.argb(56, 255, 255, 255)
         set(v) { set(field, v) { field = it } }
 
-    /**
-     * Px each shader edge is pushed outside the pane, so a flush screen edge shows no rim. Push,
-     * do not oversize the view: blurring the uncovered margin drags a dark gradient inward.
-     */
+    /** Px each shader edge is pushed outside the pane so a flush screen edge shows no rim; push rather than oversize the view, or blurring the uncovered margin drags a dark gradient inward. */
     var edgeExpandLeft: Float = 0f
         set(v) { set(field, v) { field = it } }
     var edgeExpandTop: Float = 0f
@@ -56,10 +50,6 @@ class GlassParams(var density: Float) {
     var edgeExpandRight: Float = 0f
         set(v) { set(field, v) { field = it } }
     var edgeExpandBottom: Float = 0f
-        set(v) { set(field, v) { field = it } }
-
-    /** Bottom-edge dissolve length; both shader passes read it, so tint cannot outlive backdrop. */
-    var fadeBottomPx: Float = 0f
         set(v) { set(field, v) { field = it } }
 
     /** Top fade in surface-local px, set per frame by [BubbleGlassPainter]; negative means the line is above. */
@@ -190,6 +180,10 @@ class GlassParams(var density: Float) {
     var innerShadow: Float = 0f
         set(v) { set(field, v.coerceIn(0f, 1f)) { field = it } }
 
+    /** Darkening on the outer edge under the highlight, zero on the plateau; 0 is off. */
+    var edgeShadow: Float = defaultEdgeShadow
+        set(v) { set(field, v.coerceIn(0f, 1f)) { field = it } }
+
     /** A third, deliberately broad specular lobe; with the thin arcs it reads as a lit surface. */
     var sheenStrength: Float = 0.18f
         set(v) { set(field, v.coerceIn(0f, 2f)) { field = it } }
@@ -208,6 +202,22 @@ class GlassParams(var density: Float) {
     var transGamma: Float = defaultTransGamma
         set(v) { set(field, v.coerceIn(0.3f, 1f)) { field = it } }
 
+    /** Saturation of the transmitted backdrop, 1 off; blur and the dim drain colour and this puts it back. */
+    var saturation: Float = defaultSaturation
+        set(v) { set(field, v.coerceIn(1f, 2f)) { field = it } }
+
+    /** Lift of the bright part of the transmission; 0 is off. */
+    var bloom: Float = defaultBloom
+        set(v) { set(field, v.coerceIn(0f, 1f)) { field = it } }
+
+    /** Level the lift starts above, in the grade's space; the hook derives the default from the wallpaper dim so bright detail can reach it. */
+    var bloomThreshold: Float = defaultBloomThreshold
+        set(v) { set(field, v.coerceIn(0.01f, 1f)) { field = it } }
+
+    /** How much sharp, bent wallpaper shows at the very rim over the frost; 0 is off. */
+    var detail: Float = defaultDetail
+        set(v) { set(field, v.coerceIn(0f, 1f)) { field = it } }
+
     // ── Rim stroke ─────────────────────────────────────────────────────────────────
     // A hard line on the silhouette. The light pass only ever makes a wide soft lobe.
 
@@ -215,7 +225,7 @@ class GlassParams(var density: Float) {
     var rimStrokePx: Float = defaultRimStrokePx
         set(v) { set(field, v.coerceIn(0f, 24f)) { field = it } }
 
-    /** Gradient axis in degrees, clockwise from +x. Decides which side of the rim lights up. */
+    /** Gradient axis in degrees, clockwise from +x. Both ends of the axis light up. */
     var rimStrokeAngle: Float = defaultRimStrokeAngle
         set(v) { set(field, v) { field = it } }
 
@@ -223,7 +233,7 @@ class GlassParams(var density: Float) {
     var rimEnabled: Boolean = true
         set(v) { set(field, v) { field = it } }
 
-    /** Bright stop of the rim gradient; the opposite stop is the same hue at zero alpha. */
+    /** Colour of the rim gradient's two lit ends; the middle stop is the same hue at zero alpha. */
     var rimStrokeColor: Int = defaultRimStrokeColor
         set(v) { set(field, v) { field = it } }
 
@@ -231,6 +241,11 @@ class GlassParams(var density: Float) {
     companion object {
         // Mirrors GlassDefaults by hand; the engine does not import settings.
         @JvmStatic var defaultTransGamma: Float = 0.75f
+        @JvmStatic var defaultSaturation: Float = 1.1f
+        @JvmStatic var defaultBloom: Float = 0.5f
+        @JvmStatic var defaultBloomThreshold: Float = 0.6f
+        @JvmStatic var defaultEdgeShadow: Float = 0.15f
+        @JvmStatic var defaultDetail: Float = 0.25f
         @JvmStatic var defaultRimStrokePx: Float = 0f
         @JvmStatic var defaultRimStrokeAngle: Float = 90f
         @JvmStatic var defaultRimStrokeColor: Int = Color.WHITE

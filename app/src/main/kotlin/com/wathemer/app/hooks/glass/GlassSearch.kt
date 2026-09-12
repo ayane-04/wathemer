@@ -94,7 +94,7 @@ internal fun layoutSearchScreen(fragment: View) {
     val screenH = root.resources.displayMetrics.heightPixels
     searchLowerOffset = ((screenH * SEARCH_FIELD_TOP_FRACTION).toInt() - loc[1]).coerceAtLeast(0)
 
-    // The 1px hairline travels down with the field and cuts across the panel; INVISIBLE, not GONE, so nothing shifts.
+    // The hairline travels down with the field and cuts across the panel; INVISIBLE, not GONE, so nothing shifts.
     searchDividerId.takeIf { it != 0 }
         ?.let { root.findViewById<View>(it) }
         ?.let { if (it.visibility != View.INVISIBLE) it.visibility = View.INVISIBLE }
@@ -179,7 +179,7 @@ private fun ensureChipWrapHook(group: View) {
     var c: Class<*>? = group.javaClass
     while (c != null) {
         val m = runCatching {
-            c!!.getDeclaredMethod(
+            c.getDeclaredMethod(
                 "onMeasure", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
             )
         }.getOrNull()
@@ -699,6 +699,7 @@ private fun cancelHideFade(v: View) {
     logOnce("hide fade retracted; a VISIBLE arrived while the hide was deferred")
 }
 
+// The FABs are deliberately never registered here: deferring their everyday hides for the fade feels sticky.
 /** Fade this view out with the home screen whenever WhatsApp hides it. */
 internal fun registerFadeOnHide(v: View?) {
     if (v == null) return

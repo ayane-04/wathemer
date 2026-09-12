@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -49,11 +48,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
 import com.wathemer.app.settings.components.CategoryRow
-import com.wathemer.app.settings.components.MenuRow
 import com.wathemer.app.settings.components.NavTopBar
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.SectionHeader
-import com.wathemer.app.settings.components.StubNote
+import com.wathemer.app.settings.components.NoteText
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.settings.prefs.ThemeDoc
@@ -118,7 +116,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                 snapshot.value = snapshotFromPrefs(prefs)
                     .copy(wallpaperStamp = snapshot.value.wallpaperStamp + 1)
                 if (!keepUndo) ThemeLibrary.clearUndo(context)
-                onMessage("${outcome.name} applied. Restart WhatsApp to see it.")
+                onMessage("${outcome.name} applied.")
                 if (outcome.problems.isNotEmpty()) notice = outcome.problems
             }
             is ThemeLibrary.Outcome.Failed -> onMessage(outcome.reason)
@@ -188,59 +186,39 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
 
     Scaffold(containerColor = Palette.Bg) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(
-                title = "Themes",
-                // Said in the subtitle, not in a row: a row that appears and vanishes shifts everything under it.
-                subtitle = when {
-                    busy -> "Working"
-                    slots.isEmpty() -> "None saved"
-                    else -> "${slots.size} saved"
-                },
-                onBack = { nav.pop() },
-            )
+            NavTopBar(title = "Themes", onBack = { nav.pop() })
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(bottom = 12.dp),
             ) {
-                SectionHeader(
-                    title = "Your themes",
-                    subtitle = "Your colours, bubble shapes, icons, font, wallpaper and glass sliders.",
-                )
-                MenuRow(
-                    title = "Save what you have now",
-                    subtitle = "Adds your current look to the list below.",
-                    onClick = { naming = true },
-                )
-                MenuRow(
-                    title = "Import a theme file",
-                    subtitle = "Open a theme someone sent you.",
+                CategoryRow(label = "Save the current look", onClick = { naming = true })
+                CategoryRow(
+                    label = "Open a theme file",
+                    divider = undo != null,
                     onClick = {
                         runCatching { importLauncher.launch(arrayOf("*/*")) }
                             .onFailure { onMessage("No file picker on this phone.") }
                     },
                 )
                 undo?.let { doc ->
-                    MenuRow(
-                        title = "Undo the last change",
-                        subtitle = "Puts back the theme you had before, from ${whenText(context, doc.createdAt)}.",
+                    CategoryRow(
+                        label = "Undo the last change",
+                        description = whenText(context, doc.createdAt),
+                        divider = false,
                         onClick = { undoing = true },
                     )
                 }
 
+                SectionHeader("Saved")
                 if (slots.isEmpty()) {
-                    StubNote("Nothing saved yet. Save what you have, or import a theme someone shared.")
+                    NoteText(if (busy) "Working" else "Nothing saved yet.")
                 } else {
-                    slots.forEach { slot ->
-                        ThemeSlotRow(context, slot) { acting = slot }
+                    slots.forEachIndexed { i, slot ->
+                        ThemeSlotRow(context, slot, divider = i < slots.lastIndex) { acting = slot }
                     }
                 }
-
-                Spacer(Modifier.size(4.dp))
-                StubNote("A theme carries the Liquid Glass sliders. Whether glass is on stays yours.")
-                StubNote("Applied when WhatsApp starts. Restart it from the button below.")
             }
         }
     }
@@ -301,10 +279,10 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
         ConfirmDialog(
             title = "Apply ${slot.doc.name}?",
             body = buildString {
-                append("Your colours, bubble shapes, icons and font are replaced by this theme's.")
-                if (carriesGlass) append(" Its Liquid Glass sliders replace yours.")
-                if (carriesWallpaper) append(" Your current wallpaper image is replaced too.")
-                append(" You can undo it straight afterwards.")
+                append("Replaces your colours, bubble shapes, icons and font.")
+                if (carriesGlass) append(" Its glass settings replace yours.")
+                if (carriesWallpaper) append(" Your wallpaper is replaced too.")
+                append(" You can undo it.")
             },
             confirmLabel = "Apply",
             onConfirm = { applying = null; applyTheme(slot, keepUndo = true) },
@@ -315,7 +293,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
     deleting?.let { slot ->
         ConfirmDialog(
             title = "Delete ${slot.doc.name}?",
-            body = "It leaves your list. Whatever is on WhatsApp right now stays as it is.",
+            body = "It leaves your list. WhatsApp stays as it is.",
             confirmLabel = "Delete",
             onConfirm = {
                 deleting = null
@@ -329,7 +307,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
         val previous = undo
         ConfirmDialog(
             title = "Undo the last change?",
-            body = "Your colours and wallpaper go back to how they were before the last theme was applied. This can only be done once.",
+            body = "Your colours and wallpaper go back to how they were before the last theme. Once only.",
             confirmLabel = "Undo",
             onConfirm = {
                 undoing = false
@@ -347,10 +325,10 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
     }
 }
 
-/* ── Rows ───────────────────────────────────────────────────────────────── */
+// ── Rows ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ThemeSlotRow(context: Context, slot: ThemeLibrary.Slot, onClick: () -> Unit) {
+private fun ThemeSlotRow(context: Context, slot: ThemeLibrary.Slot, divider: Boolean, onClick: () -> Unit) {
     val doc = slot.doc
     CategoryRow(
         label = doc.name,
@@ -362,26 +340,26 @@ private fun ThemeSlotRow(context: Context, slot: ThemeLibrary.Slot, onClick: () 
                 text = doc.colors?.get(Prefs.KEY_TEXT) ?: Prefs.DEFAULT_TEXT,
             )
         },
+        divider = divider,
         onClick = onClick,
     )
 }
 
-/** The three globals side by side, the same shorthand the root screen uses for the live theme. */
+/** The three globals side by side. */
 @Composable
 private fun ThemeBadge(primary: Int, background: Int, text: Int) {
     Row(
         modifier = Modifier
-            .border(1.dp, Palette.Rule, RoundedCornerShape(8.dp))
-            .padding(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(1.dp),
+            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(6.dp))
+            .padding(1.dp),
     ) {
-        Box(Modifier.size(width = 13.dp, height = 40.dp).background(Color(primary), RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp)))
-        Box(Modifier.size(width = 13.dp, height = 40.dp).background(Color(background)))
-        Box(Modifier.size(width = 13.dp, height = 40.dp).background(Color(text), RoundedCornerShape(topEnd = 6.dp, bottomEnd = 6.dp)))
+        Box(Modifier.size(width = 8.dp, height = 22.dp).background(Color(primary), RoundedCornerShape(topStart = 5.dp, bottomStart = 5.dp)))
+        Box(Modifier.size(width = 8.dp, height = 22.dp).background(Color(background)))
+        Box(Modifier.size(width = 8.dp, height = 22.dp).background(Color(text), RoundedCornerShape(topEnd = 5.dp, bottomEnd = 5.dp)))
     }
 }
 
-/* ── Dialogs ────────────────────────────────────────────────────────────── */
+// ── Dialogs ──────────────────────────────────────────────────────────────
 
 @Composable
 private fun ThemeDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
@@ -389,9 +367,8 @@ private fun ThemeDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Palette.Bg, RoundedCornerShape(16.dp))
-                .border(1.dp, Palette.RuleStrong, RoundedCornerShape(16.dp))
-                .padding(18.dp),
+                .background(Palette.Surface, RoundedCornerShape(16.dp))
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             content = content,
         )
@@ -410,23 +387,33 @@ private fun ActionsDialog(
     onDismiss: () -> Unit,
 ) {
     ThemeDialog(onDismiss) {
-        Text(slot.doc.name, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        Text(describe(context, slot.doc), color = Palette.FgMuted, fontSize = 11.sp, lineHeight = 15.sp)
+        Text(slot.doc.name, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text(describe(context, slot.doc), color = Palette.FgMuted, fontSize = 14.sp)
         // Body scrolls and the dismiss stays outside it, or a tall font scale pushes the last row off the window.
         Column(
             modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Button(onClick = onApply, modifier = Modifier.fillMaxWidth()) {
-                Text("Apply this theme", fontWeight = FontWeight.Bold)
+                Text("Apply", fontWeight = FontWeight.Medium)
             }
-            MenuRow("Share", "Send this theme to someone.", onShare)
-            MenuRow("Save to a file", "Keep a copy wherever you choose.", onExport)
-            MenuRow("Rename", "Change what it is called here.", onRename)
-            MenuRow("Delete", "Remove it from your list.", onDelete)
+            DialogAction("Share", onShare)
+            DialogAction("Save to a file", onExport)
+            DialogAction("Rename", onRename)
+            DialogAction("Delete", onDelete)
         }
         DialogDismiss("Close", onDismiss)
     }
+}
+
+@Composable
+private fun DialogAction(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = Palette.Fg,
+        fontSize = 16.sp,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+    )
 }
 
 @Composable
@@ -438,16 +425,16 @@ private fun ConfirmDialog(
     onDismiss: () -> Unit,
 ) {
     ThemeDialog(onDismiss) {
-        Text(title, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        Text(body, color = Palette.FgMuted, fontSize = 12.sp, lineHeight = 17.sp)
+        Text(title, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text(body, color = Palette.FgMuted, fontSize = 14.sp, lineHeight = 20.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = onDismiss,
                 modifier = Modifier.weight(1f),
-                border = BorderStroke(1.dp, Palette.Rule),
-            ) { Text("Cancel", color = Palette.Fg, fontWeight = FontWeight.SemiBold) }
+                border = BorderStroke(1.dp, Palette.RuleStrong),
+            ) { Text("Cancel", color = Palette.Fg) }
             Button(onClick = onConfirm, modifier = Modifier.weight(1f)) {
-                Text(confirmLabel, fontWeight = FontWeight.Bold)
+                Text(confirmLabel, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -463,12 +450,12 @@ private fun NameDialog(
 ) {
     var value by remember { mutableStateOf(initial) }
     ThemeDialog(onDismiss) {
-        Text(title, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, Palette.Rule, RoundedCornerShape(8.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .border(1.dp, Palette.RuleStrong, RoundedCornerShape(10.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicTextField(
@@ -476,12 +463,12 @@ private fun NameDialog(
                 // Filtered at the source: one line, capped where the row can still show it whole.
                 onValueChange = { raw -> value = raw.filterNot { it == '\n' || it == '\r' }.take(MAX_THEME_NAME) },
                 modifier = Modifier.fillMaxWidth(),
-                textStyle = TextStyle(color = Palette.Fg, fontSize = 14.sp),
+                textStyle = TextStyle(color = Palette.Fg, fontSize = 16.sp),
                 cursorBrush = SolidColor(Palette.Fg),
                 singleLine = true,
                 decorationBox = { innerField ->
                     Box {
-                        if (value.isEmpty()) Text("My theme", color = Palette.FgSubtle, fontSize = 14.sp)
+                        if (value.isEmpty()) Text("My theme", color = Palette.FgSubtle, fontSize = 16.sp)
                         innerField()
                     }
                 },
@@ -491,13 +478,13 @@ private fun NameDialog(
             OutlinedButton(
                 onClick = onDismiss,
                 modifier = Modifier.weight(1f),
-                border = BorderStroke(1.dp, Palette.Rule),
-            ) { Text("Cancel", color = Palette.Fg, fontWeight = FontWeight.SemiBold) }
+                border = BorderStroke(1.dp, Palette.RuleStrong),
+            ) { Text("Cancel", color = Palette.Fg) }
             Button(
                 onClick = { onConfirm(value.trim()) },
                 enabled = value.isNotBlank(),
                 modifier = Modifier.weight(1f),
-            ) { Text(confirmLabel, fontWeight = FontWeight.Bold) }
+            ) { Text(confirmLabel, fontWeight = FontWeight.Medium) }
         }
     }
 }
@@ -505,14 +492,14 @@ private fun NameDialog(
 @Composable
 private fun NoticeDialog(lines: List<String>, onDismiss: () -> Unit) {
     ThemeDialog(onDismiss) {
-        Text("Worth knowing", color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text("Notes", color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
         Column(
             modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            lines.forEach { Text(it, color = Palette.FgMuted, fontSize = 12.sp, lineHeight = 17.sp) }
+            lines.forEach { Text(it, color = Palette.FgMuted, fontSize = 14.sp, lineHeight = 20.sp) }
         }
-        DialogDismiss("Got it", onDismiss)
+        DialogDismiss("OK", onDismiss)
     }
 }
 
@@ -521,19 +508,18 @@ private fun DialogDismiss(label: String, onClick: () -> Unit) {
     Text(
         label,
         color = Palette.FgMuted,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 0.4.sp,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(top = 2.dp, bottom = 2.dp),
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
     )
 }
 
-/* ── Text ───────────────────────────────────────────────────────────────── */
+// ── Text ─────────────────────────────────────────────────────────────────
 
 /** One line under the name: whether it carries a wallpaper, how many colours, and when it was made. */
 private fun describe(context: Context, doc: ThemeDoc): String {
     val parts = mutableListOf<String>()
-    parts += if (doc.wallpaper?.hasImage == true) "With wallpaper" else "No wallpaper"
+    if (doc.wallpaper?.hasImage == true) parts += "Wallpaper"
     when (val n = doc.colors?.size ?: 0) {
         0 -> parts += "Stock colours"
         1 -> parts += "1 colour"

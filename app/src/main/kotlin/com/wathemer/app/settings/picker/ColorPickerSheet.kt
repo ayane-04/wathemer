@@ -30,7 +30,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -68,6 +67,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.wathemer.app.settings.components.CloseIcon
+import com.wathemer.app.settings.components.Palette
+import com.wathemer.app.settings.components.luminance
 import com.wathemer.app.util.HexColor
 import kotlin.math.roundToInt
 
@@ -76,16 +77,14 @@ import kotlin.math.roundToInt
 @Composable
 fun ColorPickerSheet(
     title: String,
-    subtitle: String,
     initialColor: Int,
     recents: List<Int>,
     onDismiss: () -> Unit,
     onApply: (Int) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val rule = Color.White.copy(alpha = 0.09f)
-    val fgMuted = Color.White.copy(alpha = 0.55f)
-    val fgSubtle = Color.White.copy(alpha = 0.32f)
+    val rule = Palette.RuleStrong
+    val fgMuted = Palette.FgMuted
 
     // HSV state
     val initHsv = remember(initialColor) { argbToHsv(initialColor) }
@@ -107,8 +106,8 @@ fun ColorPickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.background,
-        contentColor = Color.White,
+        containerColor = Palette.Surface,
+        contentColor = Palette.Fg,
         dragHandle = null,
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
     ) {
@@ -117,38 +116,28 @@ fun ColorPickerSheet(
             modifier = Modifier
                 .weight(1f, fill = false)
                 .verticalScroll(rememberScrollState())
-                .padding(start = 18.dp, end = 18.dp, top = 14.dp),
+                .padding(start = 18.dp, end = 18.dp, top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // Drag handle
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
-                    .width(42.dp).height(4.dp)
+                    .width(36.dp).height(4.dp)
                     .background(rule, RoundedCornerShape(4.dp))
             )
 
             // Header
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text(
-                        subtitle.uppercase(),
-                        color = fgMuted, fontSize = 9.sp, letterSpacing = 1.6.sp,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
+                Text(title, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .border(1.dp, rule, RoundedCornerShape(8.dp))
-                        .clickable(onClick = onDismiss),
+                    modifier = Modifier.size(36.dp).clickable(onClick = onDismiss),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CloseIcon(Color.White)
+                    CloseIcon(Palette.FgMuted, size = 16.dp)
                 }
             }
 
@@ -160,28 +149,20 @@ fun ColorPickerSheet(
                 rule = rule,
             )
 
-            // Hue slider
-            LabeledSlider(label = "Hue", valueText = "${hue.toInt()}°", rule = rule, fgMuted = fgMuted) {
+            LabeledSlider(label = "Hue", valueText = "${hue.toInt()}°", fgMuted = fgMuted) {
                 HueTrack(hue = hue, onChange = { clearExact(); hue = it })
             }
-
-            // Saturation slider
-            LabeledSlider(label = "Saturation", valueText = "${(sat * 100).toInt()}%", rule = rule, fgMuted = fgMuted) {
+            LabeledSlider(label = "Saturation", valueText = "${(sat * 100).toInt()}%", fgMuted = fgMuted) {
                 SatTrack(sat = sat, hueColor = pureHueColor, onChange = { clearExact(); sat = it })
             }
-
-            // Opacity slider
-            LabeledSlider(label = "Opacity", valueText = "${(alphaFraction * 100).toInt()}%", rule = rule, fgMuted = fgMuted) {
+            LabeledSlider(label = "Opacity", valueText = "${(alphaFraction * 100).toInt()}%", fgMuted = fgMuted) {
                 AlphaTrack(alpha = alphaFraction, opaqueColor = Color(currentArgb or 0xFF000000.toInt()), onChange = { clearExact(); alphaFraction = it })
             }
 
             // Recents
             if (recents.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                        Text("RECENT", color = fgMuted, fontSize = 9.sp, letterSpacing = 1.6.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        Text("${recents.size} colour${if (recents.size == 1) "" else "s"}", color = fgSubtle, fontSize = 9.sp, letterSpacing = 0.8.sp)
-                    }
+                    Text("Recent", color = fgMuted, fontSize = 13.sp)
                     // One swatch per recent; dedup happens at write time in Prefs.pushRecent.
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -220,7 +201,6 @@ fun ColorPickerSheet(
                     exactArgb = argb
                 },
             )
-
         }
 
         // Outside the scroll: these stay reachable however tall the body gets.
@@ -234,7 +214,7 @@ fun ColorPickerSheet(
                 onClick = onDismiss,
                 modifier = Modifier.weight(1f),
                 border = BorderStroke(1.dp, rule),
-            ) { Text("Cancel", color = Color.White, fontWeight = FontWeight.SemiBold) }
+            ) { Text("Cancel", color = Palette.Fg) }
             Button(
                 onClick = { onApply(currentArgb) },
                 modifier = Modifier.weight(1f),
@@ -242,7 +222,7 @@ fun ColorPickerSheet(
                     containerColor = currentColor,
                     contentColor = if (luminance(currentArgb) > 0.5f) Color.Black else Color.White,
                 ),
-            ) { Text("Apply colour", fontWeight = FontWeight.Bold) }
+            ) { Text("Apply", fontWeight = FontWeight.Medium) }
         }
     }
 }
@@ -259,9 +239,9 @@ private fun SvArea(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .border(1.dp, rule, RoundedCornerShape(8.dp))
-            .background(Brush.horizontalGradient(listOf(Color.White, hueColor)), RoundedCornerShape(8.dp))
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)), RoundedCornerShape(8.dp))
+            .border(1.dp, rule, RoundedCornerShape(10.dp))
+            .background(Brush.horizontalGradient(listOf(Color.White, hueColor)), RoundedCornerShape(10.dp))
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)), RoundedCornerShape(10.dp))
             .onSizeChanged { areaSize = it }
             .pointerInput(Unit) { detectTapGestures(onPress = { offset ->
                 val w = areaSize.width.coerceAtLeast(1)
@@ -300,19 +280,18 @@ private fun SvArea(
 
 @Composable
 private fun LabeledSlider(
-    label: String, valueText: String, rule: Color, fgMuted: Color,
+    label: String, valueText: String, fgMuted: Color,
     track: @Composable () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-            Text(label.uppercase(), color = fgMuted, fontSize = 9.sp, letterSpacing = 1.6.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text(valueText, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
+            Text(label, color = fgMuted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(valueText, color = Palette.Fg, fontSize = 13.sp)
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(14.dp)
-                .border(1.dp, rule, RoundedCornerShape(8.dp))
         ) { track() }
     }
 }
@@ -444,23 +423,19 @@ private fun HexPreviewRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, rule, RoundedCornerShape(8.dp))
+            .border(1.dp, rule, RoundedCornerShape(10.dp))
             .clickable { editing = true }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("HEX", color = fgMuted, fontSize = 11.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold)
         Text(
             hex,
-            color = Color.White,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.4.sp,
+            color = Palette.Fg,
+            fontSize = 15.sp,
             modifier = Modifier.weight(1f),
         )
-        Text("EDIT", color = fgMuted, fontSize = 9.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold)
-        // NEW|OLD preview: clip the whole row so the two half swatches read as one split pill.
+        // New beside old: clip the whole row so the two half swatches read as one split pill.
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(12.dp))
@@ -469,23 +444,23 @@ private fun HexPreviewRow(
         ) {
             Box(
                 modifier = Modifier
-                    .width(28.dp).height(26.dp)
+                    .width(30.dp).height(26.dp)
                     .background(currentColor),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("NEW",
+                Text("New",
                     color = if (luminance(currentColor.toArgb()) > 0.5f) Color.Black.copy(0.7f) else Color.White.copy(0.85f),
-                    fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+                    fontSize = 9.sp)
             }
             Box(
                 modifier = Modifier
-                    .width(28.dp).height(26.dp)
+                    .width(30.dp).height(26.dp)
                     .background(oldColor),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("OLD",
+                Text("Old",
                     color = if (luminance(oldColor.toArgb()) > 0.5f) Color.Black.copy(0.7f) else Color.White.copy(0.85f),
-                    fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+                    fontSize = 9.sp)
             }
         }
     }
@@ -514,25 +489,21 @@ private fun HexEntryDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.background, RoundedCornerShape(16.dp))
-                .border(1.dp, rule, RoundedCornerShape(16.dp))
-                .padding(18.dp),
+                .background(Palette.Surface, RoundedCornerShape(16.dp))
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Hex colour", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(
-                "AARRGGBB, eight digits, alpha first.",
-                color = fgMuted, fontSize = 11.sp,
-            )
+            Text("Hex colour", color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            Text("Eight digits, alpha first", color = fgMuted, fontSize = 13.sp)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, rule, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                    .border(1.dp, rule, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text("#", color = fgMuted, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("#", color = fgMuted, fontSize = 16.sp)
                 BasicTextField(
                     value = text,
                     // Filter as you type: hex only, max eight, so the field never holds what Set would refuse.
@@ -543,10 +514,10 @@ private fun HexEntryDialog(
                     },
                     modifier = Modifier.weight(1f).focusRequester(focus),
                     textStyle = TextStyle(
-                        color = Color.White, fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp,
+                        color = Palette.Fg, fontSize = 17.sp,
+                        letterSpacing = 2.sp,
                     ),
-                    cursorBrush = SolidColor(Color.White),
+                    cursorBrush = SolidColor(Palette.Fg),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Characters,
@@ -570,18 +541,18 @@ private fun HexEntryDialog(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
                     border = BorderStroke(1.dp, rule),
-                ) { Text("Cancel", color = Color.White, fontWeight = FontWeight.SemiBold) }
+                ) { Text("Cancel", color = Palette.Fg) }
                 Button(
                     onClick = confirm,
                     enabled = valid,
                     modifier = Modifier.weight(1f),
-                ) { Text("Set", fontWeight = FontWeight.Bold) }
+                ) { Text("Set", fontWeight = FontWeight.Medium) }
             }
         }
     }
 }
 
-/* ── HSV math helpers ─────────────────────────────────────── */
+// ── HSV math helpers ───────────────────────────────────────
 
 private fun argbToHsv(argb: Int): FloatArray {
     val hsv = FloatArray(3)
@@ -600,11 +571,3 @@ private fun hsvToArgb(h: Float, s: Float, v: Float, alpha: Float): Int =
         (alpha * 255).roundToInt().coerceIn(0, 255),
         floatArrayOf(h, s, v),
     )
-
-/** Perceived luminance (0..1), for picking dark/light text on a coloured background. */
-private fun luminance(argb: Int): Float {
-    val r = AndroidColor.red(argb) / 255f
-    val g = AndroidColor.green(argb) / 255f
-    val b = AndroidColor.blue(argb) / 255f
-    return 0.2126f * r + 0.7152f * g + 0.0722f * b
-}

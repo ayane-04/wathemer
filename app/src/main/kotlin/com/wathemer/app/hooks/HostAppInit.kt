@@ -44,10 +44,7 @@ object HostAppInit {
         }
     }
 
-    /**
-     * Runs [action] once with the host Application, in [order]. Both anchors are hooked and the
-     * host override is entered first, so it wins wherever it resolves and the framework one idles.
-     */
+    /** Runs [action] once with the host Application, in [order]; both anchors are hooked and the host override is entered first, so it wins wherever it resolves and the framework one idles. */
     fun onCreate(order: Int, name: String, action: (Application) -> Unit) {
         clients.add(Client(order, name, action))
         ensureHooked()
@@ -96,7 +93,7 @@ object HostAppInit {
         val declared = appClassName ?: return null
         var c: Class<*>? = XposedHelpers.findClassIfExists(declared, classLoader)
         while (c != null && c != Application::class.java) {
-            val m = runCatching { c!!.getDeclaredMethod("onCreate") }.getOrNull()
+            val m = runCatching { c.getDeclaredMethod("onCreate") }.getOrNull()
             // Walking up from the concrete class, the first override is the one virtual dispatch reaches.
             if (m != null && overridesAppCreate(m)) return m
             c = c.superclass

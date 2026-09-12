@@ -30,9 +30,9 @@ import com.wathemer.app.BuildConfig
 import com.wathemer.app.hooks.dispatch.TextColorDispatcher
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
 import com.wathemer.app.hooks.glass.GlassHook
+import com.wathemer.app.hooks.glass.activityOf
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
 import com.wathemer.app.settings.prefs.Prefs
-import com.wathemer.app.util.findActivity
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -173,7 +173,7 @@ object HomeActivityHook {
             val toolbarId = res.waId("toolbar", pkg)
             if (toolbarId != 0) {
                 ViewThemeDispatcher.onId(toolbarId) { v ->
-                    val cls = v.findActivity()?.javaClass?.name ?: return@onId
+                    val cls = activityOf(v)?.javaClass?.name ?: return@onId
                     val (bg, icons) = when {
                         cls.contains("Conversation") && !cls.contains("HomeActivity")
                             -> chatToolbarBg to chatToolbarIcons       // chat scope
@@ -225,9 +225,7 @@ object HomeActivityHook {
         }
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* hookBg / hookIcon / hookText: wrappers around the dispatchers       */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── hookBg / hookIcon / hookText: wrappers around the dispatchers ────────────────────────
 
     private fun hookBg(name: String, color: Int, pkg: String, res: Resources) {
         if (color == 0) return
@@ -358,9 +356,7 @@ object HomeActivityHook {
         iv.drawable?.mutate()?.colorFilter = PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN)
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* Toolbar treatment: paint re-runs each attach, tag-guard listeners.  */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── Toolbar treatment: paint re-runs each attach, tag-guard listeners. ───────────────────
 
     /** Keeps the toolbar wallpaper-transparent; it attaches before the one-shot shell-clear, so a layout listener re-applies. */
     private fun installWallpaperToolbarWatcher(view: View, iconColor: Int, overflowId: Int) {
@@ -450,8 +446,7 @@ object HomeActivityHook {
         filter: PorterDuffColorFilter = PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN),
     ) {
         val name = view.javaClass.simpleName
-        val isActionMenuItem = name == "ActionMenuItemView" ||
-            name.endsWith("ActionMenuItemView") || name.endsWith("MenuItemView")
+        val isActionMenuItem = name.endsWith("MenuItemView")
         when {
             view is ImageButton -> {
                 view.imageTintList = tintList
@@ -482,9 +477,7 @@ object HomeActivityHook {
         }
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* WDSFab: setters override their arg with A03/A04, write field first. */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── WDSFab: setters override their arg with A03/A04, write field first. ──────────────────
 
     private fun installWdsFabHook(
         classLoader: ClassLoader, pkg: String, res: Resources,
@@ -531,9 +524,7 @@ object HomeActivityHook {
         )
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* id/fab never fires attach again after an activity recreation.       */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── id/fab never fires attach again after an activity recreation. ────────────────────────
     // Drive FAB work from id/content, which re-fires after recreation; a set global primary masks regressions here.
 
     private val fabTreatments = ArrayList<(View) -> Unit>()
@@ -573,9 +564,7 @@ object HomeActivityHook {
         }
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* Chat row bg: direct RippleDrawable replacement.                     */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── Chat row bg: direct RippleDrawable replacement. ──────────────────────────────────────
 
     private const val ROW_BG_LISTENER_TAG = -1167196162
 
@@ -606,9 +595,7 @@ object HomeActivityHook {
         }
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* ExtendedMiniFab: setWdsFabStyle() repaints; re-apply every layout.  */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── ExtendedMiniFab: setWdsFabStyle() repaints; re-apply every layout. ───────────────────
 
     private const val MINI_FAB_LISTENER_TAG = -1167196164
 
@@ -630,9 +617,7 @@ object HomeActivityHook {
         }
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* WDSBadge: A05 is outline only; use getBgPaint()/getTextPaint().     */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── WDSBadge: A05 is outline only; use getBgPaint()/getTextPaint(). ──────────────────────
 
     private fun installWdsBadgeHook(
         classLoader: ClassLoader, pkg: String, res: Resources,
@@ -680,9 +665,7 @@ object HomeActivityHook {
         }
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* WDSIcon: A02 drives the tint, imageTintList no-ops; per-view tag.   */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── WDSIcon: A02 drives the tint, imageTintList no-ops; per-view tag. ────────────────────
 
     private const val ICON_FILTER_TAG_KEY = -1167196161
     private var wdsIconHookInstalled = false
@@ -756,9 +739,7 @@ object HomeActivityHook {
         return null
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* Nav icons: MBWA's iOS glyphs, used with permission; tint composes.  */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── Nav icons: MBWA's iOS glyphs, used with permission; tint composes. ───────────────────
 
     private var navModuleRes: Resources? = null
     private val navIconCache = HashMap<String, Drawable?>()
@@ -827,7 +808,7 @@ object HomeActivityHook {
             else runCatching { res.getDrawable(id, null) }.getOrNull()
         }
 
-    /* Custom home-FAB glyph picked by content-description; the FAB icon tint composes. */
+    // Custom home-FAB glyph picked by content-description; the FAB icon tint composes.
     private const val FAB_ICON_TAG = -1167196170
 
     private fun installFabCustomIcon(app: Application) {
@@ -856,7 +837,7 @@ object HomeActivityHook {
         }
     }
 
-    /* Toolbar icon swaps: overflow, back and camera; template glyphs, so the toolbar icon tint composes. */
+    // Toolbar icon swaps: overflow, back and camera; template glyphs, so the toolbar icon tint composes.
     private fun installToolbarCustomIcons(app: Application) {
         val modRes = navModuleRes ?: runCatching {
             app.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY).resources
@@ -924,7 +905,7 @@ object HomeActivityHook {
         walk(root)
     }
 
-    /* Action icon swaps by id, from the WA decompile inventory; ids that resolve to 0 skip silently. */
+    // Action icon swaps by id, from the WA decompile inventory; ids that resolve to 0 skip silently.
     private val ACTION_ICON_GLYPHS = mapOf(
         "search_view_clear_button" to "mb_ic_clear",
         "search_close_btn" to "mb_ic_clear",

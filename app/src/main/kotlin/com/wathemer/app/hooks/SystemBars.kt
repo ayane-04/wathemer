@@ -33,7 +33,7 @@ object SystemBars {
         // The gates live in the callbacks so toggling applies on the next Activity create.
         ActivityLifecycle.onCreated("systemBars") { a ->
             if (shouldTheme(a)) {
-                runCatching { apply(a, paintStrips = true) }
+                runCatching { apply(a) }
                     .onFailure { Log.w(LOGTAG, "apply(created ${a.javaClass.simpleName}) failed: ${it.message}") }
             }
             if (a.packageName == WHATSAPP_PKG) runCatching { watchFocus(a) }
@@ -41,7 +41,8 @@ object SystemBars {
         // Re-applied on every resume too; this runs at the top of onResume, so the focus listener is what lands after WhatsApp's own writes.
         ActivityLifecycle.onResumed("systemBars") { a ->
             if (shouldTheme(a)) {
-                runCatching { apply(a, paintStrips = true) }.onFailure { /* silent */ }
+                // Silent: a failed re-apply on resume is the next resume's problem.
+                runCatching { apply(a) }.onFailure { }
             }
         }
         HookLog.arm("lifecycle/windowFocus")
@@ -56,7 +57,8 @@ object SystemBars {
             if (!hasFocus) return@addOnWindowFocusChangeListener
             HookLog.hit("lifecycle/windowFocus")
             if (!shouldTheme(a)) return@addOnWindowFocusChangeListener
-            runCatching { applyIcons(a, resolveStatusColor()) }.onFailure { /* silent */ }
+            // Silent: the next focus gain applies the icons again.
+            runCatching { applyIcons(a, resolveStatusColor()) }.onFailure { }
         }
     }
 
@@ -88,11 +90,9 @@ object SystemBars {
         return true
     }
 
-    private fun apply(a: Activity, paintStrips: Boolean) {
+    private fun apply(a: Activity) {
         val statusColor = resolveStatusColor()
-        if (paintStrips) {
-            runCatching { paintStatusStrip(a, statusColor) }.onFailure { Log.w(LOGTAG, "status strip: ${it.message}") }
-        }
+        runCatching { paintStatusStrip(a, statusColor) }.onFailure { Log.w(LOGTAG, "status strip: ${it.message}") }
         applyIcons(a, statusColor)
     }
 

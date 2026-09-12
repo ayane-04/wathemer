@@ -128,8 +128,7 @@ object ChatWallpaperLibrary {
 
     /** One line, bounded, no control characters; the title view can be blank, so the jid's user part stands in. */
     fun sanitizeName(raw: String?, fallback: String?, jid: String): String {
-        val clean = raw.orEmpty().map { if (it.isISOControl()) ' ' else it }.joinToString("")
-            .replace(Regex("\\s+"), " ").trim().take(MAX_NAME_CHARS)
+        val clean = ThemeFile.oneLine(raw)
         if (clean.isNotBlank()) return clean
         if (!fallback.isNullOrBlank()) return fallback
         return displayJid(jid)
@@ -168,7 +167,7 @@ object ChatWallpaperLibrary {
                 blur = o.optInt("blur", 0).coerceIn(0, 150),
             )
         }
-    }.getOrDefault(emptyList())
+    }.onFailure { Log.w(TAG, "parse: unreadable list, reading it as empty: $it") }.getOrDefault(emptyList())
 
     fun serialize(entries: List<Entry>): String {
         val arr = JSONArray()

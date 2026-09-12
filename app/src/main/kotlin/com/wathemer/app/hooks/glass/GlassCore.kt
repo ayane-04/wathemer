@@ -25,6 +25,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import com.wathemer.app.glass.BackdropCapture
 import com.wathemer.app.glass.GlassParams
+import com.wathemer.app.glass.GlassView
 import com.wathemer.app.glass.WallpaperLook
 import com.wathemer.app.hooks.HookLog
 import com.wathemer.app.hooks.ModulePrefs
@@ -48,6 +49,27 @@ internal const val DOWNSAMPLE = 4f
 
 // One tint for every pane. Overwritten from KEY_GLASS_TINT at install; do not tune here, move the slider.
 internal var TINT_ALPHA = GlassDefaults.TINT
+
+/** The tint carries a whisper of the wallpaper's dominant hue when set; off is the neutral grey. */
+internal var HUED_TINT = GlassDefaults.HUED_TINT
+
+/** Cap on the hued tint's chroma, as a fraction of full: a whisper, never a colour. */
+internal const val HUE_CAP = 0.2f
+
+/** The wallpaper copies are shrunk and blurred in linear light when set; off is the display-space path. */
+internal var LINEAR_COPY = GlassDefaults.LINEAR_COPY
+
+/** The copies follow the Backdrop blur slider; read at install like every glass value. */
+internal var ONE_BLUR = GlassDefaults.ONE_BLUR
+
+/** The small pills run the bubble program over the copy. */
+internal var SMALL_OPTICS = GlassDefaults.SMALL_OPTICS
+
+/** The selected chat row runs the bubble program over the selection copy. */
+internal var ROW_OPTICS = GlassDefaults.ROW_OPTICS
+
+/** The glow threshold as a fraction of the brightest value the dim leaves, so a bright wallpaper detail can always reach it. */
+internal const val BLOOM_THRESHOLD_FRACTION = 0.5f
 
 // ── One band width for every surface, as a fraction ───────────────────────────────
 // A fraction of each surface's smaller side: one fixed dp band cannot fit both a small pill and the big card.
@@ -76,7 +98,7 @@ internal const val POPUP_DIVIDER_ALPHA = 28
 
 internal const val CARD_GAP_DP = 8f
 
-// Every card, against the pill's 16dp. The one width knob.
+// Every card, tighter than the pill's own inset. The one width knob.
 internal const val CARD_INSET_DP = 6f
 
 // Breathing room between a card's border and the content inside it, applied equally on all four sides. The one knob for "too cluttered".
@@ -157,6 +179,19 @@ internal fun loadGlassPrefs(): Boolean {
         RIM_WIDTH_DP = p.getInt(k.KEY_GLASS_RIM_WIDTH, GlassDefaults.RIM_WIDTH).toFloat()
         // Set once here; every construction site would otherwise repeat them.
         GlassParams.defaultTransGamma = p.getInt(k.KEY_GLASS_GAMMA, GlassDefaults.GAMMA) / 100f
+        GlassParams.defaultSaturation = p.getInt(k.KEY_GLASS_SATURATION, GlassDefaults.SATURATION).coerceIn(100, 200) / 100f
+        GlassParams.defaultEdgeShadow = p.getInt(k.KEY_GLASS_EDGE_SHADOW, GlassDefaults.EDGE_SHADOW).coerceIn(0, 30) / 100f
+        GlassParams.defaultBloom = p.getInt(k.KEY_GLASS_GLOW, GlassDefaults.GLOW).coerceIn(0, 100) / 100f
+        HUED_TINT = p.getBoolean(k.KEY_GLASS_HUED_TINT, GlassDefaults.HUED_TINT)
+        LINEAR_COPY = p.getBoolean(k.KEY_GLASS_LINEAR_COPY, GlassDefaults.LINEAR_COPY)
+        ONE_BLUR = p.getBoolean(k.KEY_GLASS_ONE_BLUR, GlassDefaults.ONE_BLUR)
+        SMALL_OPTICS = p.getBoolean(k.KEY_GLASS_SMALL_OPTICS, GlassDefaults.SMALL_OPTICS)
+        ROW_OPTICS = p.getBoolean(k.KEY_GLASS_ROW_OPTICS, GlassDefaults.ROW_OPTICS)
+        GlassPopupMorph.enabled = p.getBoolean(k.KEY_GLASS_POPUP_MORPH, GlassDefaults.POPUP_MORPH)
+        GlassParams.defaultDetail = p.getInt(k.KEY_GLASS_EDGE_CLARITY, GlassDefaults.EDGE_CLARITY).coerceIn(0, 100) / 100f
+        BackdropCapture.liveRim = p.getBoolean(k.KEY_GLASS_LIVE_CLARITY, GlassDefaults.LIVE_CLARITY)
+        GlassNavDroplet.enabled = p.getBoolean(k.KEY_GLASS_NAV_DROPLET, GlassDefaults.NAV_DROPLET)
+        GlassView.assembleOnAppear = p.getBoolean(k.KEY_GLASS_ASSEMBLE, GlassDefaults.ASSEMBLE)
         GlassParams.defaultRimStrokeAngle = p.getInt(k.KEY_GLASS_RIM_ANGLE, GlassDefaults.RIM_ANGLE).toFloat()
         // A set pill colour wins over the frost, the fabColored stand-down pattern.
         tokenTabPillSet = p.getInt(k.OVR_TAB_ACTIVE_PILL, 0) != 0
@@ -179,10 +214,7 @@ internal var navUnreadText = 0
 
 private var selectorGuardArmed = false
 
-/**
- * The list selector is touch feedback, not backdrop. Drawn into a pane's RenderNode its ripple arms
- * an animator against that node, and the frame's own draw then dies on "Target already set!".
- */
+/** The list selector is touch feedback, not backdrop: drawn into a pane's RenderNode its ripple arms an animator against that node, and the frame's own draw then dies on "Target already set!". */
 internal fun ensureSelectorGuard() {
     if (selectorGuardArmed) return
     selectorGuardArmed = true
@@ -208,10 +240,10 @@ internal fun logOnce(msg: String) {
 /** One-time log lines: the re-apply sites fire repeatedly per launch and bury the geometry lines. */
 private val loggedOnce = Collections.synchronizedSet(HashSet<String>())
 
-/** The tint channel, from wallpaper luma: white over dark, black over bright; never store a finished colour. */
-@Volatile private var glassTintChannel = 255
+/** The tint's rgb from wallpaper luma, white over dark and black over bright, with the wallpaper's hue when asked; alpha is per surface. */
+@Volatile private var glassTintRgb = 0xFFFFFF
 
-// Volatile: the early resolve runs off the main thread and the draw path reads both without a lock.
+// Volatile out of caution: the early resolve is posted to the main thread, and the draw path reads both without a lock.
 @Volatile private var glassTintResolved = false
 
 /** The shared pane tint: the resolved channel at the user's alpha. */
@@ -219,7 +251,7 @@ internal val glassTintColor: Int get() = glassTint(TINT_ALPHA)
 
 /** The same tint at a different alpha, for surfaces that must read against the glass. */
 internal fun glassTint(alpha: Int): Int =
-    Color.argb(alpha, glassTintChannel, glassTintChannel, glassTintChannel)
+    (alpha.coerceIn(0, 255) shl 24) or glassTintRgb
 
 internal fun resolveGlassTint(views: List<View>) {
     if (glassTintResolved) return
@@ -240,7 +272,10 @@ internal fun resolveGlassTintFrom(bmp: Bitmap, dim: Float) {
 
     var sum = 0.0
     var n = 0
+    var sx = 0.0
+    var sy = 0.0
     val step = 16
+    val hsv = FloatArray(3)
     for (iy in 0 until step) {
         for (ix in 0 until step) {
             val px = bmp.getPixel(
@@ -248,6 +283,12 @@ internal fun resolveGlassTintFrom(bmp: Bitmap, dim: Float) {
                 (bmp.height - 1) * iy / (step - 1),
             )
             sum += 0.2126 * Color.red(px) + 0.7152 * Color.green(px) + 0.0722 * Color.blue(px)
+            // Chroma-weighted hue vectors, in radians: grey pixels add nothing and opposed hues cancel toward grey.
+            Color.colorToHSV(px, hsv)
+            val c = (hsv[1] * hsv[2]).toDouble()
+            val h = Math.toRadians(hsv[0].toDouble())
+            sx += c * Math.cos(h)
+            sy += c * Math.sin(h)
             n++
         }
     }
@@ -256,10 +297,36 @@ internal fun resolveGlassTintFrom(bmp: Bitmap, dim: Float) {
     // Crossfade the channel, not the alpha: 110..150 luma slides through grey instead of snapping.
     val t = ((luma - 110.0) / 40.0).coerceIn(0.0, 1.0)
     val ch = ((1.0 - t) * 255.0).toInt().coerceIn(0, 255)
-    glassTintChannel = ch
+    val chroma = (Math.hypot(sx, sy) / n).toFloat().coerceAtMost(HUE_CAP)
+    // Wrapped into 0..360 before any HSV call, which treats a negative hue as red.
+    val hue = ((Math.toDegrees(Math.atan2(sy, sx)) % 360.0 + 360.0) % 360.0).toFloat()
+    if (HUED_TINT && chroma > 0f) {
+        glassTintRgb = huedGrey(ch, hue, chroma)
+        // The pane rim strokes are set at install as plain white; they take the same cast so no surface stands out.
+        val rim = GlassParams.defaultRimStrokeColor
+        GlassParams.defaultRimStrokeColor = (rim and 0xFF000000.toInt()) or huedGrey(255, hue, chroma)
+    } else {
+        glassTintRgb = ch * 0x010101
+    }
+    // The glow starts above half of the brightest value the dim and the gamma leave, so bright detail can always reach it.
+    val top = Math.pow(1.0 - dim, 2.0 * GlassParams.defaultTransGamma)
+    GlassParams.defaultBloomThreshold = (BLOOM_THRESHOLD_FRACTION * top).toFloat().coerceIn(0.01f, 1f)
+    val rgbHex = "%06x".format(glassTintRgb)
     XposedBridge.log(
-        "[$TAG] wallpaper luma=${luma.toInt()} (dim=$dim) -> tint channel $ch @ $TINT_ALPHA",
+        "[$TAG] wallpaper luma=${luma.toInt()} (dim=$dim) hue=${hue.toInt()} chroma=$chroma " +
+            "-> tint channel $ch rgb=$rgbHex hued=$HUED_TINT glowFrom=${GlassParams.defaultBloomThreshold} @ $TINT_ALPHA",
     )
+}
+
+/** Grey [level] pushed toward [hue] by [chroma] along a zero-luma direction, so the cast changes colour and never brightness. */
+private fun huedGrey(level: Int, hue: Float, chroma: Float): Int {
+    val pure = Color.HSVToColor(floatArrayOf(hue, 1f, 1f))
+    val pr = Color.red(pure) / 255f
+    val pg = Color.green(pure) / 255f
+    val pb = Color.blue(pure) / 255f
+    val pl = 0.2126f * pr + 0.7152f * pg + 0.0722f * pb
+    fun ch(p: Float): Int = (level + chroma * 255f * (p - pl)).toInt().coerceIn(0, 255)
+    return (ch(pr) shl 16) or (ch(pg) shl 8) or ch(pb)
 }
 
 internal val doneTag = tagKey("wathemer-glass-done")
@@ -344,6 +411,7 @@ internal fun roundView(v: View, what: String) {
     XposedBridge.log("[$TAG] outline-clipped $what to a pill")
 }
 
+// Never add ConstraintLayout: an unconstrained index-0 child breaks the Broadcast page's + FAB.
 /** True for containers that stack children: FrameLayout, or CoordinatorLayout matched by name to avoid the androidx dependency. */
 internal fun canStack(vg: ViewGroup): Boolean =
     vg is FrameLayout || vg.javaClass.name.contains("CoordinatorLayout")
@@ -372,6 +440,7 @@ internal fun insideId(v: View, id: Int, depth: Int): Boolean {
     return false
 }
 
+/** Is [v] inside [maybeAncestor], itself included? Walks up at most 24 hops, so it costs depth, not subtree size. */
 internal fun isAncestorOf(maybeAncestor: View, v: View): Boolean {
     var p: View? = v
     var hops = 0
@@ -379,16 +448,6 @@ internal fun isAncestorOf(maybeAncestor: View, v: View): Boolean {
         if (p === maybeAncestor) return true
         p = p.parent as? View
         hops++
-    }
-    return false
-}
-
-/** Is [maybeChild] anywhere beneath [parent]? Walks up, so it costs depth, not subtree size. */
-internal fun containsView(parent: View, maybeChild: View): Boolean {
-    var p = maybeChild.parent
-    while (p is View) {
-        if (p === parent) return true
-        p = p.parent
     }
     return false
 }
@@ -474,7 +533,7 @@ internal fun convBandAlpha(): Int = (TINT_ALPHA / 2).coerceAtLeast(0)
 /** Inset of the conversation pills from the screen edges. */
 internal const val CONV_PILL_INSET_DP = 6f
 
-/** How far a header pane sits in from its bar; the action pane and the folder capsule both use it. */
+/** How far a header pane sits in from its bar; the search capsule and the folder capsule both use it. */
 internal const val BAR_PANE_TRIM_DP = 4f
 
 /** A user colour on either floating button stands glassFab down: a themeable surface belongs to the theme. */

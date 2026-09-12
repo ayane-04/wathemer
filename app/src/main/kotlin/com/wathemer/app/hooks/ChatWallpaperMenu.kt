@@ -3,13 +3,13 @@
 package com.wathemer.app.hooks
 
 import android.app.Activity
-import android.app.Application
 import android.content.Intent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.TextView
 import com.wathemer.app.BuildConfig
+import com.wathemer.app.hooks.wallpaper.ChatWallpapers
 import com.wathemer.app.settings.prefs.ChatWallpaperLibrary
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
@@ -19,7 +19,6 @@ import de.robv.android.xposed.XposedHelpers
 object ChatWallpaperMenu {
 
     private const val TAG = "WaThemer.ChatMenu"
-    private const val CONVERSATION = "com.whatsapp.Conversation"
     private const val SETTINGS_ACTIVITY = "com.wathemer.app.settings.MainActivity"
 
     /** Clear of WhatsApp's own small item ids and of the resource id range. */
@@ -28,8 +27,8 @@ object ChatWallpaperMenu {
     private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
 
     /** Registered unconditionally; the wallpaper switch is read when the menu builds, so a toggle needs no restart. */
-    fun install(app: Application, classLoader: ClassLoader) {
-        val cls = WaIds.clazz(classLoader, CONVERSATION, "chat wallpaper menu") ?: return
+    fun install(classLoader: ClassLoader) {
+        val cls = WaIds.clazz(classLoader, ChatWallpapers.CONVERSATION, "chat wallpaper menu") ?: return
         val cb = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val activity = param.thisObject as? Activity ?: return

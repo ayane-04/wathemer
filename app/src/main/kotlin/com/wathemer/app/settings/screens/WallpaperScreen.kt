@@ -10,7 +10,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -34,19 +33,19 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wathemer.app.hooks.wallpaper.BitmapDecoder
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
-import com.wathemer.app.settings.components.MenuRow
+import com.wathemer.app.settings.components.CategoryRow
 import com.wathemer.app.settings.components.NavTopBar
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.PreviewPanel
-import com.wathemer.app.settings.components.SectionHeader
 import com.wathemer.app.settings.components.SliderItem
 import com.wathemer.app.settings.components.ToggleItem
 import com.wathemer.app.settings.nav.NavController
+import com.wathemer.app.settings.nav.Screen
+import com.wathemer.app.settings.prefs.ChatWallpaperLibrary
 import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.settings.prefs.WallpaperAsset
 import com.wathemer.app.settings.preview.LocalThemeSnapshot
@@ -69,6 +68,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
     val snapshot = LocalThemeSnapshot.current
     val snap by snapshot
     val scope = rememberCoroutineScope()
+    val chatCount = ChatWallpaperLibrary.list(context, prefs).size
 
     // Self-repair once per entry; keyed on the path so a re-pick re-checks.
     LaunchedEffect(snap.wallpaperPath) {
@@ -78,11 +78,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
         if (settled != snap.wallpaperPath) snapshot.updateWallpaperPath(prefs, settled)
         // The prune takes glass with it, so say so here; the toggle below announces the same thing.
         if (hadGlass && !prefs.glassEnabled) {
-            Toast.makeText(
-                context,
-                "Liquid Glass turned off too, it needs a wallpaper.",
-                Toast.LENGTH_LONG,
-            ).show()
+            Toast.makeText(context, "Glass turned off too, it needs a wallpaper.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -124,7 +120,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
         ActivityResultContracts.GetContent(),
     ) { uri: Uri? ->
         if (uri != null) {
-            // Sweep earlier crops first: a pick that never came back left its temp behind.
+            // Sweep leftover crops first: a pick that never came back left its temp behind.
             context.cacheDir.listFiles()?.forEach { if (it.name.startsWith("ucrop_wallpaper_")) it.delete() }
             val tempDest = File(context.cacheDir, "ucrop_wallpaper_${System.currentTimeMillis()}.png")
             val dm = context.resources.displayMetrics
@@ -138,11 +134,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
 
     Scaffold(containerColor = Palette.Bg) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(
-                title = "Wallpaper",
-                subtitle = if (snap.wallpaperEnabled) "Enabled" else "Disabled",
-                onBack = { nav.pop() },
-            )
+            NavTopBar(title = "Wallpaper", onBack = { nav.pop() })
             PreviewPanel(modifier = Modifier.weight(0.4f).fillMaxWidth()) {
                 WallpaperThumbnail(
                     path = snap.wallpaperPath,
@@ -156,16 +148,10 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
                     .weight(0.6f)
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(bottom = 12.dp),
             ) {
-                SectionHeader(
-                    title = "Custom wallpaper",
-                    subtitle = "Bubbles, header and input bar go translucent so it shows through.",
-                )
                 ToggleItem(
-                    title = "Enable",
-                    subtitle = "Show custom background in WhatsApp",
+                    title = "Use wallpaper",
                     checked = snap.wallpaperEnabled,
                     onCheckedChange = { newChecked ->
                         snapshot.updateWallpaperEnabled(prefs, newChecked)
@@ -173,21 +159,12 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
                         if (!newChecked && prefs.glassEnabled) {
                             prefs.glassEnabled = false
                             // Two lines max, Android truncates anything longer.
-                            Toast.makeText(
-                                context,
-                                "Liquid Glass turned off too, it needs a wallpaper.",
-                                Toast.LENGTH_LONG,
-                            ).show()
+                            Toast.makeText(context, "Glass turned off too, it needs a wallpaper.", Toast.LENGTH_LONG).show()
                         }
                     },
                 )
-                MenuRow(
-                    title = "Pick image",
-                    subtitle = if (snap.wallpaperPath.isNullOrBlank()) {
-                        "Choose from gallery"
-                    } else {
-                        "Replace current image"
-                    },
+                CategoryRow(
+                    label = if (snap.wallpaperPath.isNullOrBlank()) "Choose an image" else "Replace the image",
                     onClick = {
                         if (!WallpaperAsset.hasAllFilesAccess()) {
                             WallpaperAsset.requestAllFilesAccess(context)
@@ -198,22 +175,26 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
                 )
                 SliderItem(
                     title = "Dim",
-                    subtitle = "Darken the wallpaper",
                     value = snap.wallpaperDim.toFloat(),
                     range = 0f..100f,
                     steps = 99,
                     onValueChange = { v -> snapshot.updateWallpaperDim(prefs, v.roundToInt()) },
                     valueLabel = { "${it.toInt()}%" },
                 )
-                // Range 0-150 must match Prefs.wallpaperBlur and WallpaperImage; the high ceiling is the glass frost.
+                // Range 0-150 must match Prefs.wallpaperBlur and WallpaperImage.
                 SliderItem(
                     title = "Blur",
-                    subtitle = "Softens the wallpaper. Also acts as the glass frost.",
                     value = snap.wallpaperBlur.toFloat(),
                     range = 0f..150f,
                     steps = 149,
                     onValueChange = { v -> snapshot.updateWallpaperBlur(prefs, v.roundToInt()) },
-                    valueLabel = { "${it.toInt()} px" },
+                    valueLabel = { "${it.toInt()}" },
+                )
+                CategoryRow(
+                    label = "Chat wallpapers",
+                    trailingHint = if (chatCount == 0) "None" else "$chatCount",
+                    divider = false,
+                    onClick = { nav.push(Screen.ChatWallpapers) },
                 )
             }
         }
@@ -223,25 +204,8 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
 @Composable
 private fun WallpaperThumbnail(path: String?, stamp: Long, dim: Int, blur: Int) {
     if (path.isNullOrBlank() || !File(path).canRead()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    "No wallpaper picked",
-                    color = Palette.FgMuted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.4.sp,
-                )
-                Text(
-                    "Tap \"Pick image\" below to choose one",
-                    color = Palette.FgSubtle,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No wallpaper yet", color = Palette.FgMuted, fontSize = 14.sp)
         }
         return
     }
@@ -251,7 +215,7 @@ private fun WallpaperThumbnail(path: String?, stamp: Long, dim: Int, blur: Int) 
     }
     if (bitmap == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Could not decode image", color = Palette.FgMuted, fontSize = 13.sp)
+            Text("Could not decode the image", color = Palette.FgMuted, fontSize = 14.sp)
         }
         return
     }
@@ -276,22 +240,6 @@ private fun WallpaperThumbnail(path: String?, stamp: Long, dim: Int, blur: Int) 
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(WallpaperImage.DIM_COLOR).copy(alpha = dim / 100f)),
-            )
-        }
-        // Caption, so nobody takes the preview for the real thing.
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.45f))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-        ) {
-            Text(
-                "Preview only",
-                color = Color.White.copy(alpha = 0.9f),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.3.sp,
             )
         }
     }

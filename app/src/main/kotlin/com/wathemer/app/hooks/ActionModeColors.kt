@@ -10,11 +10,11 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import com.wathemer.app.hooks.dispatch.TextColorDispatcher
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
+import com.wathemer.app.hooks.glass.tagKey
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XposedBridge
 import java.util.WeakHashMap
@@ -73,8 +73,8 @@ object ActionModeColors {
     /** Last selection state we acted on, per window root, so the walk only runs on a change. */
     private val barState = WeakHashMap<View, Boolean>()
 
-    /** setTag throws unless the key's top byte is >= 2, so force it rather than trust hashCode. */
-    private val barWatchTag = ("wathemer-action-mode-watch".hashCode() and 0x00FFFFFF) or 0x7F000000
+    /** Through tagKey like every other tag: a raw hashCode key can make setTag throw. */
+    private val barWatchTag = tagKey("wathemer-action-mode-watch")
 
     /** One watcher per window; the walk runs only on the hidden-to-shown edge because layouts fire constantly. */
     private fun watchActionModeBar(bar: View, icons: Int, closeRipple: Int, closeBtnId: Int) {
@@ -100,11 +100,6 @@ object ActionModeColors {
             val tintList = ColorStateList.valueOf(icons)
             val filter = PorterDuffColorFilter(icons, PorterDuff.Mode.SRC_IN)
             when {
-                view is ImageButton -> {
-                    view.imageTintList = tintList
-                    view.imageTintMode = PorterDuff.Mode.SRC_IN
-                    view.drawable?.mutate()?.colorFilter = filter
-                }
                 view is ImageView -> {
                     view.imageTintList = tintList
                     view.imageTintMode = PorterDuff.Mode.SRC_IN

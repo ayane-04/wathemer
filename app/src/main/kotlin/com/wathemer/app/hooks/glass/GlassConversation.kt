@@ -156,10 +156,12 @@ internal fun floatConvFooter(footer: ViewGroup) {
             val wasAtBottom = !listHost.canScrollVertically(1)
             lp.bottomMargin = -h
             listHost.layoutParams = lp
+            val lift = liftConvFooter(v)
             XposedBridge.log(
-                "[$TAG] conversation footer floated (h=$h, list host bottomMargin=-$h)",
+                "[$TAG] conversation footer floated (h=$h, list host bottomMargin=-$h, lift=$lift)",
             )
-            runCatching { padConvList(listHost, h) }
+            // The list keeps its clearance above the pill, which now sits higher.
+            runCatching { padConvList(listHost, h + lift) }
             // Only correct an offset we caused, and only when the list was pinned; from onPreDraw, see repinToBottom.
             if (wasAtBottom) {
                 (0 until listHost.childCount)
@@ -206,18 +208,21 @@ internal fun syncConvBand(holder: ViewGroup) {
     val abrAt = IntArray(2)
     holder.getLocationOnScreen(at)
     abr.getLocationOnScreen(abrAt)
-    val pillBottom = convPanes.values
+    // The capsule's own number, set beside the rect it was given: read separately the two can disagree.
+    val paneBottom = convPanes.values
         .mapNotNull { it.get() }
         .filter { it.parent === holder }
         .mapNotNull { it.layoutParams as? FrameLayout.LayoutParams }
         .maxOfOrNull { it.topMargin + it.height }
         ?: holder.height
+    val pillBottom = if (convCapsuleBottom > 0) convCapsuleBottom else paneBottom
+    if (paneBottom != pillBottom) {
+        logOnce("conversation band: capsule says $pillBottom, the panes measure $paneBottom; the capsule wins")
+    }
     val solid = (at[1] - abrAt[1]) + pillBottom
     if (solid <= 0) return
-    // One pane only: two abutting panes cannot be seamless, each blur kernel is clipped to its own capture.
+    // One pane only: two abutting panes always show their join, each blur kernel being clipped to its own capture.
     // Hard stop on the pill's bottom edge; the SDF is expanded past it so the cut has no rim of its own.
-    val total = solid
-
     var band = convBandRef?.get()
     if (band == null || band.parent !== abr) {
         band = GlassView(abr.context).apply {
@@ -226,7 +231,7 @@ internal fun syncConvBand(holder: ViewGroup) {
                 downsample = DOWNSAMPLE
                 blurRadius = holder.dp(BLUR_DP)
                 refractionEnabled = true
-                // With the SDF expanded there is no bevel to size; a 1px nominal one keeps depth and displacement at zero.
+                // With the SDF expanded there is no bevel to size; a nominal hairline keeps depth and displacement at zero.
                 bevelFraction = 0f
                 bevelThickness = 1f
                 depthRatio = DEPTH_RATIO
@@ -241,7 +246,7 @@ internal fun syncConvBand(holder: ViewGroup) {
                 edgeExpandBottom = 8f
             }
         }
-        // Above the wallpaper and its dim; if they are not abr's children the band hides behind them, hence the log.
+        // Above the wallpaper and its dim; if they are not abr's children the band hides behind them, which is what the log is for.
         var insertAt = 0
         for (i in 0 until abr.childCount) {
             val c = abr.getChildAt(i)
@@ -255,7 +260,7 @@ internal fun syncConvBand(holder: ViewGroup) {
         }
         abr.addView(
             band, insertAt,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, total).apply {
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, solid).apply {
                 gravity = Gravity.TOP
             },
         )
@@ -267,10 +272,10 @@ internal fun syncConvBand(holder: ViewGroup) {
     }
     band.params.tintColor = glassTint(convBandAlpha())
     val lp = band.layoutParams as? FrameLayout.LayoutParams ?: return
-    if (lp.height != total) {
-        lp.height = total
+    if (lp.height != solid) {
+        lp.height = solid
         band.layoutParams = lp
-        XposedBridge.log("[$TAG] conversation band resized to ${total}px")
+        XposedBridge.log("[$TAG] conversation band resized to ${solid}px (capsule bottom $pillBottom in the holder)")
     }
     convRowFadeLen = (solid - (convListHostRef?.get()?.let { h ->
         val a = IntArray(2); h.getLocationOnScreen(a); a[1]
@@ -345,9 +350,12 @@ internal fun syncMentionPane(host: FrameLayout) {
 
 /** Zero every header pane but the one taking the capsule now, or two pills stack. */
 private fun collapseHeaderPanes(holder: ViewGroup, keep: View) {
-    for ((owner, ref) in convPanes.entries) {
-        val g = ref.get() ?: continue
-        if (g.parent !== holder || owner === keep) continue
+    val keepPane = convPanes[keep]?.get()
+    // The holder's own children, never the map: the map is keyed weakly by owner, so an owner WhatsApp
+    // removes takes the only handle on its pane with it and the pane draws on at the size it had.
+    for (i in 0 until holder.childCount) {
+        val g = holder.getChildAt(i) as? GlassView ?: continue
+        if (g === keepPane) continue
         val glp = g.layoutParams ?: continue
         if (glp.width != 0 || glp.height != 0) {
             glp.width = 0
@@ -361,31 +369,34 @@ private fun collapseHeaderPanes(holder: ViewGroup, keep: View) {
 internal fun syncConvToolbar() {
     val holder = convHolderRef?.get() ?: return
     if (holder.width <= 0 || holder.height <= 0) return
-    val toolbar = (0 until holder.childCount)
-        .mapNotNull { holder.getChildAt(it) as? ViewGroup }
-        .firstOrNull { it !is GlassView && it.javaClass.name.contains("Toolbar") } ?: return
-
     // In search the holder swaps in its own bar; the capsule and the band's bottom edge follow it.
+    // Looked up before the toolbar, which WhatsApp removes from this holder while search is open.
     val barId = holder.resources.waId("search_view_toolbar", holder.context.packageName)
     val searchBar = (if (barId != 0) holder.findViewById<View>(barId) else null)
         ?.takeIf { it.isShown && it.width > 0 && it.height > 0 }
     if (searchBar != null) {
         collapseHeaderPanes(holder, searchBar)
-        val r = Rect(0, 0, searchBar.width, searchBar.height)
-        if (runCatching { holder.offsetDescendantRectToMyCoords(searchBar, r) }.isSuccess) {
-            clearBg(searchBar, "conversation search bar")
-            convCapsuleBottom = r.bottom
-            pill(holder, searchBar, r.left, r.top, r.right, r.bottom)
-        }
+        clearBg(searchBar, "conversation search bar")
+        // The holder's own box, exactly as the toolbar branch takes it: search gets the header's treatment,
+        // one capsule spanning the chrome with the band ending on its bottom edge.
+        val searchInset = (CONV_PILL_INSET_DP * holder.resources.displayMetrics.density).toInt()
+        convCapsuleBottom = holder.height
+        pill(holder, searchBar, searchInset, 0, holder.width - searchInset, holder.height)
+        // Same pass, or the band keeps the bottom edge of whichever capsule it last saw.
+        runCatching { syncConvBand(holder) }
         return
     }
+    val toolbar = (0 until holder.childCount)
+        .mapNotNull { holder.getChildAt(it) as? ViewGroup }
+        .firstOrNull { it !is GlassView && it.javaClass.name.contains("Toolbar") } ?: return
+
     // In selection the bar lives in action_bar_root over this band; leave the capsule or that bar loses its pill.
     if (!toolbar.isShown) return
     collapseHeaderPanes(holder, toolbar)
 
     // WhatsApp's own bar fill has to go, or the pills sit on a slab instead of on the wallpaper.
     clearBg(toolbar, "conversation toolbar")
-    // The 1dp line is WDSToolbar.onDraw's, handled by ensureToolbarDividerHook; cleared per-id, never blanket.
+    // The divider line is WDSToolbar.onDraw's, handled by ensureToolbarDividerHook; cleared per-id, never blanket.
     if (toolbar.foreground != null) {
         logOnce("conversation toolbar foreground cleared: ${toolbar.foreground?.javaClass?.name}")
         toolbar.foreground = null
@@ -436,6 +447,7 @@ internal fun syncConvToolbar() {
     if (r - l > band) {
         convCapsuleBottom = pb
         pill(holder, toolbar, l, pt, r, pb)
+        runCatching { syncConvBand(holder) }
     }
     convBannerRef?.get()?.let { b -> runCatching { syncConvBanner(b) } }
 }
@@ -470,6 +482,10 @@ private fun padConvList(listHost: ViewGroup, footerHeight: Int) {
     XposedBridge.log("[$TAG] conversation list padded (top=$top bottom=$bottom)")
     if (wasAtBottom) repinToBottom(list)
 }
+
+/** True when [v] sits in the conversation header, whose capsule already covers it; other paths stand down. */
+internal fun convHeaderOwns(v: View): Boolean =
+    convHolderRef?.get()?.let { isAncestorOf(it, v) } == true
 
 /** The conversation's own AbsListView: the row hooks' identity test and the collectors' row source. */
 internal var convListRef: WeakReference<ViewGroup>? = null
@@ -553,6 +569,7 @@ internal fun pill(
 internal fun syncConvFooter() {
     val footer = convFooterRef?.get() ?: return
     if (footer.width <= 0 || footer.height <= 0) return
+    if (footer.getTag(convFloatTag) != null) liftConvFooter(footer)
     val res = footer.resources
     val pkg = footer.context.packageName
     val inputId = res.waId("input_layout", pkg)
@@ -651,6 +668,14 @@ internal fun syncConvFooter() {
     }
 }
 
+/** The whole compose row rides one translation, so the pill, the send disc and their panes cannot separate. */
+private fun liftConvFooter(footer: View): Int {
+    val lift = footer.dp(COMPOSE_PILL_LIFT_DP)
+    // Written only on a mismatch: this runs from a layout pass, and a transform write asks for a frame.
+    if (footer.translationY != -lift) footer.translationY = -lift
+    return lift.toInt()
+}
+
 /** GONE between an owner and the footer is the composer removed; INVISIBLE there is the open animation. */
 private fun goneAbove(v: View?, stop: View): Boolean {
     var p: View? = v ?: return true
@@ -726,6 +751,9 @@ private fun composePane(
 
 /** How far the compose pill is grown past `input_layout` so its icons are not flush. */
 private const val COMPOSE_PILL_PAD_DP = 5f
+
+/** How far the compose row sits off the bottom edge, so the pill reads as floating rather than docked. */
+private const val COMPOSE_PILL_LIFT_DP = 6f
 
 /** Ceiling on the compose pill's corner radius: half the single-row height. */
 private const val COMPOSE_MAX_RADIUS_DP = 24f

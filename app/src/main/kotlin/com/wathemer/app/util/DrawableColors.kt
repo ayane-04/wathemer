@@ -5,7 +5,6 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.InsetDrawable
 import android.graphics.drawable.LayerDrawable
-import android.graphics.drawable.RippleDrawable
 import com.wathemer.app.hooks.ColorMap
 
 /** Walks a Drawable tree rewriting [ColorMap] seeds. Must stay idempotent: it runs on every loadDrawable and on shared ConstantStates. */
@@ -16,7 +15,6 @@ object DrawableColors {
         when (drawable) {
             is ColorDrawable -> handleColor(drawable)
             is GradientDrawable -> handleGradient(drawable)
-            is RippleDrawable -> handleRipple(drawable)
             is LayerDrawable -> handleLayer(drawable)
             is InsetDrawable -> drawable.drawable?.let { replace(it) }
             // Other types (BitmapDrawable, VectorDrawable and so on) are skipped.
@@ -41,13 +39,6 @@ object DrawableColors {
                 }
                 if (changed) d.colors = out
             }
-        }
-    }
-
-    private fun handleRipple(d: RippleDrawable) {
-        // Walk inner layers (content + mask)
-        for (i in 0 until d.numberOfLayers) {
-            replace(d.getDrawable(i))
         }
     }
 

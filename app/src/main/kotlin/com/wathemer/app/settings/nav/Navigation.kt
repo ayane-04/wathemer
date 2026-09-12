@@ -8,51 +8,26 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 
 /** Every settings screen. Keep this exhaustive: MainActivity's when over it flags any screen missing a destination. */
 enum class Screen {
-    // Root
     CategoryList,
 
-    // Global colors: root category list + 4 sub-screens
+    // Colours: the three globals and the presets on the root, three sub-pages beside them
     GlobalColors,
-    GlobalColorsTokens,         // Accent + Background + Text
     GlobalColorsUnread,         // Unread accent + Unread count text
     GlobalColorsToolbar,        // Selection-mode (action-mode) bar: bg + icons + count text + close ripple
     StatusBar,                  // system status-bar theming only
 
-    // Backdrop tree: wallpaper and glass share it because glass refracts the wallpaper and needs one to draw.
-    Backdrop,
-    Wallpaper,                  // custom wallpaper: toggle / pick / dim / blur
+    // Wallpaper and glass; glass refracts the wallpaper and needs one to draw
+    Wallpaper,                  // custom wallpaper: toggle / pick / dim / blur, and the chat wallpapers row
     LiquidGlass,                // the glass engine: master toggle + tuning
     ChatWallpapers,             // one chat, its own image, dim and blur; entries arrive from WhatsApp's chat menu
 
-    // Homescreen tree
+    // One page each, sectioned
     Homescreen,
-    HomescreenChatList,
-    HomescreenChatListRows,     // sub-category: chat row bg + name + preview + timestamp
-    HomescreenChatListSearch,   // sub-category: 4 search-bar overrides
-    HomescreenTabBar,
-    HomescreenTabBarBar,        // sub-category: bar bg + divider
-    HomescreenTabBarItems,      // sub-category: 4 per-tab-item overrides
-    HomescreenHeader,
-    HomescreenFab,
-    HomescreenFabMain,          // sub-category: FAB bg + icon
-    HomescreenFabMiniFab,       // sub-category: mini-fab bg + label
-
-    // Chat Screen tree
     Chat,
-    ChatBubbles,
-    ChatBubblesCustom,          // combined per-side bubble-shape picker (tap-to-enter)
-    ChatInputBar,
-    ChatHeaderToolbar,
-    ChatQuoteReplies,
-    ChatMisc,
+    ChatBubbleShapes,          // combined per-side bubble-shape picker (tap-to-enter)
 
-    // Extras tree
     Extras,
-
-    // Saved themes: export, import, and the library of slots
     Themes,
-
-    // Version check and the download it offers
     Updates,
 }
 

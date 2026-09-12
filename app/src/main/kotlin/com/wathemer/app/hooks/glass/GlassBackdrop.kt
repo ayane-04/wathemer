@@ -42,6 +42,40 @@ internal val wallpaperLookTag = tagKey("wathemer-wallpaper-look")
 /** On a decor that carries no wallpaper: a cached miss, so a wallpaper-less window is never walked per draw. */
 private val wallpaperMissTag = tagKey("wathemer-wallpaper-miss")
 
+/** The panes' blur as a sigma in screen px, set at install; 0 keeps the copies at their fixed radius. */
+@Volatile internal var frostSigmaScreen = 0f
+
+/** The popup snapshot's box radius; derived beside the sigma, or the fixed one. */
+@Volatile internal var snapRadius = POPUP_SNAP_RADIUS
+
+/** The info header's reading: a menu's backdrop is blurred deeper than the wallpaper copy. */
+private const val SNAP_BLUR_BOOST = 1.8f
+
+/** At install: hand the copies the panes' blur, or 0 to keep them as they were. */
+internal fun configureCopyBlur(sigmaScreen: Float) {
+    frostSigmaScreen = sigmaScreen
+    snapRadius = if (sigmaScreen > 0f) boxRadiusFor(sigmaScreen * SNAP_BLUR_BOOST / POPUP_SNAP_SHRINK) else POPUP_SNAP_RADIUS
+}
+
+/** Three box passes whose variance matches a Gaussian of [sigmaCopy] texels; floored where a stretch would show its grid. */
+internal fun boxRadiusFor(sigmaCopy: Float): Int {
+    val r = (Math.sqrt(4.0 * sigmaCopy * sigmaCopy + 1.0) - 1.0) / 2.0
+    return Math.round(r).toInt().coerceIn(2, 24)
+}
+
+private val matrixVals = FloatArray(9)
+
+/** Source px to screen px: the view's own matrix once laid out, else the centre-crop ratio it will apply. */
+private fun cropScaleOf(img: ImageView, src: Bitmap): Float {
+    if (img.width > 0) {
+        img.imageMatrix.getValues(matrixVals)
+        val s = matrixVals[Matrix.MSCALE_X]
+        if (s > 0.01f) return s
+    }
+    val dm = img.resources.displayMetrics
+    return maxOf(dm.widthPixels / src.width.toFloat(), dm.heightPixels / src.height.toFloat()).coerceAtLeast(0.01f)
+}
+
 /** The shrunk copies for one source bitmap at one dim; the pair is the identity, not the bitmap alone. */
 private class Shrunk(val dimAlpha: Int, val bubble: Bitmap?, val bubbleFolded: Boolean, val selection: Bitmap?)
 
@@ -97,26 +131,34 @@ internal fun wallpaperRecordOf(host: View): WallpaperRecord? {
     val dimAlpha = dimAlphaOf(img)
     var rec = img.getTag(wallpaperRecordTag) as? WallpaperRecord
     if (rec == null || rec.src !== src || rec.dimAlpha != dimAlpha) {
-        rec = buildRecord(src, dimAlpha) ?: return null
+        rec = buildRecord(src, dimAlpha, cropScaleOf(img, src)) ?: return null
         img.setTag(wallpaperRecordTag, rec)
     }
     if (rec.placementEpoch != wallpaperGeometryEpoch && img.width > 0) {
         rec.bubble?.let { rec.bubblePlacement = wallpaperPlacement(img, src, it) }
         rec.selection?.let { rec.selectionPlacement = wallpaperPlacement(img, src, it) }
+        rec.srcPlacement = wallpaperPlacement(img, src, src)
         rec.placementEpoch = wallpaperGeometryEpoch
         logOnce("wallpaper placement derived for ${src.width}x${src.height} at dim $dimAlpha: iv=${img.width}x${img.height}")
     }
     return rec
 }
 
-private fun buildRecord(src: Bitmap, dimAlpha: Int): WallpaperRecord? {
-    val shared = shrunkRegistry[src]?.firstOrNull { it.dimAlpha == dimAlpha } ?: buildShrunk(src, dimAlpha) ?: return null
+private fun buildRecord(src: Bitmap, dimAlpha: Int, cropScale: Float): WallpaperRecord? {
+    val shared = shrunkRegistry[src]?.firstOrNull { it.dimAlpha == dimAlpha }
+        ?: buildShrunk(src, dimAlpha, cropScale) ?: return null
     return WallpaperRecord(src, dimAlpha, shared.bubble, shared.bubbleFolded, shared.selection)
 }
 
 /** Deep and light copies; the dim is folded so refraction matches the screen. Guarded: a scale to the same size hands back the source. */
-private fun buildShrunk(src: Bitmap, dimAlpha: Int): Shrunk? {
-    val bubble = FrostDrawable.shrinkOf(src)
+private fun buildShrunk(src: Bitmap, dimAlpha: Int, cropScale: Float): Shrunk? {
+    // One copy texel is FROST_SHRINK source px, and each source px is cropScale screen px; the sigma is the panes' in screen px.
+    val radius = if (frostSigmaScreen > 0f) {
+        boxRadiusFor(frostSigmaScreen / (FrostDrawable.FROST_SHRINK * cropScale))
+    } else {
+        FrostDrawable.FROST_RADIUS
+    }
+    val bubble = FrostDrawable.shrinkOf(src, LINEAR_COPY, radius)
     // The selected row's copy stays legible: half size with one light pass, not the frost's three.
     val selection = runCatching {
         val small = BitmapBlur.halveTo(src, SELECT_SHRINK)
@@ -143,7 +185,8 @@ private fun buildShrunk(src: Bitmap, dimAlpha: Int): Shrunk? {
     }
     XposedBridge.log(
         "[$TAG] wallpaper copies built for ${src.width}x${src.height}: bubble=${bubble?.width}x${bubble?.height} " +
-            "selection=${selection?.width}x${selection?.height} dim=$dimAlpha folded=$folded",
+            "selection=${selection?.width}x${selection?.height} dim=$dimAlpha folded=$folded linear=$LINEAR_COPY " +
+            "radius=$radius crop=$cropScale",
     )
     return shrunk
 }
@@ -189,8 +232,10 @@ private const val POPUP_SNAP_RADIUS = 2
 
 /** A real blur of the snapshot at an eighth of the screen; a stretched shrink shows its grid. */
 private fun smoothBlur(src: Bitmap): Bitmap {
+    val radius = snapRadius
+    if (LINEAR_COPY) BitmapBlur.shrinkBlurLinear(src, POPUP_SNAP_SHRINK / POPUP_SNAP_COPY, radius, 3)?.let { return it }
     val small = BitmapBlur.halveTo(src, POPUP_SNAP_SHRINK / POPUP_SNAP_COPY)
-    val soft = BitmapBlur.boxBlur(small, POPUP_SNAP_RADIUS, 3)
+    val soft = BitmapBlur.boxBlur(small, radius, 3)
     if (small !== src) small.recycle()
     return soft
 }

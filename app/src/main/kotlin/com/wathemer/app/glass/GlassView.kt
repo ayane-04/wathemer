@@ -1,14 +1,18 @@
 package com.wathemer.app.glass
 
 import android.animation.ValueAnimator
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.RecordingCanvas
 import android.graphics.RuntimeShader
 import android.graphics.Shader
+import android.os.Build
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
@@ -22,10 +26,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.sin
 
-/**
- * A pane of glass: draws a blurred, tinted copy of [backdrop] behind its own children. Point it at a
- * sibling drawn before it; an ancestor is refused at capture time. On API 33+ the refraction pass runs too.
- */
+/** A pane of glass, a blurred and tinted copy of [backdrop] behind its own children: point it at a sibling drawn before it, an ancestor is refused at capture time, and on Tiramisu and up the refraction pass runs too. */
 class GlassView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -52,10 +53,7 @@ class GlassView @JvmOverloads constructor(
             invalidate()
         }
 
-    /**
-     * Capture in pre-draw; the capture-invalidate loop is deliberate. Removing the invalidate
-     * freezes the glass, so throttle the idle case, never stop it.
-     */
+    /** Capture in pre-draw, and the capture-invalidate loop is deliberate: removing the invalidate freezes the glass, so throttle the idle case and never stop it. */
     private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
         // Guarded whole: capture() draws WhatsApp's own views, and an escape here crashes the UI thread every frame.
         try {
@@ -130,6 +128,7 @@ class GlassView @JvmOverloads constructor(
         params.onChanged = {
             // Comparing every uniform costs more than the rebuild it avoids; just flag stale.
             capture.effectDirty = true
+            clarityValid = false
             invalidateLight()
             invalidateOutline()
             invalidate()
@@ -143,7 +142,15 @@ class GlassView @JvmOverloads constructor(
         viewTreeObserver.addOnScrollChangedListener(activityListener)
         // Attach counts as activity, so the first frames are live rather than a heartbeat late.
         lastActivityMs = SystemClock.uptimeMillis()
+        // Assemble on first appearance. Skipped for a pane handed a materialize before attach, which is a
+        // scroll-driven one, and for a pane attached hidden, which would spend its assemble unseen.
+        if (assembleOnAppear && !appeared && materialize >= 1f && isShown) {
+            appeared = true
+            materializeIn(APPEAR_MS)
+        }
     }
+
+    private var appeared = false
 
     override fun onDetachedFromWindow() {
         viewTreeObserver.removeOnPreDrawListener(preDrawListener)
@@ -206,6 +213,7 @@ class GlassView @JvmOverloads constructor(
         if (v >= 1f) appearSweep = false
         // The transmission leads the lighting: the backdrop swells in first, the rim strikes last.
         capture.setContentAlpha((v * 1.4f).coerceAtMost(1f))
+        capture.setRimAlpha(v)
         invalidateLight()
         invalidate()
     }
@@ -213,12 +221,28 @@ class GlassView @JvmOverloads constructor(
     /** Its own clock: the pre-draw poll idles at the heartbeat, far below animation rate. */
     fun materializeTo(target: Float, durationMs: Long) {
         materializeAnim?.cancel()
-        if (durationMs <= 0L) { setMaterialize(target); return }
+        if (durationMs <= 0L) {
+            setMaterialize(target)
+            setLens(target)
+            return
+        }
         materializeAnim = ValueAnimator.ofFloat(materialize, target).apply {
             duration = durationMs
-            addUpdateListener { setMaterialize(it.animatedValue as Float) }
+            addUpdateListener {
+                val v = it.animatedValue as Float
+                setMaterialize(v)
+                setLens(v)
+            }
             start()
         }
+    }
+
+    /** From an animation only: this rebuilds the capture's chain, and the info header scrubs materialize from a scroll. */
+    private fun setLens(v: Float) {
+        if (!assembleOnAppear) return
+        capture.setLensScale(v)
+        // The capture is placed by position and gated on movement; a bend that is changing has to count as moving.
+        lastActivityMs = SystemClock.uptimeMillis()
     }
 
     /** Appear by assembling rather than fading: Apple names alpha-fade as the wrong answer. */
@@ -337,16 +361,81 @@ class GlassView @JvmOverloads constructor(
 
     private val flatPaint = Paint()
 
+    // ── Crisp rim ──────────────────────────────────────────────────────────────────────
+    // The band again from the sharp wallpaper, under the light pass; wallpaper-only panes, since a live source has no sharp bitmap.
+
+    /** This pane's own rim shader; uniforms live on it. */
+    private val clarityShader: RuntimeShader? by lazy {
+        if (GlassShader.supported) GlassShader.newRimShader() else null
+    }
+    private val clarityPaint = Paint()
+    private var clarityContent: BitmapShader? = null
+    private var clarityContentOf: Bitmap? = null
+    private val clarityMatrix = Matrix()
+    private var clarityW = -1
+    private var clarityH = -1
+    private var clarityDetail = -1f
+    private var clarityDim = -1f
+    private var clarityValid = false
+
+    private fun drawClarity(canvas: Canvas) {
+        if (params.detail <= 0f || backdrop != null || width <= 0 || height <= 0 || !capture.hasContent) return
+        // A pane expanded past its band on every side is all plateau; the program would return nothing for its price.
+        val expand = minOf(minOf(params.edgeExpandLeft, params.edgeExpandRight), minOf(params.edgeExpandTop, params.edgeExpandBottom))
+        if (expand >= GlassShader.effectiveBevel(params, width, height)) return
+        val rs = clarityShader ?: return
+        val rec = wallpaperRecordFor?.invoke(this) ?: return
+        val src = rec.src
+        val place = rec.srcPlacement ?: return
+        if (src.isRecycled) return
+        val dim = rec.dimAlpha / 255f
+        // Scaled by materialize like the rim stroke, so the sharp edge assembles with the frost instead of arriving first.
+        val detail = params.detail * materialize
+        if (!clarityValid || width != clarityW || height != clarityH || detail != clarityDetail || dim != clarityDim) {
+            clarityW = width
+            clarityH = height
+            clarityDetail = detail
+            clarityDim = dim
+            clarityValid = true
+            GlassShader.applyRimUniforms(rs, params, width, height, dim, detail)
+        }
+        var cs = clarityContent
+        if (cs == null || clarityContentOf !== src) {
+            cs = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            // Linear, or the child samples nearest whatever the paint says.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) cs.filterMode = BitmapShader.FILTER_MODE_LINEAR
+            clarityContent = cs
+            clarityContentOf = src
+        }
+        // Source to screen, then screen to this pane; screenLoc is refreshed every pre-draw. Bind after the matrix, as the painter does.
+        clarityMatrix.set(place)
+        clarityMatrix.postTranslate(-screenLoc[0].toFloat(), -screenLoc[1].toFloat())
+        cs.setLocalMatrix(clarityMatrix)
+        rs.setInputShader("content", cs)
+        clarityPaint.shader = rs
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val band = ceil(GlassShader.effectiveBevel(params, width, height) + 2f)
+        if (band * 2f + 4f >= minOf(w, h)) {
+            canvas.drawRect(0f, 0f, w, h, clarityPaint)
+            return
+        }
+        canvas.drawRect(0f, 0f, w, band, clarityPaint)
+        canvas.drawRect(0f, h - band, w, h, clarityPaint)
+        canvas.drawRect(0f, band, band, h - band, clarityPaint)
+        canvas.drawRect(w - band, band, w, h - band, clarityPaint)
+    }
+
     /** Shade only the bevel band; the plateau gets the exact constant, sparing a whole-surface shader pass. */
     private fun drawLight(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        // Ceil plus 2px slack: fractional edges leave a 1px unshaded boundary row.
+        // Ceil plus a little slack: a fractional edge leaves an unshaded boundary row.
         // The rects abut exactly; both are translucent, so any overlap double-tints its row.
         val band = ceil(GlassShader.effectiveBevel(params, width, height) + 2f)
 
         // A fading or expanded surface cannot use the shortcut: a flat rect cannot ramp its alpha.
-        val fading = params.fadeBottomPx > 0f || params.fadeTopLenPx > 0f ||
+        val fading = params.fadeTopLenPx > 0f ||
             params.edgeExpandLeft > 0f || params.edgeExpandTop > 0f ||
             params.edgeExpandRight > 0f || params.edgeExpandBottom > 0f
         // Skip the split only when the bands would leave almost no plateau, which only a pane a few pixels tall does.
@@ -368,10 +457,7 @@ class GlassView @JvmOverloads constructor(
         }
     }
 
-    /**
-     * The exact plateau colour the light program returns: f0 survives there, the premultiplied rgb
-     * must be un-premultiplied for a Paint, and it must read [effFresnelStrength] or the edge steps.
-     */
+    /** The exact plateau colour the light program returns: f0 survives there, the premultiplied rgb must be un-premultiplied for a Paint, and it must read [effFresnelStrength] or the edge steps. */
     private fun flatInteriorColor(): Int {
         // The same tint scale the shader gets, or the band edge steps while a pane materializes.
         val ta = ((params.tintColor ushr 24) and 0xFF) / 255f * materialize
@@ -455,15 +541,24 @@ class GlassView @JvmOverloads constructor(
         invalidate()
     }
 
-    private companion object {
+    companion object {
         /** Half a turn (pi): the arcs start opposite their homes and sweep in as the rim strikes. */
-        const val SWEEP_RADIANS = 3.1415927f
+        private const val SWEEP_RADIANS = 3.1415927f
         /** The light added at the touch point; chosen by eye. */
-        const val PRESS_AMP = 0.12f
-        const val PRESS_IN_MS = 80L
-        const val PRESS_OUT_MS = 240L
+        private const val PRESS_AMP = 0.12f
+        private const val PRESS_IN_MS = 80L
+        private const val PRESS_OUT_MS = 240L
         /** Finger-sized pool: buttons sit inside it whole, cards get a local glow. */
-        const val PRESS_RADIUS_DP = 64f
+        private const val PRESS_RADIUS_DP = 64f
+
+        /** Surfaces assemble their lens as they appear rather than arriving whole; set at install. */
+        @JvmStatic var assembleOnAppear: Boolean = false
+
+        /** How long a surface takes to assemble. */
+        const val APPEAR_MS = 220L
+
+        /** A view's window wallpaper record, for the rim pass; the hook sets it once, so the engine never imports the hook. */
+        @JvmStatic var wallpaperRecordFor: ((View) -> WallpaperRecord?)? = null
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -471,7 +566,10 @@ class GlassView @JvmOverloads constructor(
 
         // drawRenderNode needs a RecordingCanvas; on a software canvas degrade to tint instead of crashing.
         val recording = canvas as? RecordingCanvas
-        if (recording != null) capture.draw(recording)
+        if (recording != null) {
+            capture.draw(recording)
+            drawClarity(canvas)
+        }
 
         // Full-res light over the blur; the RuntimeShader Paint needs the hardware-canvas check too.
         if (recording != null && ensureLight()) {

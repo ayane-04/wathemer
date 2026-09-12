@@ -46,10 +46,7 @@ class RectList {
     }
 }
 
-/**
- * All the chat bubbles' glass, one view behind the message list. ListView scrolling repositions
- * row RenderNodes without re-recording, so nothing inside a row may depend on its screen position.
- */
+/** All the chat bubbles' glass, one view behind the message list: a ListView repositions row RenderNodes without re-recording, so nothing inside a row may depend on its screen position. */
 class GlassBubblePane(context: Context) : View(context) {
 
     companion object {
@@ -69,6 +66,9 @@ class GlassBubblePane(context: Context) : View(context) {
     /** Screen y where bubbles start dissolving as they rise, and the ramp's length. 0 disables. */
     var fadeLineScreenY: Float = 0f
     var fadeLen: Float = 0f
+
+    /** Ask the painter for its stroke: a pane that transmits nothing has no hard edge without it. */
+    var forceRim: Boolean = false
 
     /** Flattened-corner radius for grouped continuations, px; 0 turns merging off and the flags are ignored. */
     var flatRadiusPx: Float = 0f
@@ -155,12 +155,15 @@ class GlassBubblePane(context: Context) : View(context) {
         val place: Matrix?
         val t: Int
         val d: Float
+        val rec: WallpaperRecord?
         // Guarded like painter.paint below: these lambdas walk live WhatsApp views on the draw path.
         try {
             bmp = backdrop()
             place = if (bmp != null) placement() else null
             t = tint()
             d = dim()
+            // The sharp source for the rim, once per draw; the record is the window's own.
+            rec = if (params.detail > 0f) GlassView.wallpaperRecordFor?.invoke(this) else null
         } catch (e: Throwable) {
             if (!loggedThrow) {
                 loggedThrow = true
@@ -202,6 +205,10 @@ class GlassBubblePane(context: Context) : View(context) {
                     dim = d, rimColor = rimColor, rimWidth = rimWidth,
                     fadeLineScreenY = fadeLineScreenY, fadeLen = fadeLen,
                     radii = radii,
+                    sharp = rec?.src, sharpPlace = rec?.srcPlacement,
+                    // The copy folded its dim, so the sharp tap takes the same; an unfolded copy dims both later in the program.
+                    sharpDim = if (rec != null && rec.bubbleDimFolded) rec.dimAlpha / 255f else 0f,
+                    forceRim = forceRim,
                 )
             }.onFailure {
                 if (!loggedThrow) {

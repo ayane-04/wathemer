@@ -22,6 +22,7 @@ import com.wathemer.app.hooks.waId
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import java.lang.ref.WeakReference
+import java.util.WeakHashMap
 import kotlin.math.abs
 
 /** The radius is the optics ceiling (the lensing band clamps to it); a fraction so big surfaces are not starved. */
@@ -108,6 +109,9 @@ internal fun panelGlass(panel: View, what: String) {
                 fresnelStrength = 0.25f
                 // Off; the pane underneath already lifted this content.
                 transGamma = 1f
+                // Off for the same reason: the content captured here carries graded glass already.
+                saturation = 1f
+                bloom = 0f
                 // Half a pane's tint; the content underneath already carries one.
                 tintColor = glassTint((TINT_ALPHA / 2).coerceAtLeast(0))
             }
@@ -137,7 +141,6 @@ internal fun panelGlass(panel: View, what: String) {
     syncPanelGlass(panel)
 }
 
-// UI-thread scratch, reused like popupRowGlass's paneRect: this runs per pre-draw while any panel shows.
 /** A dialog window's own fill is a shell behind the pane, and the pane's wider corners leave it showing. */
 private fun clearWindowShells(panel: View, host: ViewGroup, what: String) {
     val act = activityOf(panel) ?: return
@@ -152,6 +155,7 @@ private fun clearWindowShells(panel: View, host: ViewGroup, what: String) {
     }
 }
 
+// UI-thread scratch, reused like popupRowGlass's paneRect: this runs per pre-draw while any panel shows.
 private val panelScratchRect = Rect()
 
 private fun syncPanelGlass(panel: View) {
@@ -186,6 +190,9 @@ private var popupHooked = false
 
 private val popupGlassTag = tagKey("wathemer-popup-glass")
 
+/** The button each drop-down was shown from; showAtLocation's first argument is a parent token, not a button. */
+private val popupAnchors = WeakHashMap<PopupWindow, WeakReference<View>>()
+
 /** Popups expose no id, so PopupWindow's show methods are hooked; a menu is identified by its row ids. */
 internal fun ensurePopupGlass() {
     if (popupHooked) return
@@ -193,10 +200,23 @@ internal fun ensurePopupGlass() {
     runCatching {
         var hooked = 0
         for (m in PopupWindow::class.java.declaredMethods) {
+            if (m.name == "dismiss") {
+                XposedBridge.hookMethod(m, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val pw = param.thisObject as? PopupWindow ?: return
+                        runCatching { GlassPopupMorph.onDismiss(pw) }
+                    }
+                })
+                hooked++
+                continue
+            }
             if (m.name != "showAsDropDown" && m.name != "showAtLocation") continue
+            // Bound here, outside the hook: only a drop-down's first argument is the button it hangs from.
+            val dropDown = m.name == "showAsDropDown"
             XposedBridge.hookMethod(m, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val pw = param.thisObject as? PopupWindow ?: return
+                    if (dropDown) (param.args.getOrNull(0) as? View)?.let { popupAnchors[pw] = WeakReference(it) }
                     // Posted, not immediate: at show time the content view is 0x0 with zero rows; one frame later it is real.
                     pw.contentView?.post {
                         runCatching { glassPopup(pw) }
@@ -206,7 +226,7 @@ internal fun ensurePopupGlass() {
             })
             hooked++
         }
-        XposedBridge.log("[$TAG] popup glass armed on $hooked PopupWindow show methods")
+        XposedBridge.log("[$TAG] popup glass armed on $hooked PopupWindow methods")
     }.onFailure { XposedBridge.log("[$TAG] popup glass FAILED: $it") }
 }
 
@@ -239,7 +259,7 @@ private fun glassPopup(pw: PopupWindow) {
         clearBg(clip, "paper_clip_layout")
         clip.elevation = 0f
     } != null
-    popupRowGlass(content, radius)
+    popupRowGlass(content, radius, popupAnchors[pw]?.get(), pw)
     // Menu rows on one sheet want seams; a tile grid does not, and its "rows" include the spacers.
     if (!attachPanel) popupRowDividers(content)
     // Class and size in the log so a wrongly glassed popup names itself.
@@ -253,9 +273,16 @@ private fun glassPopup(pw: PopupWindow) {
 internal const val MENU_SCRIM = 0xB80E1418.toInt()
 
 /** GlassBubblePane, not panelGlass: cost stays flat as the menu grows, and one union rect avoids scalloped seams between items. */
-private fun popupRowGlass(content: View, radiusPx: Float?) {
+private fun popupRowGlass(content: View, radiusPx: Float?, anchor: View?, pw: PopupWindow) {
     if (content.getTag(panelGlassTag) != null) return
     if (!content.isAttachedToWindow) return
+    // With a button to rise from, the Activity's pane draws this menu's glass and the popup carries none of its own.
+    if (GlassPopupMorph.begin(content, radiusPx ?: content.dp(PANEL_ROW_RADIUS_DP), anchor, pw)) {
+        content.setTag(panelGlassTag, true)
+        requestScreenSnap(content)
+        logOnce("popup menu glass rises from its button")
+        return
+    }
     // The pane needs a stacking ancestor; a LinearLayout would sequence it in and consume a row.
     var host = content.parent as? ViewGroup
     while (host != null && !canStack(host)) host = host.parent as? ViewGroup
@@ -276,6 +303,12 @@ private fun popupRowGlass(content: View, radiusPx: Float?) {
             maxDisplacePx = content.dp(DISPLACE_DP)
             fresnelStrength = 0.5f
             tintColor = MENU_SCRIM
+            // The snapshot is the composited screen, graded glass included; grading or lifting it again would double both.
+            saturation = 1f
+            bloom = 0f
+            transGamma = 1f
+            // No rim from the wallpaper over a screen snapshot: the two would not match.
+            detail = 0f
         }
         tint = { MENU_SCRIM }
         // The screen if PixelCopy gave us one, else the wallpaper. Both are screen-space.
@@ -325,7 +358,7 @@ private fun menuRowHost(content: View): ViewGroup? {
     return group
 }
 
-/** Seams are 1px foreground lines on one continuous glass: per-item rects scallop, and the row backgrounds were cleared. */
+/** Seams are hairline foreground lines on one continuous glass: per-item rects scallop, and the row backgrounds were cleared. */
 private fun popupRowDividers(content: View) {
     val group = menuRowHost(content) ?: return
     val line = glassTint(POPUP_DIVIDER_ALPHA)
@@ -353,7 +386,7 @@ private fun popupRowDividers(content: View) {
 }
 
 /** One union rect over the rows: per-item rects notch at the seams, and the content view runs taller than its rows. */
-private fun collectPopupRowRects(content: View, out: RectList) {
+internal fun collectPopupRowRects(content: View, out: RectList) {
     val group = menuRowHost(content) ?: return
     if (content.width <= 0) return
     content.getLocationOnScreen(popupContentAt)
@@ -500,6 +533,10 @@ internal fun frostReactionsTray(v: View) {
                 maxDisplacePx = tray.dp(DISPLACE_DP)
                 fresnelStrength = 0.5f
                 tintColor = TRAY_SCRIM
+                // The activity content it captures carries graded and lifted panes already.
+                saturation = 1f
+                bloom = 0f
+                transGamma = 1f
             }
         }
         container.addView(glass, 0, FrameLayout.LayoutParams(0, 0))

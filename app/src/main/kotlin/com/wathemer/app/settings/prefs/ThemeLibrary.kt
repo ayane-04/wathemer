@@ -213,6 +213,19 @@ object ThemeLibrary {
             values[Prefs.KEY_GLASS_RIM_WIDTH] = g.rimWidth
             values[Prefs.KEY_GLASS_RIM_ANGLE] = g.rimAngle
             values[Prefs.KEY_GLASS_BUBBLE_MERGE] = g.bubbleMerge
+            values[Prefs.KEY_GLASS_SATURATION] = g.saturation
+            values[Prefs.KEY_GLASS_HUED_TINT] = g.huedTint
+            values[Prefs.KEY_GLASS_LINEAR_COPY] = g.linearCopy
+            values[Prefs.KEY_GLASS_EDGE_SHADOW] = g.edgeShadow
+            values[Prefs.KEY_GLASS_GLOW] = g.glow
+            values[Prefs.KEY_GLASS_EDGE_CLARITY] = g.edgeClarity
+            values[Prefs.KEY_GLASS_LIVE_CLARITY] = g.liveClarity
+            values[Prefs.KEY_GLASS_NAV_DROPLET] = g.navDroplet
+            values[Prefs.KEY_GLASS_ASSEMBLE] = g.assemble
+            values[Prefs.KEY_GLASS_ONE_BLUR] = g.oneBlur
+            values[Prefs.KEY_GLASS_SMALL_OPTICS] = g.smallOptics
+            values[Prefs.KEY_GLASS_POPUP_MORPH] = g.popupMorph
+            values[Prefs.KEY_GLASS_ROW_OPTICS] = g.rowOptics
         }
 
         doc.font?.let { f -> applyFont(context, prefs, f, clear, values, problems) }
@@ -314,6 +327,19 @@ object ThemeLibrary {
                 rimWidth = prefs.glassRimWidth,
                 rimAngle = prefs.glassRimAngle,
                 bubbleMerge = prefs.glassBubbleMerge,
+                saturation = prefs.glassSaturation,
+                huedTint = prefs.glassHuedTint,
+                linearCopy = prefs.glassLinearCopy,
+                edgeShadow = prefs.glassEdgeShadow,
+                glow = prefs.glassGlow,
+                edgeClarity = prefs.glassEdgeClarity,
+                liveClarity = prefs.glassLiveClarity,
+                navDroplet = prefs.glassNavDroplet,
+                assemble = prefs.glassAssemble,
+                oneBlur = prefs.glassOneBlur,
+                smallOptics = prefs.glassSmallOptics,
+                popupMorph = prefs.glassPopupMorph,
+                rowOptics = prefs.glassRowOptics,
             ),
         )
     }

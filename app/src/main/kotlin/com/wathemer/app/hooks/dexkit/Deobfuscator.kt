@@ -309,10 +309,10 @@ object Deobfuscator {
     private const val UPDATE_DRAW_STATE = "updateDrawState"
     private const val LINK_COLOR_FIELD = "linkColor"
 
-    /** Last-resort names, spelled as ART sees them, never jadx's C-prefixed form. Neither declares updateDrawState on 2.26.30 or later. */
+    /** Last-resort names, spelled as ART sees them, never jadx's C-prefixed form; neither declares updateDrawState on current builds. */
     private val LEGACY_LINK_SPAN_NAMES = listOf(
-        "X.17S",   // WA 2.26.20.72
-        "X.1hK",   // WA 2.26.19.73
+        "X.17S",   // the build before the bridge
+        "X.1hK",   // the build before that
     )
 
     @Volatile private var linkSpanResolved = false

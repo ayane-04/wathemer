@@ -30,7 +30,7 @@ object ColorSeeds {
         0x20272b,
         0x000000,  // true black (overlays, deep surfaces)
         0x10161a,
-        // high-frequency hits in WA 2.26.19.73
+        // the high-frequency hits in the build these seeds were read from
         0x182229,  // composer bar
         0x888888,  // mid-grey surface
         0x3e474d,  // elevated container

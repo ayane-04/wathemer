@@ -1,6 +1,7 @@
 package com.wathemer.app.settings.preview
 
 import androidx.compose.ui.graphics.Color
+import com.wathemer.app.settings.components.luminance
 
 /** Which home-preview sub-element a detail page highlights; the rest dim via [alphaFor]. */
 enum class HomeFocus {
@@ -15,24 +16,16 @@ enum class HomeFocus {
 fun HomeFocus.alphaFor(element: HomeFocus): Float =
     if (this == HomeFocus.None || this == element) 1f else 0.30f
 
-/** Perceived luminance, for picking dark/light text on a coloured background. */
-internal fun lumaArgb(argb: Int): Float {
-    val r = android.graphics.Color.red(argb) / 255f
-    val g = android.graphics.Color.green(argb) / 255f
-    val b = android.graphics.Color.blue(argb) / 255f
-    return 0.2126f * r + 0.7152f * g + 0.0722f * b
-}
-
 /** Return Black if the color is light, White if dark, for legible text/icons on accent. */
 internal fun onColorFor(argb: Int): Color =
-    if (lumaArgb(argb) > 0.55f) Color(0xFF101010) else Color.White
+    if (luminance(argb) > 0.55f) Color(0xFF101010) else Color.White
 
 /** A slightly lighter (or darker) variant of a base color for surface elevation. */
 internal fun elevate(argb: Int, amount: Float = 0.06f): Color {
     val r = android.graphics.Color.red(argb)
     val g = android.graphics.Color.green(argb)
     val b = android.graphics.Color.blue(argb)
-    val isDark = lumaArgb(argb) < 0.5f
+    val isDark = luminance(argb) < 0.5f
     val delta = if (isDark) (255 * amount).toInt() else -(255 * amount).toInt()
     return Color(
         red = ((r + delta).coerceIn(0, 255)) / 255f,

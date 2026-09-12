@@ -16,6 +16,7 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.widget.TextView
 import com.wathemer.app.glass.FrostDrawable
+import com.wathemer.app.glass.GlassParams
 
 /** Frost one view from the wallpaper; idempotent, recycled chips come back bound to a different chip. */
 internal fun frost(
@@ -66,17 +67,6 @@ internal fun frost(
 
 internal val frostListenerTag = tagKey("wathemer-frost-listener")
 
-/** The Calls-disc treatment: a full-bounds circle, re-applied on layout. */
-internal fun frostSquareOnLayout(v: View) {
-    runCatching { frost(v, allowSquare = true, ignorePadding = true) }
-    if (v.getTag(frostListenerTag) == null) {
-        v.setTag(frostListenerTag, true)
-        v.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
-            runCatching { frost(view, allowSquare = true, ignorePadding = true) }
-        }
-    }
-}
-
 /** [frostOnLayout] with an explicit tint and radius; see the reply-quote call site. */
 internal fun frostOnLayoutWith(v: View, tint: Int, radius: Float?, ignorePadding: Boolean = false) {
     val apply = Runnable {
@@ -92,6 +82,20 @@ internal fun frostOnLayoutWith(v: View, tint: Int, radius: Float?, ignorePadding
 }
 
 private val frostMoveTag = tagKey("wathemer-frost-move")
+
+/** A pill's band as a fraction of its smaller side; the plan's figure, not the slider's, which is for the cards. */
+private const val PILL_BEVEL_FRACTION = 0.15f
+
+/** The pane recipe for a small pill, fresh per drawable: the painter writes the band and the tint into it. */
+internal fun pillOptics(v: View): GlassParams = GlassParams(v.resources.displayMetrics.density).apply {
+    refractionEnabled = true
+    bevelFraction = PILL_BEVEL_FRACTION
+    depthRatio = DEPTH_RATIO
+    maxDisplacePx = DISPLACE_DP * density
+    fresnelStrength = 0.5f
+    // No fringe on a pre-blurred copy, as the bubbles have it.
+    dispersion = 0f
+}
 
 /** offsetTopAndBottom moves rows without a redraw and a draw-time wallpaper patch freezes; invalidate on any screen move. */
 internal fun watchFrostPosition(v: View) {
@@ -109,6 +113,8 @@ internal fun liquidFrostOnLayout(
     keepPadding: Boolean = false,
     /** Named, the frost goes through forceBg; needed on a view the interceptor already keeps cleared. */
     forceLabel: String? = null,
+    /** A small pill: run the bubble program over the copy when the switch is on. */
+    optics: Boolean = false,
 ) {
     watchFrostPosition(v)
     val apply = Runnable {
@@ -125,6 +131,7 @@ internal fun liquidFrostOnLayout(
                 v, { host -> wallpaperRecordOf(host) }, radius, glassTint(tintAlpha),
                 strokeWidth = v.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
                 ignorePadding = true,
+                optics = if (optics && SMALL_OPTICS) pillOptics(v) else null,
             )
             v.setTag(frostTag, d)
             if (forceLabel != null) forceBg(v, d, forceLabel) else v.background = d
@@ -137,7 +144,7 @@ internal fun liquidFrostOnLayout(
     }
 }
 
-/** [frostOnLayout] for square views; the aspect gate would drop them, a disc is the point here. */
+/** [frostOnLayout] for square views (the Calls disc, the tile pills); the aspect gate would drop them, a disc is the point here. */
 internal fun frostCircleOnLayout(v: View) {
     val apply = Runnable { runCatching { frost(v, allowSquare = true, ignorePadding = true) } }
     apply.run()
@@ -207,7 +214,7 @@ private fun sampleFill(v: View): Int? {
         val bmp = Bitmap.createBitmap(
             n, n, Bitmap.Config.ARGB_8888,
         )
-        // Scale the canvas, keep the view's real bounds: a 24px box makes the rounded rect degenerate and it renders nothing.
+        // Scale the canvas, keep the view's real bounds: an icon-sized box makes the rounded rect degenerate and it renders nothing.
         val c = Canvas(bmp)
         c.scale(n.toFloat() / v.width, n.toFloat() / v.height)
         d.setBounds(0, 0, v.width, v.height)
@@ -250,10 +257,7 @@ private val stockPadById = HashMap<Int, Rect>()
 /** WhatsApp's own band padding, restated on the label because the band it came from is cleared. */
 private const val UNREAD_PILL_PAD_DP = 6f
 
-/**
- * The unread label ships with `background="@null"` and no vertical padding; the pill and its air were the band's, which glass clears.
- * Font padding goes too, or the text sits low in its own pill.
- */
+/** The unread label ships unbacked and unpadded, its pill and air being the band's, which glass clears; the font padding goes too, or the text sits low in its own pill. */
 internal fun padUnreadPill(v: View) {
     val tv = v as? TextView ?: return
     if (tv.includeFontPadding) tv.includeFontPadding = false
@@ -263,10 +267,7 @@ internal fun padUnreadPill(v: View) {
     v.setPadding(v.paddingLeft, want, v.paddingRight, want)
 }
 
-/**
- * Our fill reports no padding, so replacing a drawable that had some remeasures a wrap_content
- * host narrower. Learn the stock inset once per id, then hold the view at it.
- */
+/** Our fill reports no padding, so replacing a padded drawable remeasures a wrap_content host narrower; learn the stock inset once per id and hold the view at it. */
 private fun keepStockPadding(v: View) {
     val id = v.id
     if (id == View.NO_ID) return
@@ -285,10 +286,7 @@ private fun keepStockPadding(v: View) {
     }
 }
 
-/**
- * The label was measured against the old inset, so this frame would show it clipped. Returning
- * false from pre-draw cancels the traversal instead of presenting it.
- */
+/** The label was measured against the old inset, so this frame would show it clipped; returning false from pre-draw cancels the traversal instead of presenting it. */
 private fun dropFrame(v: View) {
     val observer = v.viewTreeObserver ?: return
     if (!observer.isAlive) return

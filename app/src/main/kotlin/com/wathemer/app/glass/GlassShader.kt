@@ -6,10 +6,7 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 
-/**
- * Three programs from shared fragments: the panes split refraction and light around their blur;
- * a bubble's blur is baked into its bitmap, so it runs both in one pass.
- */
+/** Three programs from shared fragments: the panes split refraction and light around their blur, and a bubble's blur is baked into its bitmap, so it runs both in one pass. */
 object GlassShader {
 
     private const val TAG = "WaThemer.Shader"
@@ -30,16 +27,10 @@ object GlassShader {
          * puts that edge where nobody can see it and leaves the visible region on the flat plateau.
          */
         uniform float4 expand;
-        /** Px over which coverage ramps to zero at the bottom. 0 disables. */
-        uniform float  fadeBottom;
         /**
          * Top fade: `x` = where the ramp starts in surface-local px (may be negative, i.e. above the
-         * surface), `y` = its length. 0 length disables.
-         *
-         * Separate from [fadeBottom] because it is not the same effect: the bottom fade dissolves a
-         * band into the content below it, while this dissolves a surface as it travels up the screen
-         * past a fixed line. A chat bubble needs the second one, and its ramp has to be positioned in
-         * screen space rather than at the surface's own edge.
+         * surface), `y` = its length. 0 length disables. Positioned in screen space rather than at the
+         * surface's own edge, because it dissolves a surface travelling up past a fixed line.
          */
         uniform float2 fadeTop;
 
@@ -116,22 +107,12 @@ object GlassShader {
         float normalZ(float2 nxy) { return sqrt(max(1.0 - dot(nxy, nxy), 0.0)); }
 
         /**
-         * Coverage multiplier for both fades. One definition for both programs, because the
+         * Coverage multiplier for the fade. One definition for both programs, because the
          * transmitted image and the lighting must vanish over the same pixels or the tint outlives
-         * the backdrop and the band ends in a pale ghost of itself.
-         *
-         * `t*t` rather than smoothstep. smoothstep has zero derivative at both ends, so coverage
-         * stays near 1 for the first quarter of the ramp and the fade appears to start ~30 px below
-         * where it does. A square is steep where it meets full coverage and flat where it lands,
-         * which is the right way round: the eye forgives a kink at full opacity and does not
-         * forgive one at the vanishing end, where Mach banding lives.
+         * the backdrop and the surface ends in a pale ghost of itself.
          */
         float fadeAt(float2 fragCoord) {
             float f = 1.0;
-            if (fadeBottom > 0.0) {
-                float t = clamp((size.y - fragCoord.y) / fadeBottom, 0.0, 1.0);
-                f *= t * t;
-            }
             // Linear here, deliberately. AbsListView's fading edge is a linear gradient, and it is
             // dissolving the text of the same bubbles this dissolves the glass of; a squared ramp
             // would visibly separate the two as a row travels up.
@@ -150,6 +131,10 @@ object GlassShader {
         uniform float magnify;
         uniform float maxDisplace;    // px, soft ceiling on the bend
         uniform float transGamma;     // <1 lifts the transmitted darks; 1 is off
+        uniform float saturation;     // colour put back after the blur; 1 is off
+        uniform float bloom;          // lift of what is already bright; 0 is off
+        uniform float bloomThreshold; // level the lift starts above, in the grade's space; set from the dim so it stays reachable
+        uniform float dim;            // the wallpaper dim, applied before the gamma; 0 when the capture or copy already carries it
     """.trimIndent()
 
     /** The light pass's uniforms, one text for the pane and the bubble programs. */
@@ -171,6 +156,7 @@ object GlassShader {
         uniform float2 pressPos;         // surface-local px; a press pools light here
         uniform float  pressAmp;         // added to the light scalar; 0 disables
         uniform float  pressR;           // pool radius, px
+        uniform float  edgeShadow;       // darkening on the outer edge; 0 disables
     """.trimIndent()
 
     /** Snell through the slab to the displacement `off`; needs `n`, `t`, `fragCoord` in scope. */
@@ -239,6 +225,21 @@ object GlassShader {
             half4 outc = half4(cr, cg.g, cb, cg.a);
     """.trimIndent()
 
+    /** The sharp wallpaper bent in the band and crossfaded over the copy before the grade; the plateau keeps the copy. */
+    private val TAPS_SHARP = """
+            if (detail > 0.0 && t < 0.999) {
+                float u = 1.0 - t;
+                half4 sh = sharp.eval(clamp(fragCoord + off, lo, hi));
+                sh = half4(sh.rgb * half(1.0 - sharpDim), sh.a);
+                outc = mix(outc, sh, half(detail * u * u));
+            }
+    """.trimIndent()
+
+    /** The wallpaper dim in float and before the gamma: the same multiply the capture did in eight bits, without the lost codes. */
+    private val TRANSMIT_DIM = """
+            if (dim > 0.0) outc = half4(outc.rgb * half(1.0 - dim), outc.a);
+    """.trimIndent()
+
     /** Transmission gamma on `outc`, before any coverage multiply or the premultiplication breaks. */
     private val TRANSMIT_GAMMA = """
             // Transmission gamma, which is what stops the backdrop reading as frosted. See
@@ -252,6 +253,22 @@ object GlassShader {
             // that takes the whole program with it.
             if (transGamma < 0.999 && outc.a > 0.99) {
                 outc = half4(half3(pow(float3(outc.rgb), float3(transGamma))), outc.a);
+            }
+    """.trimIndent()
+
+    /** Colour and glow into the transmission, about luma in the squared display value; the transfer pair is the cheap square, not the exact curve. */
+    private val TRANSMIT_GRADE = """
+            // Opaque pixels only, like the gamma: a partially covered premultiplied pixel would break its premultiplication.
+            if ((abs(saturation - 1.0) > 0.001 || bloom > 0.0) && outc.a > 0.99) {
+                float3 lin = float3(outc.rgb) * float3(outc.rgb);
+                float  l   = dot(lin, float3(0.2126, 0.7152, 0.0722));
+                lin = mix(float3(l), lin, saturation);
+                // A soft threshold: only what is already bright glows, the rest is untouched.
+                if (bloom > 0.0) lin += bloom * max(lin - float3(bloomThreshold), float3(0.0));
+                // Clamped to the alpha's square, so the root stays under the alpha and the pixel stays premultiplied.
+                float aa = float(outc.a) * float(outc.a);
+                lin = clamp(lin, float3(0.0), float3(aa));
+                outc = half4(half3(sqrt(lin)), outc.a);
             }
     """.trimIndent()
 
@@ -368,6 +385,12 @@ object GlassShader {
                 float tt = clamp(sf.z, 0.0, 1.0);
                 shade = innerShadow * smoothstep(0.0, 0.35, tt) * (1.0 - smoothstep(0.35, 0.75, tt));
             }
+            // The edge darkens under its own highlight: a sixth power of the distance from the rim, so it hugs the edge and is exactly zero on the plateau.
+            if (edgeShadow > 0.0) {
+                float u = 1.0 - clamp(sf.z, 0.0, 1.0);
+                float u2 = u * u;
+                shade += edgeShadow * u2 * u2 * u2;
+            }
 
             // Premultiplied: the tint contributes rgb*a, the light adds white with its own
             // alpha so it brightens without darkening what shows through.
@@ -388,9 +411,37 @@ object GlassShader {
 
             $TRANSMIT_BEND
             $TAPS_PANE
+            $TRANSMIT_DIM
             $TRANSMIT_GAMMA
+            $TRANSMIT_GRADE
             // Premultiplied, so one multiply fades colour and alpha together and correctly.
             return outc * half(fadeAt(fragCoord));
+        }
+    """.trimIndent()
+
+    /** The band alone, from the sharp wallpaper: the bend the frost's blur would otherwise erase, blended over it by a detail alpha. */
+    val RIM_AGSL: String = """
+        $REFRACT_UNIFORMS
+        uniform float detail;         // how much sharp content shows at the very rim; 0 is off
+
+        $COMMON
+
+        half4 main(float2 fragCoord) {
+            float4 sf = surfaceAt(fragCoord);
+            float  t = sf.z;
+            // The plateau is the frost's alone.
+            if (t >= 0.999) return half4(0.0);
+            float3 n = float3(sf.xy, normalZ(sf.xy));
+
+            $TRANSMIT_BEND
+            $TAPS_BUBBLE
+            $TRANSMIT_DIM
+            $TRANSMIT_GAMMA
+            $TRANSMIT_GRADE
+            // Crisp at the rim, gone by the plateau; the square keeps the mix soft where it meets the frost.
+            float u = 1.0 - t;
+            float da = detail * u * u;
+            return outc * half(da * fadeAt(fragCoord));
         }
     """.trimIndent()
 
@@ -422,7 +473,9 @@ object GlassShader {
     /** A bubble in one pass: the same transmission and light steps as the panes, composited in the shader. */
     val BUBBLE_AGSL: String = """
         $REFRACT_UNIFORMS
-        uniform float dim;               // black at this alpha over the transmission; 0 once the dim is inside the bitmap
+        uniform shader sharp;            // the wallpaper source itself, placed to the bubble, for the rim
+        uniform float detail;            // how much sharp content shows at the very rim; 0 is off
+        uniform float sharpDim;          // the window's dim, which the copy carries and the source does not
 
         $LIGHT_UNIFORMS
 
@@ -440,10 +493,12 @@ object GlassShader {
 
             $TRANSMIT_BEND
             $TAPS_BUBBLE
+            $TAPS_SHARP
+            $TRANSMIT_DIM
             $TRANSMIT_GAMMA
-            // Float from here: the dim and the composite mix half and float, which AGSL need not accept.
+            $TRANSMIT_GRADE
+            // Float from here: the composite mixes half and float, which AGSL need not accept.
             float4 tr = float4(outc);
-            if (dim > 0.0) tr = float4(tr.rgb * (1.0 - dim), tr.a * (1.0 - dim) + dim);
 
             float2 nxy = sf.xy;
             $MICRO_STEPS
@@ -461,6 +516,7 @@ object GlassShader {
     private var refractFailed = false
     private var lightFailed = false
     private var bubbleFailed = false
+    private var rimFailed = false
 
     /** The hook's ledger hears a compile failure; logcat alone is invisible from the module log. */
     var onCompileFailure: ((what: String, t: Throwable) -> Unit)? = null
@@ -508,9 +564,18 @@ object GlassShader {
         return rs
     }
 
+    /** A fresh rim shader for one wallpaper-only pane; null falls the pane back to the frost alone. */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    fun newRimShader(): RuntimeShader? {
+        if (rimFailed) return null
+        val rs = compile(RIM_AGSL, "rim")
+        if (rs == null) rimFailed = true
+        return rs
+    }
+
     /** The band after the corner-radius cap, shared so nothing disagrees; wider grows corner hemispheres. */
     fun effectiveBevel(params: GlassParams, w: Int, h: Int): Float {
-        // 12dp at the surface's own density; a hard-coded density mis-sizes the floor off-device.
+        // The floor in dp at the surface's own density; a hard-coded density mis-sizes it off-device.
         val radiusCap = maxOf(params.cornerRadius, 12f * params.density)
         return params.bevelThickness
             .coerceAtMost(radiusCap)
@@ -518,7 +583,15 @@ object GlassShader {
     }
 
     /** Geometry uniforms for both programs, in one place so the passes agree where the bevel is. */
-    private fun setGeometry(rs: RuntimeShader, params: GlassParams, w: Int, h: Int, es: Float) {
+    private fun setGeometry(
+        rs: RuntimeShader,
+        params: GlassParams,
+        w: Int,
+        h: Int,
+        es: Float,
+        /** Thins the glass while a surface assembles, so the bend grows in with the frost; 1 is the settled slab. */
+        lensScale: Float = 1f,
+    ) {
         val bevel = effectiveBevel(params, w, h)
         // Everything divides by es, the pass's resolution divisor, here so both passes agree on the bevel.
         rs.setFloatUniform("size", w / es, h / es)
@@ -530,7 +603,7 @@ object GlassShader {
             rs.setFloatUniform("radii", r, r, r, r)
         }
         rs.setFloatUniform("bevel", bevel / es)
-        rs.setFloatUniform("depth", (bevel * params.depthRatio / es).coerceAtLeast(0.01f))
+        rs.setFloatUniform("depth", (bevel * params.depthRatio * lensScale / es).coerceAtLeast(0.01f))
         // Round the corner ridges over about a third of the band, clamped in screen px so every pass agrees.
         rs.setFloatUniform("cornerSmooth", (bevel * 0.35f).coerceIn(2f, 64f) / es)
         // Scaled by es like every other length, or a fade in full-res px covers the wrong rows.
@@ -539,7 +612,6 @@ object GlassShader {
             params.edgeExpandLeft / es, params.edgeExpandTop / es,
             params.edgeExpandRight / es, params.edgeExpandBottom / es,
         )
-        rs.setFloatUniform("fadeBottom", params.fadeBottomPx / es)
         rs.setFloatUniform("fadeTop", params.fadeTopOffsetPx / es, params.fadeTopLenPx / es)
     }
 
@@ -551,9 +623,19 @@ object GlassShader {
         w: Int,
         h: Int,
         es: Float = 1f,
+        lensScale: Float = 1f,
     ): RenderEffect {
-        applyRefractUniforms(rs, params, w, h, es)
+        applyRefractUniforms(rs, params, w, h, es, lensScale = lensScale)
         return RenderEffect.createRuntimeShaderEffect(rs, "content")
+    }
+
+    /** The rim pass: the transmission uniforms at the pass's divisor plus the detail alpha the pane hands in. */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    fun applyRimUniforms(rs: RuntimeShader, params: GlassParams, w: Int, h: Int, dim: Float, detail: Float, es: Float = 1f) {
+        applyRefractUniforms(rs, params, w, h, es, dim)
+        // No fringe on the sharp source yet: on a crisp rim it would read as a double image, and one tap is cheaper.
+        rs.setFloatUniform("dispersion", 0f)
+        rs.setFloatUniform("detail", detail.coerceIn(0f, 1f))
     }
 
     /** Transmission uniforms without the RenderEffect wrap, so bitmap-backed bubbles run the same program. */
@@ -564,19 +646,22 @@ object GlassShader {
         w: Int,
         h: Int,
         es: Float = 1f,
+        dim: Float = 0f,
+        lensScale: Float = 1f,
     ) {
-        setGeometry(rs, params, w, h, es)
+        setGeometry(rs, params, w, h, es, lensScale)
+        rs.setFloatUniform("dim", dim.coerceIn(0f, 1f))
         rs.setFloatUniform("ior", params.ior)
         rs.setFloatUniform("dispersion", params.dispersion)
         rs.setFloatUniform("magnify", params.magnify)
-        rs.setFloatUniform("maxDisplace", (params.maxDisplacePx / es).coerceAtLeast(0.5f))
+        rs.setFloatUniform("maxDisplace", (params.maxDisplacePx * lensScale / es).coerceAtLeast(0.5f))
         rs.setFloatUniform("transGamma", params.transGamma)
+        rs.setFloatUniform("saturation", params.saturation)
+        rs.setFloatUniform("bloom", params.bloom)
+        rs.setFloatUniform("bloomThreshold", params.bloomThreshold)
     }
 
-    /**
-     * Push one surface's light uniforms. Gains arrive as parameters: writing them into params would
-     * rebuild the refraction chain per frame. flatInteriorColor must use the same fresnelStrength.
-     */
+    /** Push one surface's light uniforms; the gains arrive as parameters because writing them into params would rebuild the refraction chain per frame, and flatInteriorColor must read the same fresnelStrength. */
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     fun applyLightUniforms(
         rs: RuntimeShader,
@@ -624,13 +709,25 @@ object GlassShader {
         rs.setFloatUniform("pressPos", pressX, pressY)
         rs.setFloatUniform("pressAmp", pressAmp)
         rs.setFloatUniform("pressR", pressRadiusPx)
+        rs.setFloatUniform("edgeShadow", params.edgeShadow)
     }
 
     /** Both uniform sets plus the dim, through the same two functions, so a bubble cannot drift from a pane. */
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    fun applyBubbleUniforms(rs: RuntimeShader, params: GlassParams, w: Int, h: Int, density: Float, dim: Float) {
-        applyRefractUniforms(rs, params, w, h)
+    fun applyBubbleUniforms(
+        rs: RuntimeShader,
+        params: GlassParams,
+        w: Int,
+        h: Int,
+        density: Float,
+        dim: Float,
+        sharpDim: Float,
+        detail: Float,
+    ) {
+        applyRefractUniforms(rs, params, w, h, 1f, dim)
         applyLightUniforms(rs, params, w, h, density = density)
-        rs.setFloatUniform("dim", dim.coerceIn(0f, 1f))
+        // Per draw, not from params: a bubble with no sharp source pushes zero, or the aliased child would darken its rim.
+        rs.setFloatUniform("detail", detail.coerceIn(0f, 1f))
+        rs.setFloatUniform("sharpDim", sharpDim.coerceIn(0f, 1f))
     }
 }

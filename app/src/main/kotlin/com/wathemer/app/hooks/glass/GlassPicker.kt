@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -118,8 +119,8 @@ private var pickerPhotoId = 0
 
 private var pickerNameId = 0
 
-/** Kind, height and the label it was classified at; two row types share a height, so height alone let a recycled view keep the wrong kind. */
-private class PickerRowKind(val kind: Int, val height: Int, val name: CharSequence?)
+/** Kind, height and the label it was classified at; two row types share a height, so height alone let a recycled view keep the wrong kind. The label is a String compared by content: a Spannable would hold its row. */
+private class PickerRowKind(val kind: Int, val height: Int, val name: String?)
 
 private val pickerRowKinds = WeakHashMap<View, PickerRowKind>()
 
@@ -168,7 +169,7 @@ private fun collectPickerCards(out: RectList) {
         val cached = pickerRowKinds[row]
         val shown = pickerNameOf(row)
         val kind: Int
-        if (cached != null && cached.height == row.height && cached.name == shown) {
+        if (cached != null && cached.height == row.height && TextUtils.equals(cached.name, shown)) {
             kind = cached.kind
         } else {
             val isA = pickerActionIds.any { row.findViewById<View>(it) != null }
@@ -176,7 +177,7 @@ private fun collectPickerCards(out: RectList) {
             val isC = !isA && !isF && pickerSelectorId != 0 &&
                 row.findViewById<View>(pickerSelectorId) != null
             kind = if (isA) 1 else if (isC) 2 else if (isF) 3 else 0
-            pickerRowKinds[row] = PickerRowKind(kind, row.height, shown)
+            pickerRowKinds[row] = PickerRowKind(kind, row.height, shown?.toString())
         }
         if (kind == 0) continue
         if (kind == 1) runCatching { glassActionDisc(row) }
@@ -236,10 +237,7 @@ private fun collectPickerCards(out: RectList) {
     emit(fT, fB)
 }
 
-/**
- * The New rows' discs. WhatsApp bakes the accent circle and the white glyph into one bitmap, so
- * there is no fill to clear: the glyph is lifted out and the circle behind it becomes glass.
- */
+/** The New rows' discs: WhatsApp bakes the accent circle and the white glyph into one bitmap, so there is no fill to clear; the glyph is lifted out and the circle behind it becomes glass. */
 private fun glassActionDisc(row: View) {
     if (row.getTag(pickerDiscTag) != null) return
     val icon = firstImageIn(row, 0) ?: return
@@ -333,9 +331,7 @@ private fun frostPickerDiscs(row: View) {
 }
 
 /** Band and pill stack, so they split TINT_ALPHA: the sum over the overlap must equal one surface. */
-private fun pickerBandAlpha(): Int = (TINT_ALPHA / 2).coerceAtLeast(0)
-
-private fun pickerPillAlpha(): Int = (TINT_ALPHA - pickerBandAlpha()).coerceAtLeast(0)
+private fun pickerPillAlpha(): Int = (TINT_ALPHA - convBandAlpha()).coerceAtLeast(0)
 
 private var pickerBandRef: WeakReference<GlassView>? = null
 
@@ -365,7 +361,7 @@ private fun syncPickerBand(root: ViewGroup, header: View) {
                 downsample = DOWNSAMPLE
                 blurRadius = root.dp(BLUR_DP)
                 refractionEnabled = true
-                // With the SDF expanded there is no bevel to size; a 1px nominal one keeps displacement at zero.
+                // With the SDF expanded there is no bevel to size; a nominal hairline keeps displacement at zero.
                 bevelFraction = 0f
                 bevelThickness = 1f
                 depthRatio = DEPTH_RATIO
@@ -401,7 +397,7 @@ private fun syncPickerBand(root: ViewGroup, header: View) {
         pickerBandRef = WeakReference(band)
         XposedBridge.log("[$TAG] contact picker band inserted at " + insertAt + " (" + total + "px)")
     }
-    band.params.tintColor = glassTint(pickerBandAlpha())
+    band.params.tintColor = glassTint(convBandAlpha())
     val lp = band.layoutParams as? FrameLayout.LayoutParams ?: return
     if (lp.height != total) {
         lp.height = total
@@ -476,7 +472,7 @@ private fun collectMeTabCard(out: RectList) {
     }
     if (header != null && header.isShown && header.height > 0) {
         header.getLocationOnScreen(meTabHeaderAt)
-        top = maxOf(top, (meTabHeaderAt[1] + header.height + gap).toFloat())
+        top = maxOf(top, meTabHeaderAt[1] + header.height + gap)
     }
     val bottom = (meTabAt[1] + c.height).toFloat()
 
@@ -526,8 +522,20 @@ private fun headerBandBehind(bar: View): Boolean {
 internal fun syncSearchViewGlass(field: View) {
     val host = field.parent as? FrameLayout ?: return
     if (field.width <= 0 || field.height <= 0) return
-    val res = field.resources
-    val pkg = field.context.packageName
+
+    // The conversation header already carries a pill on this bar; a capsule here is larger and nests behind it.
+    if (convHeaderOwns(field)) {
+        wdsBarPanes[host]?.get()?.layoutParams?.let { lp ->
+            if (lp.width != 0 || lp.height != 0) {
+                lp.width = 0
+                lp.height = 0
+                wdsBarPanes[host]?.get()?.layoutParams = lp
+            }
+        }
+        // The fills still go: the header's pill is the pane that makes taking them safe.
+        clearSearchViewFills(field)
+        return
+    }
 
     var glass = wdsBarPanes[host]?.get()
     if (glass == null || glass.parent !== host) {
@@ -550,12 +558,7 @@ internal fun syncSearchViewGlass(field: View) {
         XposedBridge.log("[$TAG] search view capsule inserted")
     }
     // Only now, with a pane behind it, is the fill safe to take; two unlike families share this id.
-    if (field.background != null) clearBg(field, "search_view")
-    for (n in listOf("search_edit_frame", "search_plate", "submit_area", "search_view_toolbar")) {
-        val id = res.waId(n, pkg)
-        if (id == 0) continue
-        field.findViewById<View>(id)?.let { if (it.background != null) clearBg(it, n) }
-    }
+    clearSearchViewFills(field)
     glass.params.tintColor =
         glassTint(if (headerBandBehind(host)) pickerPillAlpha() else TINT_ALPHA)
 
@@ -576,6 +579,18 @@ internal fun syncSearchViewGlass(field: View) {
         lp.gravity = Gravity.TOP or Gravity.START
         glass.layoutParams = lp
         glass.params.cornerRadius = h / 2f
+    }
+}
+
+/** The field's own fill and the four its family paints inside it; taking them needs a pane behind the bar. */
+private fun clearSearchViewFills(field: View) {
+    val res = field.resources
+    val pkg = field.context.packageName
+    if (field.background != null) clearBg(field, "search_view")
+    for (n in listOf("search_edit_frame", "search_plate", "submit_area", "search_view_toolbar")) {
+        val id = res.waId(n, pkg)
+        if (id == 0) continue
+        field.findViewById<View>(id)?.let { if (it.background != null) clearBg(it, n) }
     }
 }
 
@@ -659,7 +674,7 @@ internal fun syncWdsSearchBar(bar: FrameLayout) {
     glass.params.tintColor =
         glassTint(if (headerBandBehind(bar)) pickerPillAlpha() else TINT_ALPHA)
 
-    // The bar's own box in both states: one box cannot disagree with itself, so the swap is seamless.
+    // The bar's own box in both states: one box cannot disagree with itself, so the swap shows no join.
     val side = bar.dp(CARD_INSET_DP).toInt()
     val box = wdsRect
     box.set(side, 0, bar.width - side, bar.height)

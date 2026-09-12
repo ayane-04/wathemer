@@ -11,7 +11,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -51,13 +51,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.wathemer.app.hooks.wallpaper.BitmapDecoder
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
+import com.wathemer.app.settings.components.CategoryRow
 import com.wathemer.app.settings.components.ChevronIcon
-import com.wathemer.app.settings.components.MenuRow
 import com.wathemer.app.settings.components.NavTopBar
 import com.wathemer.app.settings.components.Palette
-import com.wathemer.app.settings.components.SectionHeader
 import com.wathemer.app.settings.components.SliderItem
-import com.wathemer.app.settings.components.StubNote
+import com.wathemer.app.settings.components.NoteText
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.prefs.ChatWallpaperLibrary
 import com.wathemer.app.settings.prefs.Prefs
@@ -147,7 +146,7 @@ fun ChatWallpapersScreen(nav: NavController, prefs: Prefs, onMessage: (String) -
             if (t != null && entries.none { it.jid == t.jid }) onMessage("No image chosen for ${t.name}.")
             return@rememberLauncherForActivityResult
         }
-        // Sweep earlier crops first: a pick that never came back left its temp behind.
+        // Sweep leftover crops first: a pick that never came back left its temp behind.
         context.cacheDir.listFiles()?.forEach { if (it.name.startsWith("ucrop_chat_")) it.delete() }
         val tempDest = File(context.cacheDir, "ucrop_chat_${System.currentTimeMillis()}.png")
         val dm = context.resources.displayMetrics
@@ -173,39 +172,23 @@ fun ChatWallpapersScreen(nav: NavController, prefs: Prefs, onMessage: (String) -
 
     Scaffold(containerColor = Palette.Bg) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(
-                title = "Chat wallpapers",
-                subtitle = when {
-                    saving -> "Saving"
-                    entries.isEmpty() -> "None set"
-                    else -> "${entries.size} set"
-                },
-                onBack = { nav.pop() },
-            )
+            NavTopBar(title = "Chat wallpapers", onBack = { nav.pop() })
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(bottom = 12.dp),
             ) {
-                SectionHeader(
-                    title = "Your chats",
-                    subtitle = "Each chat here shows its own picture instead of the wallpaper.",
-                )
                 if (!wallpaperOn) {
-                    StubNote("Chat wallpapers need the wallpaper switched on. They stay saved until it is.")
+                    NoteText("These show once the wallpaper is on.")
                 }
-                if (entries.isEmpty()) {
-                    StubNote("Nothing set yet. Open a chat in WhatsApp, tap its menu, then Chat wallpaper.")
-                } else {
-                    entries.forEach { entry ->
-                        ChatWallpaperRow(context, entry) { editing = entry }
+                when {
+                    saving -> NoteText("Saving")
+                    entries.isEmpty() -> NoteText("None yet. Open a chat in WhatsApp, tap its menu, then Chat wallpaper.")
+                    else -> entries.forEachIndexed { i, entry ->
+                        ChatWallpaperRow(context, entry, divider = i < entries.lastIndex) { editing = entry }
                     }
                 }
-                Spacer(Modifier.size(4.dp))
-                StubNote("To add a chat: open it in WhatsApp, tap its menu, then Chat wallpaper.")
-                StubNote("A change shows the next time the chat opens, or when you go back to it.")
             }
         }
     }
@@ -231,7 +214,7 @@ fun ChatWallpapersScreen(nav: NavController, prefs: Prefs, onMessage: (String) -
     removing?.let { entry ->
         ConfirmDialog(
             title = "Use the wallpaper for ${entry.name}?",
-            body = "The chat's own picture is deleted and the chat shows your wallpaper again.",
+            body = "The chat's own picture is deleted.",
             confirmLabel = "Remove",
             onConfirm = {
                 removing = null
@@ -247,54 +230,55 @@ fun ChatWallpapersScreen(nav: NavController, prefs: Prefs, onMessage: (String) -
     }
 }
 
-/* ── Rows ───────────────────────────────────────────────────────────────── */
+// ── Rows ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ChatWallpaperRow(context: Context, entry: ChatWallpaperLibrary.Entry, onClick: () -> Unit) {
+private fun ChatWallpaperRow(context: Context, entry: ChatWallpaperLibrary.Entry, divider: Boolean, onClick: () -> Unit) {
     val file = ChatWallpaperLibrary.fileOf(context, entry)
     // Keyed on the file name: a replaced image has a new stamp and so a new name.
     val bitmap = remember(entry.file) { BitmapDecoder.decodeScaled(file, 240, 240) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
-            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
             modifier = Modifier
-                .size(width = 40.dp, height = 56.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Palette.Surface),
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-                if (entry.dim > 0) {
-                    Box(Modifier.fillMaxSize().background(Color(WallpaperImage.DIM_COLOR).copy(alpha = entry.dim / 100f)))
+            Box(
+                modifier = Modifier
+                    .size(width = 40.dp, height = 56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Palette.Surface),
+            ) {
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                    if (entry.dim > 0) {
+                        Box(Modifier.fillMaxSize().background(Color(WallpaperImage.DIM_COLOR).copy(alpha = entry.dim / 100f)))
+                    }
                 }
             }
+            Spacer(Modifier.size(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(entry.name, color = Palette.Fg, fontSize = 16.sp)
+                Text(
+                    "Dim ${entry.dim}% · Blur ${entry.blur}",
+                    color = Palette.FgMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Spacer(Modifier.size(12.dp))
+            ChevronIcon(Palette.FgMuted)
         }
-        Spacer(Modifier.size(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(entry.name, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
-            Text(
-                "${ChatWallpaperLibrary.displayJid(entry.jid)} · dim ${entry.dim}% · blur ${entry.blur} px",
-                color = Palette.FgMuted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 3.dp),
-            )
-        }
-        Spacer(Modifier.size(10.dp))
-        ChevronIcon(Palette.FgMuted)
+        if (divider) Box(Modifier.fillMaxWidth().padding(start = 72.dp).height(1.dp).background(Palette.Rule))
     }
 }
 
-/* ── Dialogs ────────────────────────────────────────────────────────────── */
+// ── Dialogs ──────────────────────────────────────────────────────────────
 
 @Composable
 private fun EditorDialog(
@@ -311,19 +295,19 @@ private fun EditorDialog(
     val file = ChatWallpaperLibrary.fileOf(context, entry)
     val bitmap = remember(entry.file) { BitmapDecoder.decodeScaled(file, 600, 600) }
     ChatDialog(onDismiss) {
-        Text(entry.name, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        Text(ChatWallpaperLibrary.displayJid(entry.jid), color = Palette.FgMuted, fontSize = 11.sp)
+        Text(entry.name, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(horizontal = 20.dp))
+        Text(ChatWallpaperLibrary.displayJid(entry.jid), color = Palette.FgMuted, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp))
         // The body scrolls and the dismiss stays outside it: a tall dialog on a small screen must never lose its button.
         Column(
             modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
                     .aspectRatio(16f / 9f)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Palette.Surface),
+                    .background(Palette.Bg),
             ) {
                 if (bitmap != null) {
                     Image(
@@ -339,7 +323,6 @@ private fun EditorDialog(
             }
             SliderItem(
                 title = "Dim",
-                subtitle = "Darken this chat's picture",
                 value = dim.toFloat(),
                 range = 0f..100f,
                 steps = 99,
@@ -349,10 +332,9 @@ private fun EditorDialog(
                 },
                 valueLabel = { "${it.toInt()}%" },
             )
-            // Range 0-150 matches the global blur slider and the hook; the high ceiling is the glass frost.
+            // Range 0-150 matches the global blur slider and the hook.
             SliderItem(
                 title = "Blur",
-                subtitle = "Softens this chat's picture",
                 value = blur.toFloat(),
                 range = 0f..150f,
                 steps = 149,
@@ -360,24 +342,16 @@ private fun EditorDialog(
                     blur = v.roundToInt()
                     onChanged(ChatWallpaperLibrary.setDimBlur(prefs, entry, dim, blur))
                 },
-                valueLabel = { "${it.toInt()} px" },
+                valueLabel = { "${it.toInt()}" },
             )
-            MenuRow(
-                title = "Replace picture",
-                subtitle = "Pick another image for this chat.",
-                onClick = onReplace,
-            )
-            MenuRow(
-                title = "Use the wallpaper instead",
-                subtitle = "Remove this chat's picture.",
-                onClick = onRemove,
-            )
+            CategoryRow(label = "Replace the picture", onClick = onReplace)
+            CategoryRow(label = "Use the wallpaper instead", divider = false, onClick = onRemove)
         }
         OutlinedButton(
             onClick = onDismiss,
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, Palette.Rule),
-        ) { Text("Done", color = Palette.Fg, fontWeight = FontWeight.SemiBold) }
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            border = BorderStroke(1.dp, Palette.RuleStrong),
+        ) { Text("Done", color = Palette.Fg) }
     }
 }
 
@@ -387,10 +361,9 @@ private fun ChatDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Palette.Bg, RoundedCornerShape(16.dp))
-                .border(1.dp, Palette.RuleStrong, RoundedCornerShape(16.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .background(Palette.Surface, RoundedCornerShape(16.dp))
+                .padding(vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             content = content,
         )
     }
@@ -404,17 +377,25 @@ private fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ChatDialog(onDismiss) {
-        Text(title, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        Text(body, color = Palette.FgMuted, fontSize = 12.sp, lineHeight = 17.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
-                onClick = onDismiss,
-                modifier = Modifier.weight(1f),
-                border = BorderStroke(1.dp, Palette.Rule),
-            ) { Text("Cancel", color = Palette.Fg, fontWeight = FontWeight.SemiBold) }
-            Button(onClick = onConfirm, modifier = Modifier.weight(1f)) {
-                Text(confirmLabel, fontWeight = FontWeight.Bold)
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Palette.Surface, RoundedCornerShape(16.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(title, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            Text(body, color = Palette.FgMuted, fontSize = 14.sp, lineHeight = 20.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    border = BorderStroke(1.dp, Palette.RuleStrong),
+                ) { Text("Cancel", color = Palette.Fg) }
+                Button(onClick = onConfirm, modifier = Modifier.weight(1f)) {
+                    Text(confirmLabel, fontWeight = FontWeight.Medium)
+                }
             }
         }
     }

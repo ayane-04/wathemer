@@ -44,6 +44,20 @@ data class ThemeGlass(
     val rimWidth: Int,
     val rimAngle: Int,
     val bubbleMerge: Boolean,
+    // Defaulted: files written before the slider existed read as the shipped value, and older constructor calls compile.
+    val saturation: Int = GlassDefaults.SATURATION,
+    val huedTint: Boolean = GlassDefaults.HUED_TINT,
+    val linearCopy: Boolean = GlassDefaults.LINEAR_COPY,
+    val edgeShadow: Int = GlassDefaults.EDGE_SHADOW,
+    val glow: Int = GlassDefaults.GLOW,
+    val edgeClarity: Int = GlassDefaults.EDGE_CLARITY,
+    val liveClarity: Boolean = GlassDefaults.LIVE_CLARITY,
+    val navDroplet: Boolean = GlassDefaults.NAV_DROPLET,
+    val assemble: Boolean = GlassDefaults.ASSEMBLE,
+    val oneBlur: Boolean = GlassDefaults.ONE_BLUR,
+    val smallOptics: Boolean = GlassDefaults.SMALL_OPTICS,
+    val popupMorph: Boolean = GlassDefaults.POPUP_MORPH,
+    val rowOptics: Boolean = GlassDefaults.ROW_OPTICS,
 )
 
 /** Shapes travel as asset names, never as the stored index: the registry is ordered and a removal renumbers it. */
@@ -202,7 +216,7 @@ object ThemeFile {
     }
 
     /** One printable line, capped. No fallback: a caller that needs one says so. */
-    private fun oneLine(raw: String?): String = raw.orEmpty()
+    internal fun oneLine(raw: String?): String = raw.orEmpty()
         .map { if (it.isISOControl()) ' ' else it }
         .joinToString("")
         .replace(Regex("\\s+"), " ")
@@ -270,7 +284,20 @@ object ThemeFile {
                     .put("rim", g.rim)
                     .put("rimWidth", g.rimWidth)
                     .put("rimAngle", g.rimAngle)
-                    .put("bubbleMerge", g.bubbleMerge),
+                    .put("bubbleMerge", g.bubbleMerge)
+                    .put("saturation", g.saturation)
+                    .put("huedTint", g.huedTint)
+                    .put("linearCopy", g.linearCopy)
+                    .put("edgeShadow", g.edgeShadow)
+                    .put("glow", g.glow)
+                    .put("edgeClarity", g.edgeClarity)
+                    .put("liveClarity", g.liveClarity)
+                    .put("navDroplet", g.navDroplet)
+                    .put("assemble", g.assemble)
+                    .put("oneBlur", g.oneBlur)
+                    .put("smallOptics", g.smallOptics)
+                    .put("popupMorph", g.popupMorph)
+                    .put("rowOptics", g.rowOptics),
             )
         }
         return root.toString(2)
@@ -342,6 +369,19 @@ object ThemeFile {
                 rimWidth = o.optInt("rimWidth", GlassDefaults.RIM_WIDTH).coerceIn(1, 4),
                 rimAngle = o.optInt("rimAngle", GlassDefaults.RIM_ANGLE).coerceIn(0, 360),
                 bubbleMerge = o.optBoolean("bubbleMerge", GlassDefaults.BUBBLE_MERGE),
+                saturation = o.optInt("saturation", GlassDefaults.SATURATION).coerceIn(100, 200),
+                huedTint = o.optBoolean("huedTint", GlassDefaults.HUED_TINT),
+                linearCopy = o.optBoolean("linearCopy", GlassDefaults.LINEAR_COPY),
+                edgeShadow = o.optInt("edgeShadow", GlassDefaults.EDGE_SHADOW).coerceIn(0, 30),
+                glow = o.optInt("glow", GlassDefaults.GLOW).coerceIn(0, 100),
+                edgeClarity = o.optInt("edgeClarity", GlassDefaults.EDGE_CLARITY).coerceIn(0, 100),
+                liveClarity = o.optBoolean("liveClarity", GlassDefaults.LIVE_CLARITY),
+                navDroplet = o.optBoolean("navDroplet", GlassDefaults.NAV_DROPLET),
+                assemble = o.optBoolean("assemble", GlassDefaults.ASSEMBLE),
+                oneBlur = o.optBoolean("oneBlur", GlassDefaults.ONE_BLUR),
+                smallOptics = o.optBoolean("smallOptics", GlassDefaults.SMALL_OPTICS),
+                popupMorph = o.optBoolean("popupMorph", GlassDefaults.POPUP_MORPH),
+                rowOptics = o.optBoolean("rowOptics", GlassDefaults.ROW_OPTICS),
             )
         }
 

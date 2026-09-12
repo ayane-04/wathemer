@@ -100,7 +100,7 @@ class WallpaperImage private constructor(
     private fun globalLook(): WallpaperLook = WallpaperLook(
         0,
         xprefs.getInt(Prefs.KEY_WALLPAPER_DIM, 0).coerceIn(0, 100),
-        // Ceiling 150: glass frost needs heavy blur and RenderEffect is free per frame.
+        // Ceiling 150: a RenderEffect is free per frame, so a heavy blur costs nothing; the glass blurs on its own.
         xprefs.getInt(Prefs.KEY_WALLPAPER_BLUR, 0).coerceIn(0, 150),
     )
 
@@ -158,9 +158,12 @@ class WallpaperImage private constructor(
             return
         }
 
-        activity.window.statusBarColor = 0
-        // Force the system nav bar transparent too, so the wallpaper runs edge-to-edge.
-        activity.window.navigationBarColor = 0
+        // Both bars clear for an edge-to-edge wallpaper; deprecated, the only writer below API 35, and the nav write keeps disarming the forced-light bit above.
+        @Suppress("DEPRECATION")
+        activity.window.run {
+            statusBarColor = 0
+            navigationBarColor = 0
+        }
 
         val imageView = ImageView(activity).apply {
             tag = WALLPAPER_TAG
@@ -316,7 +319,8 @@ class WallpaperImage private constructor(
                     parent.addView(dimView, 1)
                 }
             }
-            override fun onChildViewRemoved(p: View?, child: View?) { /* no-op */ }
+            // Only additions matter; a removal has nothing to re-pin.
+            override fun onChildViewRemoved(p: View?, child: View?) { }
         })
     }
 
@@ -362,7 +366,7 @@ class WallpaperImage private constructor(
     companion object {
         private const val TAG = "WaThemer.Wallpaper"
         private const val WHATSAPP_PKG = "com.whatsapp"
-        private const val REENFORCEMENT_TAG_KEY = -1167196165
+        private const val REENFORCEMENT_TAG_KEY = -1167196166
 
         /** Tag prefix on every injected view; paint features and findAndHideWallpaperView skip anything carrying it. */
         const val TAG_PREFIX = "wt_"

@@ -126,7 +126,7 @@ internal fun injectUpdatesCard(host: ViewGroup) {
     XposedBridge.log("[$TAG] updates card + title '${tv.text}' inserted")
 }
 
-/** Title clearance is header.height + 4dp to match the Chats title, and every clip edge is the list's own padding box. */
+/** Title clearance matches the Chats title's, the header's height plus its small gap, and every clip edge is the list's own padding box. */
 internal fun syncUpdatesCard() {
     val host = updatesHostRef?.get() ?: return
     val glass = updatesPanelRef?.get() as? GlassView ?: return
@@ -606,7 +606,7 @@ private fun alignIconlessRows(v: View, gutter: Int, want: Int, depth: Int) {
 }
 
 /** Wraps the list itself, so an empty page whose list is GONE gets no slab. */
-private fun syncContentCard(list: View, label: String, frameCard: Boolean = false) {
+private fun syncContentCard(list: View, label: String, frameCard: Boolean) {
     val glass = contentCards[list]?.get() ?: return
     val host = glass.parent as? ViewGroup ?: return
     if (host.width <= 0 || host.height <= 0) return
@@ -734,7 +734,7 @@ private fun syncContentCard(list: View, label: String, frameCard: Boolean = fals
     }
 }
 
-// Its own pad: these blocks are dense ink to every edge, and the shared 8dp read cramped on sight.
+// Its own pad: these blocks are dense ink to every edge, and the shared card pad read cramped on sight.
 private const val BLOCK_CONTENT_PAD_DP = 10f
 
 private val blockCards = WeakHashMap<View, WeakReference<GlassView>>()
@@ -992,7 +992,7 @@ private fun injectPageCard(card: PageCard, host: ViewGroup) {
     host.addView(glass, 0, ViewGroup.MarginLayoutParams(0, 0))
     card.panel = WeakReference(glass)
 
-    // The title's margins cancel its height in this sequencing host, and it must go before the match_parent list or it measures 0px forever.
+    // The title's margins cancel its height in this sequencing host, and it must go before the match_parent list or it measures to nothing forever.
     val ctx = host.context
     val tv = TextView(ctx).apply {
         text = navLabel(card.navIndex) ?: card.titleFallback
@@ -1179,7 +1179,7 @@ internal fun syncChannelCard() {
 }
 
 // ── Folder header: the chat screen's band and capsule, one pair per window ─────────
-// One band only: two abutting panes cannot be seamless, each blur kernel is clipped to its own capture.
+// One band only: two abutting panes always show their join, each blur kernel being clipped to its own capture.
 internal val folderBands = WeakHashMap<View, WeakReference<GlassView>>()
 
 private val folderCapsules = WeakHashMap<View, WeakReference<GlassView>>()
@@ -1216,7 +1216,6 @@ private fun ensureFolderHeader(anchor: View, label: String) {
     abr.getLocationOnScreen(folderHeaderAbrAt)
     val solid = folderHeaderAt[1] - folderHeaderAbrAt[1] + headerBar.height
     if (solid <= 0) return
-    val total = solid
 
     var band = folderBands[abr]?.get()
     if (band == null || band.parent !== abr) {
@@ -1226,7 +1225,7 @@ private fun ensureFolderHeader(anchor: View, label: String) {
                 downsample = DOWNSAMPLE
                 blurRadius = abr.dp(BLUR_DP)
                 refractionEnabled = true
-                // With the SDF expanded there is no bevel to size; a 1px nominal one keeps depth and displacement at zero.
+                // With the SDF expanded there is no bevel to size; a nominal hairline keeps depth and displacement at zero.
                 bevelFraction = 0f
                 bevelThickness = 1f
                 depthRatio = DEPTH_RATIO
@@ -1251,7 +1250,7 @@ private fun ensureFolderHeader(anchor: View, label: String) {
         }
         abr.addView(
             band, insertAt,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, total).apply {
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, solid).apply {
                 gravity = Gravity.TOP
             },
         )
@@ -1260,7 +1259,7 @@ private fun ensureFolderHeader(anchor: View, label: String) {
     }
     band.params.tintColor = glassTint(convBandAlpha())
     (band.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
-        if (lp.height != total) { lp.height = total; band.layoutParams = lp }
+        if (lp.height != solid) { lp.height = solid; band.layoutParams = lp }
     }
 
     // No capsule without a shown toolbar; the settings search pill is its own surface.
@@ -1287,7 +1286,7 @@ private fun ensureFolderHeader(anchor: View, label: String) {
     // The remainder of the tint budget; band plus capsule sum to TINT_ALPHA exactly, including 0.
     cap.params.tintColor = glassTint((TINT_ALPHA - convBandAlpha()).coerceAtLeast(0))
     val inset = (CONV_PILL_INSET_DP * abr.resources.displayMetrics.density).toInt()
-    val trim = (4 * abr.resources.displayMetrics.density).toInt()
+    val trim = abr.dp(BAR_PANE_TRIM_DP).toInt()
     val l = folderHeaderAt[0] - folderHeaderAbrAt[0] + inset
     val t = folderHeaderAt[1] - folderHeaderAbrAt[1] + trim
     val w = toolbar.width - 2 * inset

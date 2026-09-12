@@ -12,10 +12,13 @@ import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
+import android.util.Log
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
+import com.wathemer.app.glass.BubbleGlassPainter
 import com.wathemer.app.glass.FrostDrawable
+import com.wathemer.app.glass.GlassParams
 
 /** Mutable and reused: the provider is asked for the outline on every invalidateOutline. */
 internal class CardOutline(
@@ -93,6 +96,25 @@ internal class SelectionPane(
         Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG,
     )
 
+    /** The row's own recipe for the bubble program, built on the first draw that can use it; the painter writes into it. */
+    private var optics: GlassParams? = null
+
+    /** The fill over the lift as one straight colour: the program takes a straight tint and multiplies it itself. */
+    private val compositeTint: Int = run {
+        val af = (fill ushr 24 and 0xFF) / 255f
+        val al = (lift ushr 24 and 0xFF) / 255f
+        val a = af + al * (1f - af)
+        if (a <= 0f) {
+            0
+        } else {
+            val wf = af / a
+            val wl = al * (1f - af) / a
+            fun ch(shift: Int) =
+                ((fill shr shift and 0xFF) * wf + (lift shr shift and 0xFF) * wl + 0.5f).toInt().coerceIn(0, 255)
+            ((a * 255f + 0.5f).toInt().coerceIn(0, 255) shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+        }
+    }
+
     override fun draw(canvas: Canvas) {
         val b = bounds
         if (b.width() <= 0 || b.height() <= 0) return
@@ -103,6 +125,12 @@ internal class SelectionPane(
 
         val bmp = runCatching { sharp() }.getOrNull()
         val place = if (bmp != null) placement() else null
+        // The row as glass: the program draws the copy, the tint and the rim, so nothing below runs for it.
+        if (ROW_OPTICS && bmp != null && place != null && canvas.isHardwareAccelerated &&
+            drawOptics(canvas, bmp, place, r)
+        ) {
+            return
+        }
         val save = canvas.save()
         path.reset()
         path.addRoundRect(box, r, r, Path.Direction.CW)
@@ -132,14 +160,59 @@ internal class SelectionPane(
         }
     }
 
+    /** Guarded whole and falling through to the fills: this runs inside the row's draw pass. */
+    private fun drawOptics(canvas: Canvas, bmp: Bitmap, place: Matrix, r: Float): Boolean {
+        return try {
+            val density = host.resources.displayMetrics.density
+            val p = optics ?: GlassParams(density).apply {
+                refractionEnabled = true
+                bevelFraction = ROW_OPTICS_BEVEL_FRACTION
+                depthRatio = DEPTH_RATIO
+                maxDisplacePx = DISPLACE_DP * density
+                fresnelStrength = 0.5f
+                // No fringe over a copy, as the bubbles and pills have it.
+                dispersion = 0f
+            }.also { optics = it }
+            p.cornerRadius = r
+            host.getLocationOnScreen(at)
+            // No stroke and no fills: the program's edge is the rim, and the copy carries its dim already.
+            selectionPainter(density).paint(
+                canvas, box, p, compositeTint, bmp, place,
+                screenX = at[0] + box.left, screenY = at[1] + box.top,
+                dim = 0f, rimColor = 0, rimWidth = 0f,
+            )
+            true
+        } catch (t: Throwable) {
+            if (!loggedOpticsThrow) {
+                loggedOpticsThrow = true
+                Log.w("WaThemer.Select", "row optics threw, fills kept", t)
+            }
+            false
+        }
+    }
+
     override fun setAlpha(alpha: Int) = Unit
     override fun setColorFilter(colorFilter: ColorFilter?) = Unit
 
     @Deprecated("Deprecated in Drawable", ReplaceWith("PixelFormat.TRANSLUCENT"))
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+    companion object {
+        /** A row's band as a fraction of its smaller side, the pills' figure. */
+        private const val ROW_OPTICS_BEVEL_FRACTION = 0.15f
+
+        /** Process-wide latch: a fresh pane per selection would log per row. */
+        private var loggedOpticsThrow = false
+
+        /** Its own painter per density: this binds the selection copy, the pills the bubble copy, and a painter caches one. */
+        private val painters = HashMap<Float, BubbleGlassPainter>()
+
+        private fun selectionPainter(density: Float): BubbleGlassPainter =
+            painters.getOrPut(density) { BubbleGlassPainter(density) }
+    }
 }
 
-/** Scrolling repositions rows without re-recording, freezing the sampled wallpaper; armed once, never removed, deliberately. */
+/** Scrolling repositions rows without re-recording, freezing the sampled wallpaper; the pre-draw listener detaches with its view, the attach watcher stays. */
 internal class RowScrollWatch(private val host: View) :
     ViewTreeObserver.OnPreDrawListener, View.OnAttachStateChangeListener {
     private val at = IntArray(2)

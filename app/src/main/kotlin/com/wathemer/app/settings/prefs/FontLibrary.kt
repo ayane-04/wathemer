@@ -156,7 +156,7 @@ object FontLibrary {
             if (file.isBlank() || stamp <= 0) return@mapNotNull null
             Entry(file, o.optString("name").ifBlank { "Font $stamp" }, stamp)
         }
-    }.getOrDefault(emptyList())
+    }.onFailure { Log.w(TAG, "parse: unreadable list, reading it as empty: $it") }.getOrDefault(emptyList())
 
     private fun serialize(entries: List<Entry>): String {
         val arr = JSONArray()

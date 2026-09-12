@@ -47,7 +47,6 @@ internal fun infoHeaderGlass(header: View) {
             if (v.visibility != View.INVISIBLE) v.visibility = View.INVISIBLE
         }
     }
-    hideBand.run()
     val sync = Runnable {
         hideBand.run()
         runCatching { syncInfoFade(holder) }

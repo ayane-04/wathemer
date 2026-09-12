@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base parent: Material3 dark-only (we never go light; matches design system). -->
+    <!-- Material3 dark only; the app has no light theme. -->
     <style name="Theme.WaThemer" parent="Theme.Material3.Dark.NoActionBar">
         <item name="android:windowBackground">@color/seed_background</item>
         <item name="android:statusBarColor">@color/seed_background</item>

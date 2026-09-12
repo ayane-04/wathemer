@@ -549,7 +549,7 @@ private fun syncActionBarCover(root: ViewGroup, bar: View, toolbarId: Int) {
     if (active) {
         // Same family as the toolbar: glass owns the fill, and the band or the wallpaper behind is the material.
         if (bar.background != null) clearBg(bar, "action_mode_bar")
-        // AppCompat creates the guard lazily, hence the second, delayed pass.
+        // AppCompat creates the guard lazily, which is why there is a second, delayed pass.
         val inset = runCatching {
             root.rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())?.top
         }.getOrNull() ?: 0
@@ -558,7 +558,7 @@ private fun syncActionBarCover(root: ViewGroup, bar: View, toolbarId: Int) {
     }
     if (active) {
         forEachWithId(root, toolbarId) { t ->
-            if (t !== bar && t.visibility == View.VISIBLE && !containsView(t, bar)) {
+            if (t !== bar && t.visibility == View.VISIBLE && !isAncestorOf(t, bar)) {
                 hiddenUnderActionBar[t] = t.visibility
                 t.visibility = View.INVISIBLE
             }
@@ -637,7 +637,7 @@ internal fun syncToolbarTitle() {
         }
         // Absolute sp, not a multiplier, which would compound every layout; the typeface family survives a font swap.
         if (!hide) {
-            val px = TOOLBAR_TITLE_SP * tv.resources.displayMetrics.scaledDensity
+            val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, TOOLBAR_TITLE_SP, tv.resources.displayMetrics)
             if (abs(tv.textSize - px) > 0.5f) {
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, TOOLBAR_TITLE_SP)
                 tv.setTypeface(tv.typeface, Typeface.BOLD)
@@ -686,7 +686,7 @@ internal fun injectBigTitle(bar: View) {
         setTextColor(primaryTextColor(ctx))
         includeFontPadding = false
         maxLines = 1
-        // 16dp lines up with the search field; the 4dp shift comes off the padding so the margin stays the header's clearance.
+        // Lines up with the search field; the shift comes off the padding so the margin stays the header's clearance.
         setPadding(
             container.dp(16f).toInt(), container.dp(2f).toInt(),
             container.dp(16f).toInt(), container.dp(10f).toInt(),

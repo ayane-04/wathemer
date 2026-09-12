@@ -41,10 +41,7 @@ object ModulePrefs {
             .getOrNull()
     }
 
-    /**
-     * SharedPreferences over the remote store, refreshable in place so the fields holding it stay
-     * valid. Absent a framework store every read returns its default, which is stock behaviour.
-     */
+    /** SharedPreferences over the remote store, refreshable in place so the fields holding it stay valid; absent a framework store every read returns its default, which is stock behaviour. */
     class WtPrefs internal constructor(private val provider: () -> SharedPreferences?) : SharedPreferences {
 
         @Volatile private var current: SharedPreferences? = provider()

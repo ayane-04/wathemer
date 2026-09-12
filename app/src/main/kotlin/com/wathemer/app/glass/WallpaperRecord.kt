@@ -29,6 +29,8 @@ class WallpaperRecord(
 ) {
     var bubblePlacement: Matrix? = null
     var selectionPlacement: Matrix? = null
+    /** The source bitmap itself to the screen, for the rim pass that bends sharp wallpaper. */
+    var srcPlacement: Matrix? = null
     /** The geometry epoch both placements were derived at; a stale epoch means re-derive both. */
     var placementEpoch: Int = -1
 

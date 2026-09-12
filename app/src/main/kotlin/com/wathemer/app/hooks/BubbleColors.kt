@@ -87,9 +87,7 @@ object BubbleColors {
         }
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* Layer 1: tint the bubble Drawable methods                           */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── Layer 1: tint the bubble Drawable methods ────────────────────────────────────────────
 
     /** Per-side bg tint. mutate() before the filter is mandatory: shared ConstantState bleeds tint across rows. */
     private fun hookBubbleMethod(
@@ -132,9 +130,7 @@ object BubbleColors {
             (if (shapeIncoming != 0 || shapeOutgoing != 0) ", deferring to shapes in=$shapeIncoming out=$shapeOutgoing" else "") + ")")
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* Layer 2: kill WDS rounded-outline foregrounds on bubble surfaces    */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── Layer 2: kill WDS rounded-outline foregrounds on bubble surfaces ─────────────────────
 
     private fun installForegroundKill(app: Application) {
         val pkg = app.packageName
@@ -187,9 +183,7 @@ object BubbleColors {
         }
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* Layer 3: restore rounded clip where Layer 2 removed the mask        */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── Layer 3: restore rounded clip where Layer 2 removed the mask ─────────────────────────
 
     private fun installRoundedOutlines(app: Application) {
         applyRoundedOutline(app, "preview", topOnly = true)              // PDF preview = top corners only
@@ -207,9 +201,7 @@ object BubbleColors {
         applyRoundedOutline(app, "live_location_info_holder", topOnly = false) // live location info row (LinearLayout/FrameLayout per layout XML)
     }
 
-    /* ─────────────────────────────────────────────────────────────────── */
-    /* Text + timestamp colours, per side.                                */
-    /* ─────────────────────────────────────────────────────────────────── */
+    // ── Text + timestamp colours, per side. ──────────────────────────────────────────────────
 
     /** Text and date colours via TextColorDispatcher plus attach re-apply; side detection in [isOutgoingBubble]. */
     private fun hookBubbleTextColors(
@@ -338,7 +330,7 @@ object BubbleColors {
                 override fun getOutline(view: View, outline: Outline) {
                     val w = view.width; val h = view.height
                     if (w <= 0 || h <= 0) return
-                    // Clip at the padding inset: map_frame pads 11dp and outer-bounds clipping leaves the map rectangular.
+                    // Clip at the padding inset: map_frame pads its map, and clipping at the outer bounds leaves it rectangular.
                     val l = view.paddingLeft
                     val t = view.paddingTop
                     val r = w - view.paddingRight

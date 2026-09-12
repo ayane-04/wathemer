@@ -1,5 +1,5 @@
 // The entry point, and the table of which WhatsApp id gets which treatment; the surfaces themselves
-// live in the sibling Glass*.kt files. Only install and the three getters below are called from outside.
+// live in the sibling Glass*.kt files. Only install, the two badge getters and the three wallpaper notes are called from outside.
 package com.wathemer.app.hooks.glass
 
 import android.app.Activity
@@ -66,15 +66,25 @@ object GlassHook {
         // A program that fails to compile falls back silently; the ledger has to say so.
         GlassShader.onCompileFailure = { what, t -> HookLog.fail("glass/agsl/$what", t) }
         GlassShader.onCompiled = { what -> HookLog.hit("glass/agsl/$what") }
+        // The rim pass asks for a window's record through this, so the engine never imports the hook.
+        GlassView.wallpaperRecordFor = { v -> wallpaperRecordOf(v) }
         val res = app.resources
         // Density is only available here, so the dp to px conversion cannot live in loadGlassPrefs.
         GlassParams.defaultRimStrokePx =
             if (RIM_ALPHA > 0) RIM_WIDTH_DP * res.displayMetrics.density else 0f
         GlassParams.defaultRimStrokeColor = ((RIM_ALPHA * 255 / 100) shl 24) or 0xFFFFFF
+        // The copies follow the slider through HWUI's own radius to sigma mapping, so one number blurs every surface.
+        configureCopyBlur(if (ONE_BLUR) 0.57735f * BLUR_DP * res.displayMetrics.density + 0.5f else 0f)
         XposedBridge.log(
             "[$TAG] blur=${BLUR_DP}dp tint=$TINT_ALPHA displace=${DISPLACE_DP}dp " +
                 "bevel=$BEVEL_FRACTION radius=${CARD_RADIUS_DP}dp " +
-                "gamma=${GlassParams.defaultTransGamma} rim=$RIM_ALPHA/${RIM_WIDTH_DP}dp " +
+                "gamma=${GlassParams.defaultTransGamma} sat=${GlassParams.defaultSaturation} glow=${GlassParams.defaultBloom} " +
+                "edge=${GlassParams.defaultEdgeShadow} hued=$HUED_TINT linear=$LINEAR_COPY clarity=${GlassParams.defaultDetail} " +
+                "liveClarity=${BackdropCapture.liveRim} " +
+                "droplet=${GlassNavDroplet.enabled} assemble=${GlassView.assembleOnAppear} " +
+                "oneBlur=$ONE_BLUR frostSigma=$frostSigmaScreen snapRadius=$snapRadius optics=$SMALL_OPTICS " +
+                "popupMorph=${GlassPopupMorph.enabled} rowOptics=$ROW_OPTICS " +
+                "rim=$RIM_ALPHA/${RIM_WIDTH_DP}dp " +
                 "rimAngle=${GlassParams.defaultRimStrokeAngle}",
         )
         val pkg = app.packageName
@@ -423,7 +433,7 @@ object GlassHook {
             }
         }
 
-        // Over glass the 3px rule reads as a seam. INVISIBLE keeps the appbar's height where GONE would collapse it.
+        // Over glass the divider rule reads as a seam. INVISIBLE keeps the appbar's height where GONE would collapse it.
         val filterDividerId = res.waId("filter_divider", pkg)
         if (filterDividerId != 0) ViewThemeDispatcher.onId(filterDividerId) { v ->
             if (v.visibility != View.INVISIBLE) {
@@ -672,7 +682,7 @@ object GlassHook {
                 p = p.parent
             }
             if (!known) return@onId
-            frostSquareOnLayout(v)
+            frostCircleOnLayout(v)
         }
 
         // ── The community home page's appbar ───────────────────────────────────────────
@@ -823,10 +833,12 @@ object GlassHook {
                             return@runCatching
                         }
                         // Blurred wallpaper as the fill: a film lets the bubble edge bleed through these.
+                        // The reactions pill overlaps its own bubble, and a lens over a lens is the one thing left as a stamp.
                         val d = FrostDrawable(
                             v, { host -> wallpaperRecordOf(host) }, v.height / 2f, glassTint(CHIP_ALPHA),
                             strokeWidth = v.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
                             ignorePadding = true,
+                            optics = if (SMALL_OPTICS && n != "reactions_bubble_layout") pillOptics(v) else null,
                         )
                         v.setTag(frostTag, d)
                         v.background = d
@@ -882,23 +894,23 @@ object GlassHook {
             val did = res.waId(n, pkg)
             if (did != 0) ViewThemeDispatcher.onId(did) { v ->
                 if (v is ViewStub) return@onId
-                liquidFrostOnLayout(v, keepPadding = true)
+                liquidFrostOnLayout(v, keepPadding = true, optics = true)
             }
         }
         val tiBubbleId = res.waId("ti_bubble", pkg)
         if (tiBubbleId != 0) ViewThemeDispatcher.onId(tiBubbleId) { v ->
             // Only the bubble; the dots are a sibling drawable and must keep animating.
-            liquidFrostOnLayout(v, keepPadding = true)
+            liquidFrostOnLayout(v, keepPadding = true, optics = true)
         }
         val unreadTvId = res.waId("unread_divider_tv", pkg)
         if (unreadTvId != 0) ViewThemeDispatcher.onId(unreadTvId) { v ->
             // The band is the parent's flat colour; the pill shape belongs on the text.
             (v.parent as? View)?.let { p -> if (p.background != null) clearBg(p, "unread band") }
-            // Stock leaves this label unpadded and unbacked, so the pill needs the band's own 6dp back.
+            // Stock leaves this label unpadded and unbacked, so the pill needs the band's own padding back.
             padUnreadPill(v)
-            liquidFrostOnLayout(v, keepPadding = true)
+            liquidFrostOnLayout(v, keepPadding = true, optics = true)
         }
-        // info is one of the most reused ids in the app, hence the activity scope.
+        // info is one of the most reused ids in the app, so the activity scope.
         val e2eInfoId = res.waId("info", pkg)
         if (e2eInfoId != 0) ViewThemeDispatcher.onId(e2eInfoId) { v ->
             if (activityOf(v)?.javaClass?.name?.endsWith(".Conversation") != true) return@onId
@@ -915,7 +927,7 @@ object GlassHook {
             val pid = (v.parent as? View)?.id ?: return@onId
             if (!bubblelessRootIds.contains(pid)) return@onId
             // No clearBg first: the frost replaces the fill anyway, and the stock drawable still holds the inset.
-            liquidFrostOnLayout(v, keepPadding = true)
+            liquidFrostOnLayout(v, keepPadding = true, optics = true)
         }
 
         // ── Search-in-chat ───────────────────────────────────────────────────────────────
@@ -970,7 +982,7 @@ object GlassHook {
         }
 
         // ── The add-status tile on the updates card ─────────────────────────────────────
-        // Stock is an opaque slab and a pane cannot go in, so the chips' frost; 16dp, the tile is too tall for a pill.
+        // Stock is an opaque slab and a pane cannot go in, so the chips' frost at a card's radius; the tile is too tall for a pill.
         val statusTileId = res.waId("status_tile_layout", pkg)
         if (statusTileId != 0) ViewThemeDispatcher.onId(statusTileId) { v ->
             frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(16f))
@@ -988,7 +1000,7 @@ object GlassHook {
                 frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(16f))
             }
         }
-        // 12dp matches the slab it replaces.
+        // The radius matches the slab it replaces.
         val adBannerId = res.waId("advertise_banner_container", pkg)
         if (adBannerId != 0) ViewThemeDispatcher.onId(adBannerId) { v ->
             frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(12f))
@@ -1054,13 +1066,12 @@ object GlassHook {
             val lp = col.layoutParams ?: return@onId
             if (lp.height != ViewGroup.LayoutParams.WRAP_CONTENT) {
                 lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
-                runCatching { lp.javaClass.getField("verticalBias").setFloat(lp, 0f) }
                 col.layoutParams = lp
             }
         }
 
         // ── Bottom sheets ──────────────────────────────────────────────────────────────
-        // Material's own container, so this covers every sheet; sheets live in their own window, hence screen coords.
+        // Material's own container, so this covers every sheet; sheets live in their own window, so screen coordinates.
         val sheetId = res.waId("design_bottom_sheet", pkg)
         if (sheetId != 0) ViewThemeDispatcher.onId(sheetId) { v ->
             // On layout, not attach: a sheet attaches at 0x0, so an attach hook alone sees nothing.
@@ -1212,7 +1223,7 @@ object GlassHook {
             runCatching { callMoreMenuGlass(v) }
                 .onFailure { XposedBridge.log("[$TAG] call more menu threw: $it") }
         }
-        // The header circles are WaImageButtons, not WDS; their fill is their own background drawable.
+        // Both the call header's WDSButtons and the Meta AI voice toolbar's WaImageButton fill from their own background, which is what is retinted here; send_message_btn is a bare frame and declines.
         for (n in listOf("minimize_btn", "participant_btn", "network_health_btn", "security_btn", "send_message_btn")) {
             val bid = res.waId(n, pkg)
             if (bid == 0) continue
@@ -1273,17 +1284,17 @@ object GlassHook {
         // The AppCompat SearchView gets its own path: it declines hosts that cannot carry a pane rather than clearing a fill it cannot replace.
         // search_bar_layout too: where search_view sits in a LinearLayout, that layout's parent can carry the pane.
         for (sn in listOf("search_view", "search_bar_layout")) {
-        val searchViewId = res.waId(sn, pkg)
-        if (searchViewId != 0) ViewThemeDispatcher.onId(searchViewId) { v ->
-            if (v.getTag(wdsBarTag) == null) {
-                v.setTag(wdsBarTag, true)
-                v.viewTreeObserver.addOnGlobalLayoutListener {
-                    runCatching { syncSearchViewGlass(v) }
+            val searchViewId = res.waId(sn, pkg)
+            if (searchViewId != 0) ViewThemeDispatcher.onId(searchViewId) { v ->
+                if (v.getTag(wdsBarTag) == null) {
+                    v.setTag(wdsBarTag, true)
+                    v.viewTreeObserver.addOnGlobalLayoutListener {
+                        runCatching { syncSearchViewGlass(v) }
+                    }
                 }
+                runCatching { syncSearchViewGlass(v) }
+                    .onFailure { logOnce("search view glass threw on $sn: $it") }
             }
-            runCatching { syncSearchViewGlass(v) }
-                .onFailure { logOnce("search view glass threw on $sn: $it") }
-        }
         }
 
         // The band under the photo: its fill is a FOREGROUND, it has no id, so its parent reaches it.
@@ -1341,7 +1352,7 @@ object GlassHook {
             }
             // No pane behind the toolbar; cleared so the blurred wallpaper itself is the frost.
             clearBg(v, "toolbar")
-            // Pad the toolbar's end or the pane clips at the screen edge; 8dp, tighter than the free-floating surfaces.
+            // Pad the toolbar's end or the pane clips at the screen edge; tighter than the free-floating surfaces.
             val side = (8 * v.resources.displayMetrics.density).toInt()
             if (v.paddingEnd != side) {
                 v.setPaddingRelative(v.paddingStart, v.paddingTop, side, v.paddingBottom)
@@ -1375,11 +1386,16 @@ object GlassHook {
             }
         }
         // ── The active tab pill ──────────────────────────────────────────────────────────
-        // The chips' treatment, never a pane: Material animates the pill by transform, the reaction bar's killer.
+        // A pane only for the droplet, and only because it reads the indicators' LAYOUT boxes; Material animates
+        // them by transform, and a pane following a transform is the reaction bar's killer. The stamp is the other path.
         val pillId = res.waId("navigation_bar_item_active_indicator_view", pkg)
         if (pillId != 0 && !tokenTabPillSet) {
-            // Forced: the menu view re-applies its own indicator drawable on every refresh, and that fires no layout.
-            ViewThemeDispatcher.onId(pillId) { v -> frostOnLayout(v, forceLabel = "active tab pill") }
+            // Forced in either path: the menu view re-applies its own indicator drawable on every refresh, and that fires no layout.
+            if (GlassNavDroplet.enabled) {
+                ViewThemeDispatcher.onId(pillId) { v -> GlassNavDroplet.arm(v) }
+            } else {
+                ViewThemeDispatcher.onId(pillId) { v -> frostOnLayout(v, forceLabel = "active tab pill") }
+            }
         }
 
         // A seam across the pill; hide it INVISIBLE so the nav's height does not change under us.
@@ -1529,7 +1545,7 @@ object GlassHook {
                 "audio_route_button", "camera_button", "mute_button", "more_button",
                 "screen_sharing_button", "minimize_btn", "participant_btn",
                 "calling_camera_switch_wds_button", "calling_effects_wds_button",
-                "network_health_btn", "security_btn", "send_message_btn",
+                "network_health_btn", "security_btn",
             ).map { app.resources.waId(it, app.packageName) }.filter { it != 0 }.toIntArray()
             val cls = WaIds.clazz(
                 app.classLoader, "com.whatsapp.ui.wds.components.button.WDSButton", "draft button frost",
@@ -1678,13 +1694,6 @@ object GlassHook {
         "com.whatsapp.favorites.",
     )
 
-
-    /* ── Contact info's collapsing header ───────────────────────────────────────────────── */
-
-
-    /* ── Contact info's section cards ───────────────────────────────────────────────────── */
-
-
     /** Draft button ids, resolved at install; the WDSButton hook compares against them per style pass. */
     private var draftBtnIds = IntArray(0)
     private var draftSendBtnIds = IntArray(0)
@@ -1694,51 +1703,6 @@ object GlassHook {
         ColorStateList.valueOf(0xFFFFFFFF.toInt())
     }
 
-
-    // Never add ConstraintLayout to canStack: an unconstrained index-0 child breaks the Broadcast page's + FAB.
-
-
-    // ── The conversation screen ────────────────────────────────────────────────────────
-    // Chrome only: pills behind the toolbar and compose row; bubbles are not panes, installBubbleGlass reskins them.
-
-
-    // ── Chat bubbles as glass ──────────────────────────────────────────────────────────
-    // The one surface that cannot be a pane: rows carry no ids and nothing hosts a child; see GlassBubbleDrawable.
-
-
-    /* Bubbles take the panes' tint. */
-
-
-    /* ── A selected chat row ────────────────────────────────────────────────────────────── */
-
-
-    /* ── A selected message row, measurements ──────────────────────────────────────────── */
-
-
-    /* ── The call screen ────────────────────────────────────────────────────────────────── */
-
-
-    /* ── The contact picker ─────────────────────────────────────────────────────────────── */
-
-
-    /* ── The voice-recording lock pill ──────────────────────────────────────────────────── */
-
-
-    /* ── A selected message row ─────────────────────────────────────────────────────────── */
-
-
-    // The corner arcs on the call-info header are the pane's own specular rim, not an elevation shadow.
-    // If they are ever unwanted the levers are specStrength/specPower/light1/light2, not elevation.
-
-
-    // ══ The search screen ══════════════════════════════════════════════════════════════════
-    // A vertical LinearLayout swapped into id/content: a toolbar margin reflows everything, so the panel lives in id/content via [bindPane].
-
-
-    // Fade views are registered where they are resolved, never lazily in the search path, which races the event itself.
-    // The FABs are deliberately not in this set: deferring their everyday hides by 200ms feels sticky.
-
-
     private var chatOpenHooked = false
 
     private fun ensureChatOpenTransition() {
@@ -1747,26 +1711,30 @@ object GlassHook {
         runCatching {
             // Framework fade ids; our own anim resources cannot resolve in WhatsApp's process.
             // No shared elements by design; requestFeature changes the whole process's window animations, so the removal is total.
-            XposedHelpers.findAndHookMethod(
-                Activity::class.java, "onCreate", Bundle::class.java,
-                object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        val a = param.thisObject as? Activity ?: return
-                        if (a.javaClass.name != "com.whatsapp.Conversation") return
-                        if (Build.VERSION.SDK_INT < 34) return
-                        runCatching {
-                            a.overrideActivityTransition(
-                                Activity.OVERRIDE_TRANSITION_OPEN,
-                                android.R.anim.fade_in, android.R.anim.fade_out,
-                            )
-                            a.overrideActivityTransition(
-                                Activity.OVERRIDE_TRANSITION_CLOSE,
-                                android.R.anim.fade_in, android.R.anim.fade_out,
-                            )
-                        }.onFailure { XposedBridge.log("[$TAG] chat fade refused: $it") }
-                    }
-                },
-            )
+            // Only where it can act: below 34 Activity.onCreate stays unhooked and undeoptimised.
+            if (Build.VERSION.SDK_INT >= 34) {
+                XposedHelpers.findAndHookMethod(
+                    Activity::class.java, "onCreate", Bundle::class.java,
+                    object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            val a = param.thisObject as? Activity ?: return
+                            if (a.javaClass.name != "com.whatsapp.Conversation") return
+                            // Kept here as well: lint reads the version test in this body, not at the registration.
+                            if (Build.VERSION.SDK_INT < 34) return
+                            runCatching {
+                                a.overrideActivityTransition(
+                                    Activity.OVERRIDE_TRANSITION_OPEN,
+                                    android.R.anim.fade_in, android.R.anim.fade_out,
+                                )
+                                a.overrideActivityTransition(
+                                    Activity.OVERRIDE_TRANSITION_CLOSE,
+                                    android.R.anim.fade_in, android.R.anim.fade_out,
+                                )
+                            }.onFailure { XposedBridge.log("[$TAG] chat fade refused: $it") }
+                        }
+                    },
+                )
+            }
             // API 31-33 have no overrideActivityTransition, so ask the old way around each edge.
             if (Build.VERSION.SDK_INT < 34) {
                 XposedHelpers.findAndHookMethod(

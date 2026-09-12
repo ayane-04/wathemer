@@ -27,12 +27,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -40,10 +37,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wathemer.app.R
+import com.wathemer.app.settings.components.BitmapIcon
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.prefs.BubbleStyles
 
-/* ── Bubble primitives with real text ──────────────────────── */
+// ── Bubble primitives with real text ────────────────────────
 
 /** Nine-patch or stock rounded-rect bubble bg; never tint colour artwork, mirrors BubbleShapes.tintUnlessColourArt. */
 private fun Modifier.bubbleBg(
@@ -136,7 +135,7 @@ private fun rememberBubbleShape(style: Int, dir: String): Drawable? {
     }
 }
 
-/** Single-bubble preview for the Custom-bubble screen: just the edited side, tinted shape, auto-contrast text. */
+/** Single-bubble preview for the Bubble shape screen: just the edited side, tinted shape, auto-contrast text. */
 @Composable
 fun SingleBubblePreview(isOutgoing: Boolean, style: Int, tint: Color, modifier: Modifier = Modifier) {
     val dir = if (isOutgoing) "outgoing" else "incoming"
@@ -195,47 +194,16 @@ private fun OutgoingBubble(bg: Color, textColor: Color, dateColor: Color, text: 
     }
 }
 
-/* ── Canvas-drawn glyphs ─────────────────────────────────── */
+// ── Glyphs ───────────────────────────────────────────────
 
 @Composable
-internal fun BackArrow(tint: Color) {
-    Canvas(modifier = Modifier.size(15.dp)) {
-        val w = size.width; val h = size.height
-        val s = 1.6.dp.toPx()
-        drawLine(tint, Offset(w * 0.18f, h * 0.5f), Offset(w * 0.85f, h * 0.5f), s)
-        drawLine(tint, Offset(w * 0.18f, h * 0.5f), Offset(w * 0.42f, h * 0.28f), s)
-        drawLine(tint, Offset(w * 0.18f, h * 0.5f), Offset(w * 0.42f, h * 0.72f), s)
-    }
-}
+internal fun BackArrow(tint: Color) = BitmapIcon(R.drawable.ic_ui_back, tint, 15.dp)
 
 @Composable
-internal fun VideoIcon(tint: Color) {
-    Canvas(modifier = Modifier.size(width = 17.dp, height = 12.dp)) {
-        val w = size.width; val h = size.height
-        val s = 1.3.dp.toPx()
-        drawRoundRect(
-            color = tint,
-            topLeft = Offset(0f, h * 0.15f),
-            size = Size(w * 0.66f, h * 0.7f),
-            cornerRadius = CornerRadius(1.5.dp.toPx()),
-            style = Stroke(s),
-        )
-        val triLeft = w * 0.68f
-        drawLine(tint, Offset(triLeft, h * 0.32f), Offset(w, h * 0.15f), s)
-        drawLine(tint, Offset(triLeft, h * 0.68f), Offset(w, h * 0.85f), s)
-        drawLine(tint, Offset(w, h * 0.15f), Offset(w, h * 0.85f), s)
-    }
-}
+internal fun VideoIcon(tint: Color) = BitmapIcon(R.drawable.ic_wa_video, tint, 16.dp)
 
 @Composable
-internal fun PhoneIcon(tint: Color) {
-    Canvas(modifier = Modifier.size(13.dp)) {
-        val w = size.width; val h = size.height
-        drawLine(tint, Offset(w * 0.22f, h * 0.78f), Offset(w * 0.78f, h * 0.22f), 3.dp.toPx())
-        drawCircle(tint, radius = 1.6.dp.toPx(), center = Offset(w * 0.22f, h * 0.78f))
-        drawCircle(tint, radius = 1.6.dp.toPx(), center = Offset(w * 0.78f, h * 0.22f))
-    }
-}
+internal fun PhoneIcon(tint: Color) = BitmapIcon(R.drawable.ic_wa_phone, tint, 13.dp)
 
 @Composable
 internal fun MenuDotsIcon(tint: Color) {
@@ -249,45 +217,13 @@ internal fun MenuDotsIcon(tint: Color) {
 }
 
 @Composable
-internal fun EmojiIcon(tint: Color) {
-    Canvas(modifier = Modifier.size(14.dp)) {
-        val w = size.width; val h = size.height
-        drawCircle(tint, radius = w * 0.46f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(1.dp.toPx()))
-        drawCircle(tint, radius = 0.8.dp.toPx(), center = Offset(w * 0.35f, h * 0.42f))
-        drawCircle(tint, radius = 0.8.dp.toPx(), center = Offset(w * 0.65f, h * 0.42f))
-        drawLine(tint, Offset(w * 0.32f, h * 0.62f), Offset(w * 0.5f, h * 0.72f), 1.dp.toPx())
-        drawLine(tint, Offset(w * 0.5f, h * 0.72f), Offset(w * 0.68f, h * 0.62f), 1.dp.toPx())
-    }
-}
+internal fun EmojiIcon(tint: Color) = BitmapIcon(R.drawable.ic_wa_emoji, tint, 14.dp)
 
 @Composable
-internal fun AttachIcon(tint: Color) {
-    Canvas(modifier = Modifier.size(13.dp)) {
-        val w = size.width; val h = size.height
-        val s = 1.2.dp.toPx()
-        drawLine(tint, Offset(w * 0.25f, h * 0.2f), Offset(w * 0.78f, h * 0.85f), s)
-        drawLine(tint, Offset(w * 0.25f, h * 0.4f), Offset(w * 0.65f, h * 0.92f), s)
-        drawLine(tint, Offset(w * 0.25f, h * 0.2f), Offset(w * 0.25f, h * 0.4f), s)
-    }
-}
+internal fun AttachIcon(tint: Color) = BitmapIcon(R.drawable.ic_wa_attach, tint, 13.dp)
 
 @Composable
-internal fun CameraIcon(tint: Color) {
-    Canvas(modifier = Modifier.size(13.dp)) {
-        val w = size.width; val h = size.height
-        drawRoundRect(
-            color = tint,
-            topLeft = Offset(w * 0.05f, h * 0.28f),
-            size = Size(w * 0.9f, h * 0.55f),
-            cornerRadius = CornerRadius(1.5.dp.toPx()),
-            style = Stroke(1.dp.toPx()),
-        )
-        drawLine(tint, Offset(w * 0.35f, h * 0.28f), Offset(w * 0.4f, h * 0.18f), 1.dp.toPx())
-        drawLine(tint, Offset(w * 0.4f, h * 0.18f), Offset(w * 0.6f, h * 0.18f), 1.dp.toPx())
-        drawLine(tint, Offset(w * 0.6f, h * 0.18f), Offset(w * 0.65f, h * 0.28f), 1.dp.toPx())
-        drawCircle(tint, radius = w * 0.16f, center = Offset(w * 0.5f, h * 0.56f), style = Stroke(1.dp.toPx()))
-    }
-}
+internal fun CameraIcon(tint: Color) = BitmapIcon(R.drawable.ic_wa_camera, tint, 13.dp)
 
 @Composable
 internal fun DoubleTick(tint: Color) {

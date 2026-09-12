@@ -8,10 +8,7 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * SharedPreferences wrapper for every setting the module reads. Key names are a cross-process ABI: add, never rename.
- * Writes must stay synchronous commit(), never apply(): a save has to be durable before the setter returns.
- */
+/** SharedPreferences wrapper for every setting the module reads; key names are a cross-process ABI (add, never rename), and writes stay synchronous commit(), never apply(), so a save is durable before the setter returns. */
 class Prefs(
     private val sp: SharedPreferences,
     private val context: Context,
@@ -19,7 +16,7 @@ class Prefs(
     val moduleStoreActive: Boolean = true,
 ) {
 
-    /** What [reconcileFreshInstall] did. After a reinstall the file can belong to the old UID with no write bit, hence writeFailed. */
+    /** What [reconcileFreshInstall] did; after a reinstall the file can belong to the old UID with no write bit, which is what writeFailed records. */
     data class InstallReconcile(
         val cleared: Int,
         val backup: String?,
@@ -36,7 +33,9 @@ class Prefs(
         if (!moduleStoreActive) {
             return InstallReconcile(cleared = 0, backup = null, writeFailed = false, deferred = true)
         }
-        val existing = runCatching { sp.all }.getOrNull().orEmpty()
+        val existing = runCatching { sp.all }
+            .onFailure { Log.w(TAG, "reconcile: sp.all threw, reading the store as empty: $it") }
+            .getOrNull().orEmpty()
         var backup: String? = null
         var writeFailed = false
         if (existing.isNotEmpty()) {
@@ -58,6 +57,7 @@ class Prefs(
         }
         // Marker only when the clear worked, or the unwritable-file case is suppressed forever.
         if (!writeFailed) runCatching { marker.writeText("1") }
+            .onFailure { Log.w(TAG, "reconcile: install.marker not written: $it") }
         return InstallReconcile(existing.size, backup, writeFailed)
     }
 
@@ -75,7 +75,12 @@ class Prefs(
             }
             if (new != old) { commitInt(key, new); changed++ }
         }
-        runCatching { sp.edit().putBoolean(KEY_MIGRATED_BUBBLE_STYLE_4, true).commit() }
+        commitChecked(
+            KEY_MIGRATED_BUBBLE_STYLE_4,
+            runCatching { sp.edit().putBoolean(KEY_MIGRATED_BUBBLE_STYLE_4, true).commit() }
+                .onFailure { Log.w(TAG, "bubble-style marker threw: $it") }
+                .getOrDefault(false),
+        )
         return changed
     }
 
@@ -185,6 +190,11 @@ class Prefs(
         get() = sp.getInt(KEY_GLASS_GAMMA, GlassDefaults.GAMMA)
         set(value) { commitInt(KEY_GLASS_GAMMA, value.coerceIn(30, 100)) }
 
+    /** Transmitted-backdrop saturation as a percent (100..200). 100 is off; blur and the dim drain colour and this puts it back. */
+    var glassSaturation: Int
+        get() = sp.getInt(KEY_GLASS_SATURATION, GlassDefaults.SATURATION)
+        set(value) { commitInt(KEY_GLASS_SATURATION, value.coerceIn(100, 200)) }
+
     /** Rim highlight strength 0..100, the alpha of the edge stroke. 0 is off and draws nothing. */
     var glassRim: Int
         get() = sp.getInt(KEY_GLASS_RIM, GlassDefaults.RIM)
@@ -200,10 +210,71 @@ class Prefs(
         get() = sp.getInt(KEY_GLASS_RIM_ANGLE, GlassDefaults.RIM_ANGLE)
         set(value) { commitInt(KEY_GLASS_RIM_ANGLE, value.coerceIn(0, 360)) }
 
+    /** The wallpaper copies follow the Backdrop blur slider, so bubbles, pills and menus blur with the panes. */
+    var glassOneBlur: Boolean
+        get() = sp.getBoolean(KEY_GLASS_ONE_BLUR, GlassDefaults.ONE_BLUR)
+        set(value) { commitBoolean(KEY_GLASS_ONE_BLUR, value) }
+
+    /** The small pills run the bubble program: the same rim light and lens as the bubbles beside them. */
+    var glassSmallOptics: Boolean
+        get() = sp.getBoolean(KEY_GLASS_SMALL_OPTICS, GlassDefaults.SMALL_OPTICS)
+        set(value) { commitBoolean(KEY_GLASS_SMALL_OPTICS, value) }
+
+    /** A menu's glass rises out of the button that opened it, drawn in the Activity's window. */
+    var glassPopupMorph: Boolean
+        get() = sp.getBoolean(KEY_GLASS_POPUP_MORPH, GlassDefaults.POPUP_MORPH)
+        set(value) { commitBoolean(KEY_GLASS_POPUP_MORPH, value) }
+
+    /** The selected chat row runs the bubble program: the same rim light and lens as the pills beside it. */
+    var glassRowOptics: Boolean
+        get() = sp.getBoolean(KEY_GLASS_ROW_OPTICS, GlassDefaults.ROW_OPTICS)
+        set(value) { commitBoolean(KEY_GLASS_ROW_OPTICS, value) }
+
     /** Grouped-message merging on glass bubbles: continuations flatten the top corner on the sender's side. */
     var glassBubbleMerge: Boolean
         get() = sp.getBoolean(KEY_GLASS_BUBBLE_MERGE, GlassDefaults.BUBBLE_MERGE)
         set(value) { commitBoolean(KEY_GLASS_BUBBLE_MERGE, value) }
+
+    /** The glass tint carries a whisper of the wallpaper's dominant hue; off is the neutral grey. */
+    var glassHuedTint: Boolean
+        get() = sp.getBoolean(KEY_GLASS_HUED_TINT, GlassDefaults.HUED_TINT)
+        set(value) { commitBoolean(KEY_GLASS_HUED_TINT, value) }
+
+    /** Shrink and blur the wallpaper copies in linear light, so bright detail spreads as light. */
+    var glassLinearCopy: Boolean
+        get() = sp.getBoolean(KEY_GLASS_LINEAR_COPY, GlassDefaults.LINEAR_COPY)
+        set(value) { commitBoolean(KEY_GLASS_LINEAR_COPY, value) }
+
+    /** Darkening on the very edge under the highlight as a percent (0..30); 0 is off. */
+    var glassEdgeShadow: Int
+        get() = sp.getInt(KEY_GLASS_EDGE_SHADOW, GlassDefaults.EDGE_SHADOW)
+        set(value) { commitInt(KEY_GLASS_EDGE_SHADOW, value.coerceIn(0, 30)) }
+
+    /** How strongly bright backdrop detail glows through the glass, as a percent (0..100); 0 is off. */
+    var glassGlow: Int
+        get() = sp.getInt(KEY_GLASS_GLOW, GlassDefaults.GLOW)
+        set(value) { commitInt(KEY_GLASS_GLOW, value.coerceIn(0, 100)) }
+
+    /** Sharp, bent wallpaper at the very edge of a pane, as a percent (0..100); 0 is off. */
+    var glassEdgeClarity: Int
+        get() = sp.getInt(KEY_GLASS_EDGE_CLARITY, GlassDefaults.EDGE_CLARITY)
+        set(value) { commitInt(KEY_GLASS_EDGE_CLARITY, value.coerceIn(0, 100)) }
+
+    /** Edge clarity on the panes that show live content too, at a pass per pane. */
+    var glassLiveClarity: Boolean
+        get() = sp.getBoolean(KEY_GLASS_LIVE_CLARITY, GlassDefaults.LIVE_CLARITY)
+        set(value) { commitBoolean(KEY_GLASS_LIVE_CLARITY, value) }
+
+    /** The active tab's pill flows between tabs instead of blinking across. */
+    var glassNavDroplet: Boolean
+        get() = sp.getBoolean(KEY_GLASS_NAV_DROPLET, GlassDefaults.NAV_DROPLET)
+        set(value) { commitBoolean(KEY_GLASS_NAV_DROPLET, value) }
+
+    /** Surfaces assemble their lens as they appear rather than arriving whole. */
+    var glassAssemble: Boolean
+        get() = sp.getBoolean(KEY_GLASS_ASSEMBLE, GlassDefaults.ASSEMBLE)
+        set(value) { commitBoolean(KEY_GLASS_ASSEMBLE, value) }
+
 
     /** Look for a new release when the settings app opens. Throttled to one request a day. */
     var updateAutoCheck: Boolean
@@ -322,7 +393,7 @@ class Prefs(
         recents = next
     }
 
-    /** Revert colours to stock by removing keys, never writing: any non-zero global re-arms the substitution. Structural prefs stay. */
+    /** Reset colours to stock by removing keys, never writing: any non-zero global re-arms the substitution. Structural prefs stay. */
     fun resetToStock() {
         val ok = sp.edit().apply {
             remove(KEY_PRIMARY); remove(KEY_BACKGROUND); remove(KEY_TEXT)
@@ -407,13 +478,13 @@ class Prefs(
     /** What [importSnapshotIfEmpty] found. [warn] is the case the UI must say out loud. */
     data class SnapshotImport(val imported: Int, val source: String?, val warn: Boolean)
 
-    /**
-     * One-shot restore into an empty store from the snapshot the previous build wrote. Must run
-     * before the reconcile: an uninstall leaves no snapshot, so the reconcile still clears there.
-     */
+    /** One-shot restore into an empty store from the snapshot the previous build wrote; it must run before the reconcile, because an uninstall leaves no snapshot and the reconcile still clears there. */
     fun importSnapshotIfEmpty(): SnapshotImport? {
         if (!moduleStoreActive) return null
-        if (runCatching { sp.all }.getOrNull().orEmpty().isNotEmpty()) return null
+        val current = runCatching { sp.all }
+            .onFailure { Log.w(TAG, "import: sp.all threw, reading the store as empty: $it") }
+            .getOrNull().orEmpty()
+        if (current.isNotEmpty()) return null
         val marker = File(context.filesDir, "install.marker")
         val source = listOf(EXPORT_FILE, "prefs_before_reset.json")
             .map { File(context.filesDir, it) }
@@ -448,6 +519,8 @@ class Prefs(
         if (ok) {
             // Renamed, not deleted: the bytes stay recoverable and the import can never run twice.
             runCatching { source.renameTo(File(context.filesDir, "${source.name}.imported")) }
+                .onSuccess { if (!it) Log.w(TAG, "importSnapshot: ${source.name} not renamed; an emptied store would import it again") }
+                .onFailure { Log.w(TAG, "importSnapshot: rename threw: $it") }
             Log.i(TAG, "importSnapshot: $wrote settings from ${source.name}")
         }
         return SnapshotImport(if (ok) wrote else 0, source.name, warn = !ok)
@@ -456,6 +529,7 @@ class Prefs(
     /** Logs failed commits: after a reinstall the store can belong to the old UID and writes silently vanish. */
     private fun commitChecked(key: String, ok: Boolean) {
         if (!ok) Log.w(TAG, "commit FAILED for $key: the settings file is not writable by this UID")
+        else if (key !in NO_RESTART_KEYS) onWrite?.invoke()
     }
 
     private fun commitInt(key: String, value: Int) {
@@ -490,6 +564,15 @@ class Prefs(
 
     companion object {
         private const val TAG = "WaThemer.Prefs"
+
+        /** Every successful write reports here; the settings app uses it to know a restart is owed. */
+        var onWrite: (() -> Unit)? = null
+
+        /** Writes here owe WhatsApp no restart: this app alone reads them, or the hook reads them as a chat opens. */
+        val NO_RESTART_KEYS = setOf(
+            KEY_UPDATE_AUTO_CHECK, KEY_UPDATE_LAST_CHECK, KEY_UPDATE_VERSION, KEY_UPDATE_NOTES, KEY_UPDATE_URL,
+            KEY_UPDATE_ASSET, KEY_UPDATE_SIZE, KEY_RECENTS, KEY_CHAT_WALLPAPERS, KEY_CHAT_WALLPAPER_SEQ,
+        )
 
         const val FILE = "com.wathemer.app_prefs"
 
@@ -585,9 +668,9 @@ class Prefs(
         const val QUOTE_BAR_COLOR       = "quote_bar_color"
         const val QUOTE_BG_COLOR        = "quote_bg_color"
         const val QUOTE_TEXT_COLOR      = "quote_text_color"
-        // Misc: the "Other misc settings" Chat screen (5 tokens).
-        const val TICK_SEEN_COLOR       = "tick_seen_color"       // blue read ✓✓
-        const val TICK_UNSEEN_COLOR     = "tick_unseen_color"     // gray sent ✓ + delivered ✓✓
+        // Misc: the Chats page's Misc group (5 tokens).
+        const val TICK_SEEN_COLOR       = "tick_seen_color"       // the blue double tick of a read message
+        const val TICK_UNSEEN_COLOR     = "tick_unseen_color"     // the grey single tick of sent and double tick of delivered
         const val FORWARDED_LABEL_COLOR = "forwarded_label_color" // conversation_row_top_text_attribute
         const val MEDIA_CAPTION_COLOR   = "media_caption_color"   // caption (image/video bubbles)
         const val LINK_COLOR            = "link_color"            // clickable links, via the span base's updateDrawState hook
@@ -621,10 +704,23 @@ class Prefs(
         const val KEY_GLASS_BEVEL    = "glass_bevel"
         const val KEY_GLASS_RADIUS   = "glass_radius"
         const val KEY_GLASS_GAMMA    = "glass_gamma"
+        const val KEY_GLASS_SATURATION = "glass_saturation"
         const val KEY_GLASS_RIM      = "glass_rim"
         const val KEY_GLASS_RIM_WIDTH = "glass_rim_width"
         const val KEY_GLASS_RIM_ANGLE = "glass_rim_angle"
         const val KEY_GLASS_BUBBLE_MERGE = "glass_bubble_merge"
+        const val KEY_GLASS_HUED_TINT = "glass_hued_tint"
+        const val KEY_GLASS_LINEAR_COPY = "glass_linear_copy"
+        const val KEY_GLASS_EDGE_SHADOW = "glass_edge_shadow"
+        const val KEY_GLASS_GLOW = "glass_glow"
+        const val KEY_GLASS_EDGE_CLARITY = "glass_edge_clarity"
+        const val KEY_GLASS_LIVE_CLARITY = "glass_live_clarity"
+        const val KEY_GLASS_NAV_DROPLET = "glass_nav_droplet"
+        const val KEY_GLASS_ASSEMBLE = "glass_assemble"
+        const val KEY_GLASS_ONE_BLUR = "glass_one_blur"
+        const val KEY_GLASS_SMALL_OPTICS = "glass_small_optics"
+        const val KEY_GLASS_POPUP_MORPH = "glass_popup_morph"
+        const val KEY_GLASS_ROW_OPTICS = "glass_row_optics"
 
         // ── Updates ───────────────────────────────────
         // Settings-app only; the hook never reads these and a theme file can never write them.
@@ -688,7 +784,10 @@ class Prefs(
         val THEME_GLASS_KEYS: List<String> = listOf(
             KEY_GLASS_BLUR, KEY_GLASS_TINT, KEY_GLASS_DISPLACE, KEY_GLASS_BEVEL, KEY_GLASS_RADIUS,
             KEY_GLASS_GAMMA, KEY_GLASS_RIM, KEY_GLASS_RIM_WIDTH, KEY_GLASS_RIM_ANGLE,
-            KEY_GLASS_BUBBLE_MERGE,
+            KEY_GLASS_BUBBLE_MERGE, KEY_GLASS_SATURATION,
+            KEY_GLASS_HUED_TINT, KEY_GLASS_LINEAR_COPY, KEY_GLASS_EDGE_SHADOW, KEY_GLASS_GLOW, KEY_GLASS_EDGE_CLARITY,
+            KEY_GLASS_LIVE_CLARITY, KEY_GLASS_NAV_DROPLET, KEY_GLASS_ASSEMBLE,
+            KEY_GLASS_ONE_BLUR, KEY_GLASS_SMALL_OPTICS, KEY_GLASS_POPUP_MORPH, KEY_GLASS_ROW_OPTICS,
         )
 
         /** Every key an imported theme may touch. A key missing here is unreachable from a theme file, which is the whole guarantee. */

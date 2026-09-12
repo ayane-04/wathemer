@@ -25,12 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -38,80 +34,25 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wathemer.app.R
+import com.wathemer.app.settings.components.BitmapIcon
 import com.wathemer.app.settings.prefs.Prefs
-import kotlin.math.cos
-import kotlin.math.sin
 
-/* ── Mock icons ──────────────────────────────────────────────────────────
- * Canvas idiom like the rest of the file; emoji ignore the tint and render at their own weight. */
-
+// ── Mock icons ──────────────────────────────────────────────────────────
+// Generated bitmaps tinted at draw time; the dots and ticks stay drawn.
 @Composable
-private fun SendArrow(tint: Color) {
-    Canvas(modifier = Modifier.size(15.dp)) {
-        val w = size.width; val h = size.height
-        val s = 1.8.dp.toPx()
-        drawLine(tint, Offset(w * 0.14f, h * 0.5f), Offset(w * 0.84f, h * 0.5f), s)
-        drawLine(tint, Offset(w * 0.84f, h * 0.5f), Offset(w * 0.56f, h * 0.24f), s)
-        drawLine(tint, Offset(w * 0.84f, h * 0.5f), Offset(w * 0.56f, h * 0.76f), s)
-    }
-}
-
-@Composable
-private fun CrossIcon(tint: Color) {
-    Canvas(modifier = Modifier.size(13.dp)) {
-        val w = size.width; val h = size.height
-        val s = 1.6.dp.toPx()
-        drawLine(tint, Offset(w * 0.2f, h * 0.2f), Offset(w * 0.8f, h * 0.8f), s)
-        drawLine(tint, Offset(w * 0.8f, h * 0.2f), Offset(w * 0.2f, h * 0.8f), s)
-    }
-}
+private fun SendArrow(tint: Color) = BitmapIcon(R.drawable.ic_wa_send, tint, 15.dp)
 
 /** Reply / forward arrow. [mirrored] flips it for "forwarded". */
 @Composable
-private fun ReplyArrow(tint: Color, size: Dp = 13.dp, mirrored: Boolean = false) {
-    Canvas(modifier = Modifier.size(size).scale(if (mirrored) -1f else 1f, 1f)) {
-        val w = this.size.width; val h = this.size.height
-        val s = 1.5.dp.toPx()
-        drawLine(tint, Offset(w * 0.86f, h * 0.74f), Offset(w * 0.40f, h * 0.74f), s)
-        drawLine(tint, Offset(w * 0.40f, h * 0.74f), Offset(w * 0.40f, h * 0.30f), s)
-        drawLine(tint, Offset(w * 0.40f, h * 0.30f), Offset(w * 0.16f, h * 0.48f), s)
-        drawLine(tint, Offset(w * 0.40f, h * 0.30f), Offset(w * 0.64f, h * 0.48f), s)
-    }
-}
+private fun ReplyArrow(tint: Color, size: Dp = 13.dp, mirrored: Boolean = false) =
+    BitmapIcon(R.drawable.ic_wa_reply, tint, size, Modifier.scale(if (mirrored) -1f else 1f, 1f))
 
 @Composable
-private fun StarIcon(tint: Color) {
-    Canvas(modifier = Modifier.size(13.dp)) {
-        val w = size.width; val h = size.height
-        val path = Path()
-        val cx = w / 2f; val cy = h * 0.54f
-        val outer = w * 0.46f; val inner = outer * 0.42f
-        for (i in 0 until 10) {
-            val r = if (i % 2 == 0) outer else inner
-            val a = (-90.0 + i * 36.0) * Math.PI / 180.0
-            val x = cx + (r * cos(a)).toFloat()
-            val y = cy + (r * sin(a)).toFloat()
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        path.close()
-        drawPath(path, tint)
-    }
-}
+private fun StarIcon(tint: Color) = BitmapIcon(R.drawable.ic_wa_star, tint, 13.dp)
 
 @Composable
-private fun TrashIcon(tint: Color) {
-    Canvas(modifier = Modifier.size(13.dp)) {
-        val w = size.width; val h = size.height
-        val s = 1.3.dp.toPx()
-        drawLine(tint, Offset(w * 0.16f, h * 0.26f), Offset(w * 0.84f, h * 0.26f), s)
-        drawLine(tint, Offset(w * 0.40f, h * 0.26f), Offset(w * 0.40f, h * 0.16f), s)
-        drawLine(tint, Offset(w * 0.60f, h * 0.26f), Offset(w * 0.60f, h * 0.16f), s)
-        drawLine(tint, Offset(w * 0.40f, h * 0.16f), Offset(w * 0.60f, h * 0.16f), s)
-        drawLine(tint, Offset(w * 0.24f, h * 0.26f), Offset(w * 0.30f, h * 0.86f), s)
-        drawLine(tint, Offset(w * 0.76f, h * 0.26f), Offset(w * 0.70f, h * 0.86f), s)
-        drawLine(tint, Offset(w * 0.30f, h * 0.86f), Offset(w * 0.70f, h * 0.86f), s)
-    }
-}
+private fun TrashIcon(tint: Color) = BitmapIcon(R.drawable.ic_wa_trash, tint, 13.dp)
 
 @Composable
 private fun OverflowIcon(tint: Color) {
@@ -124,28 +65,11 @@ private fun OverflowIcon(tint: Color) {
     }
 }
 
-/** Neutral photo placeholder: a framed mountain, the universal "image" mark. */
+/** Neutral photo placeholder: the framed picture, the universal "image" mark. */
 @Composable
-private fun PhotoPlaceholder(tint: Color) {
-    Canvas(modifier = Modifier.size(34.dp)) {
-        val w = size.width; val h = size.height
-        val s = 1.5.dp.toPx()
-        drawRoundRect(
-            color = tint,
-            topLeft = Offset(w * 0.08f, h * 0.16f),
-            size = Size(w * 0.84f, h * 0.68f),
-            cornerRadius = CornerRadius(2.dp.toPx()),
-            style = Stroke(s),
-        )
-        drawCircle(tint, w * 0.06f, Offset(w * 0.30f, h * 0.34f))
-        drawLine(tint, Offset(w * 0.14f, h * 0.74f), Offset(w * 0.40f, h * 0.46f), s)
-        drawLine(tint, Offset(w * 0.40f, h * 0.46f), Offset(w * 0.60f, h * 0.66f), s)
-        drawLine(tint, Offset(w * 0.60f, h * 0.66f), Offset(w * 0.72f, h * 0.55f), s)
-        drawLine(tint, Offset(w * 0.72f, h * 0.55f), Offset(w * 0.86f, h * 0.74f), s)
-    }
-}
+private fun PhotoPlaceholder(tint: Color) = BitmapIcon(R.drawable.ic_row_wallpaper, tint, 34.dp)
 
-/** Fine-grained scope. All home sub-pages share HomeFull. */
+/** Fine-grained for the chat scopes; every surface that previews Home shares HomeFull. */
 sealed class WaPreviewKind {
     object HomeFull : WaPreviewKind()
 
@@ -153,24 +77,9 @@ sealed class WaPreviewKind {
     object ChatHeader : WaPreviewKind()
     object ChatInputBar : WaPreviewKind()
     object ChatQuote : WaPreviewKind()
-    /** Demonstrates the 5 misc tokens (seen tick + delivered tick + forwarded label + media caption + link color). */
     object ChatMisc : WaPreviewKind()
 
     object Selection : WaPreviewKind()
-}
-
-// Backwards-compat enum for call sites that pass a tab instead of a kind.
-enum class WaPreviewTab { Home, Selection }
-private fun WaPreviewTab.toKind(): WaPreviewKind = when (this) {
-    WaPreviewTab.Home -> WaPreviewKind.HomeFull
-    WaPreviewTab.Selection -> WaPreviewKind.Selection
-}
-
-/** Legacy entry: delegates to [LocalThemeSnapshot] so call sites that pass prefs still get live updates. */
-@Composable
-fun WaPreview(tab: WaPreviewTab, prefs: Prefs, modifier: Modifier = Modifier) {
-    @Suppress("UNUSED_PARAMETER") prefs
-    WaPreview(tab.toKind(), LocalThemeSnapshot.current.value, modifier)
 }
 
 /** Legacy entry: delegates to [LocalThemeSnapshot] for live updates. */
@@ -194,9 +103,7 @@ fun WaPreview(kind: WaPreviewKind, snapshot: ThemeSnapshot, modifier: Modifier =
     }
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Chat scopes: derive palette from snapshot fields with fallback cascade
-   ───────────────────────────────────────────────────────────────────────────── */
+// ── Chat scopes: derive palette from snapshot fields with fallback cascade ───────────────────
 
 @Composable
 private fun BubblesScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
@@ -333,26 +240,31 @@ private fun SelectionScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
 
     Column(modifier = modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))) {
         Row(
-            modifier = Modifier.fillMaxWidth().background(amBg).padding(horizontal = 12.dp, vertical = 9.dp),
+            modifier = Modifier.fillMaxWidth().background(amBg).padding(horizontal = 10.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Close glyph sits on a disc of its ripple colour, so the token is actually visible.
+            // The back glyph sits on a disc of its ripple colour, so the token is actually visible.
             Box(
                 modifier = Modifier
                     .background(amRipple.copy(alpha = 0.22f), CircleShape)
-                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                    .padding(6.dp),
             ) {
-                CrossIcon(amIcons)
+                BackArrow(amIcons)
             }
-            Spacer(Modifier.size(14.dp))
-            Text("2", color = amTitle, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            ReplyArrow(amIcons)
             Spacer(Modifier.size(12.dp))
-            StarIcon(amIcons)
-            Spacer(Modifier.size(12.dp))
-            TrashIcon(amIcons)
-            Spacer(Modifier.size(10.dp))
-            OverflowIcon(amIcons)
+            Text("1", color = amTitle, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Row(
+                modifier = Modifier
+                    .background(elevate(snap.actionModeBg.takeIf { it != 0 } ?: snap.background, 0.10f), RoundedCornerShape(50))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                StarIcon(amIcons)
+                TrashIcon(amIcons)
+                ReplyArrow(amIcons)
+                OverflowIcon(amIcons)
+            }
         }
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             ChatWallpaper(baseColor = pal.bg, doodleColor = pal.text, snap = snap)
@@ -369,7 +281,7 @@ private fun SelectionScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
     }
 }
 
-/** Demonstrates the 5 "Other misc settings" tokens, one bubble each. */
+/** Demonstrates the five Misc tokens, one bubble each. */
 @Composable
 private fun MiscScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
     val pal = chatPalette(snap)
@@ -398,7 +310,7 @@ private fun ForwardedIncomingBubble(pal: ChatPalette, body: String, time: String
     Box(
         modifier = Modifier
             .widthIn(min = 90.dp, max = 240.dp)
-            .background(pal.leftBg, RoundedCornerShape(topStart = 3.dp, topEnd = 10.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
+            .background(pal.leftBg, RoundedCornerShape(14.dp))
             .padding(horizontal = 9.dp, vertical = 5.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -418,7 +330,7 @@ private fun CaptionedMediaBubble(pal: ChatPalette, caption: String, time: String
     Box(
         modifier = Modifier
             .widthIn(min = 110.dp, max = 240.dp)
-            .background(pal.rightBg, RoundedCornerShape(topStart = 10.dp, topEnd = 3.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
+            .background(pal.rightBg, RoundedCornerShape(14.dp))
             .padding(3.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -448,7 +360,7 @@ private fun LinkBubble(pal: ChatPalette, prefix: String, url: String, time: Stri
     Box(
         modifier = Modifier
             .widthIn(min = 90.dp, max = 240.dp)
-            .background(pal.leftBg, RoundedCornerShape(topStart = 3.dp, topEnd = 10.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
+            .background(pal.leftBg, RoundedCornerShape(14.dp))
             .padding(horizontal = 9.dp, vertical = 5.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -478,9 +390,7 @@ private fun linkStyledText(
     return b.toAnnotatedString()
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Shared chat palette + primitives
-   ───────────────────────────────────────────────────────────────────────────── */
+// ── Shared chat palette + primitives ─────────────────────────────────────────────────────────
 
 internal data class ChatPalette(
     val bg: Color, val surface: Color, val accent: Color, val onAccent: Color,
@@ -495,7 +405,7 @@ internal data class ChatPalette(
 )
 
 @Composable
-internal fun chatPalette(snap: ThemeSnapshot): ChatPalette {
+private fun chatPalette(snap: ThemeSnapshot): ChatPalette {
     val bg = Color(snap.background)
     val accent = Color(snap.primary)
     val text = Color(snap.text)
@@ -553,43 +463,41 @@ private fun DatePill(surface: Color, subtle: Color) {
 internal enum class TickKind { Delivered, Read }
 
 @Composable
-internal fun TickGlyph(kind: TickKind, defaultColor: Color, accent: Color) {
+private fun TickGlyph(kind: TickKind, defaultColor: Color, accent: Color) {
     val color = if (kind == TickKind.Read) accent else defaultColor
     DoubleTick(color)
 }
 
 @Composable
 internal fun IncomingBubble(pal: ChatPalette, text: String, time: String) {
-    Box(
+    Row(
         modifier = Modifier
             .widthIn(min = 50.dp, max = 240.dp)
-            .background(pal.leftBg, RoundedCornerShape(topStart = 3.dp, topEnd = 10.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
-            .padding(horizontal = 9.dp, vertical = 5.dp),
+            .background(pal.leftBg, RoundedCornerShape(14.dp))
+            .padding(start = 11.dp, end = 9.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.Bottom,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text(text, color = pal.leftText, fontSize = 11.sp, lineHeight = 14.sp)
-            Text(time, color = pal.leftDate, fontSize = 8.sp, modifier = Modifier.align(Alignment.End).padding(top = 1.dp))
-        }
+        Text(text, color = pal.leftText, fontSize = 11.sp, lineHeight = 14.sp)
+        Spacer(Modifier.size(8.dp))
+        Text(time, color = pal.leftDate, fontSize = 8.sp)
     }
 }
 
 @Composable
 internal fun OutgoingBubble(pal: ChatPalette, text: String, time: String, tickKind: TickKind = TickKind.Delivered) {
-    Box(
+    Row(
         modifier = Modifier
             .widthIn(min = 50.dp, max = 240.dp)
-            .background(pal.rightBg, RoundedCornerShape(topStart = 10.dp, topEnd = 3.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
-            .padding(horizontal = 9.dp, vertical = 5.dp),
+            .background(pal.rightBg, RoundedCornerShape(14.dp))
+            .padding(start = 11.dp, end = 9.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.Bottom,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text(text, color = pal.rightText, fontSize = 11.sp, lineHeight = 14.sp)
-            Row(modifier = Modifier.align(Alignment.End).padding(top = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(time, color = pal.rightDate, fontSize = 8.sp)
-                Spacer(Modifier.size(4.dp))
-                // Read = tickSeen, Delivered and Sent = tickUnseen
-                TickGlyph(tickKind, defaultColor = pal.tickUnseen, accent = pal.tickSeen)
-            }
-        }
+        Text(text, color = pal.rightText, fontSize = 11.sp, lineHeight = 14.sp)
+        Spacer(Modifier.size(8.dp))
+        Text(time, color = pal.rightDate, fontSize = 8.sp)
+        Spacer(Modifier.size(4.dp))
+        // Read = tickSeen, Delivered and Sent = tickUnseen
+        TickGlyph(tickKind, defaultColor = pal.tickUnseen, accent = pal.tickSeen)
     }
 }
 
@@ -598,7 +506,7 @@ private fun IncomingQuotedBubble(pal: ChatPalette, quoteAuthor: String, quoteTex
     Box(
         modifier = Modifier
             .widthIn(min = 90.dp, max = 250.dp)
-            .background(pal.leftBg, RoundedCornerShape(topStart = 3.dp, topEnd = 10.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
+            .background(pal.leftBg, RoundedCornerShape(14.dp))
             .padding(4.dp),
     ) {
         Column {
@@ -628,7 +536,7 @@ private fun OutgoingQuotedBubble(pal: ChatPalette, quoteAuthor: String, quoteTex
     Box(
         modifier = Modifier
             .widthIn(min = 90.dp, max = 250.dp)
-            .background(pal.rightBg, RoundedCornerShape(topStart = 10.dp, topEnd = 3.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
+            .background(pal.rightBg, RoundedCornerShape(14.dp))
             .padding(4.dp),
     ) {
         Column {
@@ -660,7 +568,7 @@ private fun OutgoingQuotedBubble(pal: ChatPalette, quoteAuthor: String, quoteTex
 private fun TypingBubble(pal: ChatPalette) {
     Box(
         modifier = Modifier
-            .background(pal.leftBg, RoundedCornerShape(topStart = 3.dp, topEnd = 10.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
+            .background(pal.leftBg, RoundedCornerShape(14.dp))
             .padding(horizontal = 10.dp, vertical = 9.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -693,9 +601,7 @@ private fun HeaderRow(pal: ChatPalette, bg: Color, icons: Color, title: Color, s
     }
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Snapshot -> Tokens (for WaHomePreview which still uses the Tokens facade)
-   ───────────────────────────────────────────────────────────────────────────── */
+// ── Snapshot -> Tokens (for WaHomePreview which still uses the Tokens facade) ────────────────
 
 internal fun ThemeSnapshot.toTokens(): Tokens = Tokens(
     background = background,

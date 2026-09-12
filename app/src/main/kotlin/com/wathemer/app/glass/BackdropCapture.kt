@@ -9,12 +9,10 @@ import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.ViewParent
+import kotlin.math.abs
 import kotlin.math.ceil
 
-/**
- * Captures the content behind a glass view into a [RenderNode], blurred. A source that holds this
- * pane, directly or through another pane's capture, is refused per capture: the render tree would loop.
- */
+/** Captures the content behind a glass view into a [RenderNode], blurred; a source that holds this pane, directly or through another capture, is refused, or the render tree would loop. */
 class BackdropCapture(
     private val host: View,
     private val params: GlassParams,
@@ -31,10 +29,7 @@ class BackdropCapture(
         private fun sigmaOf(radiusPx: Float): Float = if (radiusPx > 0f) 0.57735f * radiusPx + 0.5f else 0f
         private fun radiusOf(sigma: Float): Float = if (sigma > 0.5f) (sigma - 0.5f) / 0.57735f else 0f
 
-        /**
-         * True only while live views are drawn into a pane's own RenderNode: a ripple drawn there arms its
-         * animator against that node, and the frame's real draw throws "Target already set!".
-         */
+        /** True only while live views draw into a pane's own RenderNode: a ripple drawn there arms its animator against that node, and the frame's real draw throws "Target already set!". */
         @Volatile
         @JvmStatic
         var capturing: Boolean = false
@@ -48,6 +43,17 @@ class BackdropCapture(
         /** Set by the hook side so a refusal reaches the module log; the engine has no Xposed. */
         @JvmStatic
         var onRefused: ((String) -> Unit)? = null
+
+        /** A live pane with a rim captures at this divisor instead of its own, so the rim has half-resolution content to bend. */
+        private const val RIM_DOWNSAMPLE = 2f
+
+        /** Panes below this smaller side gain nothing from a rim and would pay a whole pass for it. */
+        private const val RIM_MIN_SIDE_DP = 70f
+
+        /** The live-pane rim costs an offscreen layer and a pass per pane; the hook turns it on only when asked. */
+        @JvmStatic
+        var liveRim: Boolean = false
+
     }
 
     /** The subtree to blur; null disables capture. Not checked here: wiring runs before the host has a parent. */
@@ -62,12 +68,23 @@ class BackdropCapture(
     var hasContent: Boolean = false
         private set
 
-    /**
-     * [node] keeps the capture sharp: refraction can only bend detail that still exists.
-     * [glassNode] redraws it at the divisor effectScaleFor picks and carries the shader, blur chained after.
-     */
+    /** [node] keeps the capture sharp, since refraction can only bend detail that still exists; [glassNode] redraws it at effectScaleFor's divisor and carries the shader with the blur chained after. */
     val node = RenderNode("wathemer-backdrop")
     private val glassNode = RenderNode("wathemer-glass")
+
+    /** The band from the sharp node for a pane whose backdrop is live content; the wallpaper-only panes take theirs from the bitmap. */
+    private val rimNode = RenderNode("wathemer-rim")
+    private var rimHasContent = false
+    private var rimW = 0
+    private var rimH = 0
+    private var rimDetail = -1f
+    private var rimScale = -1f
+    private var rimWidth = -1
+    private var rimHeight = -1
+
+    private val rimShader: RuntimeShader? by lazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) GlassShader.newRimShader() else null
+    }
 
     private val hostLocation = IntArray(2)
     private val sourceLocation = IntArray(2)
@@ -89,6 +106,10 @@ class BackdropCapture(
     private var effectWidth = -1
     private var effectHeight = -1
     private var effectRefracting = false
+    private var effectLens = 1f
+
+    /** Thins the glass while a pane assembles; this rebuilds the chain, so only an animation may move it. */
+    private var lensScale = 1f
     var effectDirty: Boolean = true
 
     /** This surface's own transmission shader. Never shared; see GlassShader's kdoc. */
@@ -108,9 +129,10 @@ class BackdropCapture(
         if (src != null && !src.isLaidOut) return false
         if (host.width <= 0 || host.height <= 0) return false
 
-        val scale = params.downsample
-        val w = ceil(host.width / scale).toInt().coerceAtLeast(1)
-        val h = ceil(host.height / scale).toInt().coerceAtLeast(1)
+        // A live pane with a rim captures finer, so the band has something to bend; the frost path is unchanged by it.
+        val rimLive = liveRim && src != null && params.detail > 0f && params.refractionEnabled &&
+            minOf(host.width, host.height) >= RIM_MIN_SIDE_DP * params.density && rimShader != null
+        val scale = if (rimLive) minOf(params.downsample, RIM_DOWNSAMPLE) else params.downsample
         val es = effectScaleFor()
 
         // Screen, not window, coordinates: a bottom sheet is its own window with its own origin.
@@ -129,7 +151,10 @@ class BackdropCapture(
             }
         }
 
-        logGeometryOnce(w, h, dx, dy, src, es)
+        val w = ceil(host.width / scale).toInt().coerceAtLeast(1)
+        val h = ceil(host.height / scale).toInt().coerceAtLeast(1)
+
+        logGeometryOnce(w, h, dx, dy, src, es, scale)
 
         node.setPosition(0, 0, w, h)
         val canvas = node.beginRecording(w, h)
@@ -170,7 +195,10 @@ class BackdropCapture(
             node.endRecording()
         }
 
+        // Read before the main effect resets it: the rim effect keys on the same staleness.
+        val dirty = effectDirty
         applyEffectIfNeeded(scale, w, h, es)
+        applyRimEffectIfNeeded(rimLive, scale, w, h, dirty)
 
         // Second pass at 1/es: redraw the capture, refract, then blur; order is the whole point.
         val fw = ceil(host.width / es).toInt().coerceAtLeast(1)
@@ -187,14 +215,71 @@ class BackdropCapture(
             glassNode.endRecording()
         }
 
+        if (rimLive) {
+            // The sharp node again, bent by the rim program at the capture's own divisor; the plateau returns nothing.
+            val rw = ceil(host.width / scale).toInt().coerceAtLeast(1)
+            val rh = ceil(host.height / scale).toInt().coerceAtLeast(1)
+            rimW = rw
+            rimH = rh
+            rimNode.setPosition(0, 0, rw, rh)
+            val rc = rimNode.beginRecording(rw, rh)
+            try {
+                rc.drawRenderNode(node)
+            } finally {
+                rimNode.endRecording()
+            }
+            rimHasContent = true
+        } else {
+            rimHasContent = false
+        }
+
         hasContent = true
         return true
+    }
+
+    /** The rim node's program, rebuilt on the main effect's staleness plus a detail change. */
+    private fun applyRimEffectIfNeeded(rimLive: Boolean, scale: Float, w: Int, h: Int, dirty: Boolean) {
+        if (!rimLive) {
+            if (rimScale >= 0f) {
+                rimNode.setRenderEffect(null)
+                rimScale = -1f
+            }
+            return
+        }
+        val rs = rimShader ?: return
+        val detail = params.detail
+        if (!dirty && scale == rimScale && w == rimWidth && h == rimHeight && detail == rimDetail) return
+        rimScale = scale
+        rimWidth = w
+        rimHeight = h
+        rimDetail = detail
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // The capture carries the dim already, so the program dims nothing; the band is placed at the node's divisor.
+            GlassShader.applyRimUniforms(rs, params, host.width, host.height, 0f, detail, scale)
+            rimNode.setRenderEffect(RenderEffect.createRuntimeShaderEffect(rs, "content"))
+        }
+    }
+
+    /** The bend grows in with the material. Unlike the alpha this rebuilds the chain, so it rides an animator. */
+    fun setLensScale(v: Float) {
+        val s = v.coerceIn(0.02f, 1f)
+        if (s == lensScale) return
+        // A step below a fiftieth is invisible and would buy a rebuild; the settled value is always taken.
+        if (s != 1f && abs(s - lensScale) < 0.02f) return
+        lensScale = s
+        effectDirty = true
     }
 
     /** Scales only the transmitted image. A display-list property, so the effect chain is never rebuilt for it. */
     fun setContentAlpha(a: Float) {
         val v = a.coerceIn(0f, 1f)
         if (glassNode.alpha != v) glassNode.alpha = v
+    }
+
+    /** The rim follows materialize itself, not the content's boosted curve, so both rim paths assemble alike. */
+    fun setRimAlpha(a: Float) {
+        val v = a.coerceIn(0f, 1f)
+        if (rimNode.alpha != v) rimNode.alpha = v
     }
 
     /** Draw [glassNode] at [host]'s size; it carries both effects, so no path may skip it. */
@@ -207,9 +292,16 @@ class BackdropCapture(
             canvas.drawRenderNode(glassNode)
         } else {
             val save = canvas.save()
-            // The node's own size back over the host, never the divisor: the two differ by the ceil.
+            // The node's own size, never the divisor: the two differ by the ceil.
             canvas.scale(host.width.toFloat() / fw, host.height.toFloat() / fh)
             canvas.drawRenderNode(glassNode)
+            canvas.restoreToCount(save)
+        }
+        // The rim over the frost and under the light pass, at the capture's own size.
+        if (rimHasContent && rimW > 0 && rimH > 0) {
+            val save = canvas.save()
+            canvas.scale(host.width.toFloat() / rimW, host.height.toFloat() / rimH)
+            canvas.drawRenderNode(rimNode)
             canvas.restoreToCount(save)
         }
     }
@@ -217,6 +309,9 @@ class BackdropCapture(
     fun release() {
         node.discardDisplayList()
         glassNode.discardDisplayList()
+        rimNode.discardDisplayList()
+        rimHasContent = false
+        rimScale = -1f
         hasContent = false
         effectRadius = -1f
         effectDirty = true
@@ -230,7 +325,7 @@ class BackdropCapture(
     private var loggedSrcId = 0
     private var lastUnderlayDy = 0
 
-    private fun logGeometryOnce(w: Int, h: Int, dx: Float, dy: Float, src: View?, es: Float) {
+    private fun logGeometryOnce(w: Int, h: Int, dx: Float, dy: Float, src: View?, es: Float, scale: Float) {
         val srcId = System.identityHashCode(src)
         if (w == loggedW && h == loggedH && host.width == loggedHostW &&
             host.height == loggedHostH && srcId == loggedSrcId
@@ -244,20 +339,18 @@ class BackdropCapture(
         loggedSrcId = srcId
         Log.i(
             "WaThemer.Capture",
-            "host=${host.width}x${host.height} node=${w}x$h scale=${params.downsample} es=$es " +
+            "host=${host.width}x${host.height} node=${w}x$h scale=$scale es=$es " +
                 "offset=($dx,$dy) underlayDy=$lastUnderlayDy " +
                 "src=${src?.width}x${src?.height} srcLaidOut=${src?.isLaidOut}",
         )
     }
 
-    /**
-     * Refract the sharp capture, then blur. Never blur first: blur removes the detail
-     * refraction bends. Lighting stays out of this graph or it would be blurred too.
-     */
+    /** Refract the sharp capture, then blur, never the reverse: blur removes the detail refraction bends, and lighting stays out of this graph or it would be blurred too. */
     private fun applyEffectIfNeeded(scale: Float, w: Int, h: Int, es: Float) {
         val radius = params.blurRadius
         val refracting = params.refractionEnabled && GlassShader.supported
-        val unchanged = radius == effectRadius &&
+        val unchanged = lensScale == effectLens &&
+            radius == effectRadius &&
             es == effectScaleUsed &&
             scale == effectDownsample &&
             w == effectWidth &&
@@ -266,6 +359,7 @@ class BackdropCapture(
             !effectDirty
         if (unchanged) return
 
+        effectLens = lensScale
         effectRadius = radius
         effectScaleUsed = es
         effectDownsample = scale
@@ -291,7 +385,7 @@ class BackdropCapture(
             if (rs != null && params.refractionEnabled &&
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
             ) {
-                GlassShader.buildRefractEffect(rs, params, host.width, host.height, es)
+                GlassShader.buildRefractEffect(rs, params, host.width, host.height, es, lensScale)
             } else {
                 null
             }
@@ -357,6 +451,7 @@ class BackdropCapture(
         return false
     }
 
+    /** The engine's own walk; glass/ imports nothing from hooks/, so GlassCore's twin stays out of reach on purpose. */
     private fun isAncestorOf(a: View, v: View): Boolean {
         var p: ViewParent? = v.parent
         while (p != null) {

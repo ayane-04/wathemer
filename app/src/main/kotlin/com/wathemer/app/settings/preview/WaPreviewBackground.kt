@@ -50,7 +50,7 @@ fun ChatWallpaper(
         ?.takeIf { snap.wallpaperEnabled && it.isNotBlank() }
         ?.takeIf { runCatching { File(it).canRead() }.getOrDefault(false) }
 
-    // Decode once per path; 600px is ample and under the 800px thumbnail decode already on this thread.
+    // Decode once per path, at a size under the thumbnail decode already on this thread.
     val bitmap = remember(path) {
         path?.let { BitmapDecoder.decodeScaled(File(it), 600, 600) }
     }

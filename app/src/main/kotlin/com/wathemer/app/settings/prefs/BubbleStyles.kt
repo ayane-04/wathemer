@@ -1,9 +1,6 @@
 package com.wathemer.app.settings.prefs
 
-/**
- * Ordered registry of every selectable bubble style; the stored pref is a 1-based index into [ALL], 0 = stock.
- * Read docs/ENGINEERING-NOTES.md before adding or removing a style: imports corrupt assets silently, removal renumbers stored selections.
- */
+/** Ordered registry of every selectable bubble style, stored as a 1-based index into [ALL] with 0 for stock; read docs/ENGINEERING-NOTES.md before adding or removing one, since imports corrupt assets silently and a removal renumbers stored selections. */
 object BubbleStyles {
 
     data class Style(val asset: String, val label: String)
@@ -68,9 +65,6 @@ object BubbleStyles {
         Style("rounded", "Style 55"),
         Style("wapaper", "Style 56"),
     )
-
-    /** 1-based index of the first colour-artwork style; everything below it is a mask. */
-    const val FIRST_COLOUR_STYLE = 37
 
     /** Mask tint when a shape is picked but no bubble colour is: WA's own dark bubble colours. Both processes read them, so they live here. */
     const val STOCK_DARK_INCOMING = 0xFF202C33.toInt()

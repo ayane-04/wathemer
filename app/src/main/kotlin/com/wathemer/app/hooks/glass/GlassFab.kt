@@ -430,6 +430,7 @@ internal fun folderFab(fab: View, label: String) {
         lp.gravity = Gravity.TOP or Gravity.START
         glass.layoutParams = lp
     }
+    // Visibility flips alone request no layout, so the sweep misses them; [paneShouldShow] keeps both writers agreeing.
     val want = if (paneShouldShow(fab)) View.VISIBLE else View.GONE
     if (glass.visibility != want) glass.visibility = want
 }

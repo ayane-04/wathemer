@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,11 +27,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.wathemer.app.BuildConfig
-import com.wathemer.app.settings.components.MenuRow
+import com.wathemer.app.settings.components.CategoryRow
 import com.wathemer.app.settings.components.NavTopBar
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.SectionHeader
-import com.wathemer.app.settings.components.StubNote
+import com.wathemer.app.settings.components.NoteText
 import com.wathemer.app.settings.components.ToggleItem
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.prefs.Prefs
@@ -76,7 +75,7 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
             val found = withContext(Dispatchers.IO) { Updates.latest() }
             checking = false
             if (found == null) {
-                if (manual) onMessage("Could not reach GitHub")
+                if (manual) onMessage("Could not reach GitHub.")
                 return@launch
             }
             prefs.updateLastCheck = System.currentTimeMillis()
@@ -87,7 +86,7 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
             prefs.updateSize = found.size.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
             latest = found
             if (manual && !isNewerVersion(found.version, BuildConfig.VERSION_NAME)) {
-                onMessage("You are on the newest build")
+                onMessage("You are on the newest build.")
             }
         }
     }
@@ -101,53 +100,38 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
 
     Scaffold(containerColor = Palette.Bg) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(
-                title = "Updates",
-                subtitle = "You have ${BuildConfig.VERSION_NAME}",
-                onBack = { nav.pop() },
-            )
+            NavTopBar(title = "Updates", onBack = { nav.pop() })
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(bottom = 12.dp),
             ) {
-                SectionHeader(
-                    title = if (newer) "Version ${latest?.version} is out" else "Up to date",
-                    subtitle = when {
-                        newer && ready != null -> "Downloaded and waiting. Installing needs your confirmation."
-                        newer -> "Released on GitHub. Nothing is downloaded until you ask."
-                        else -> "Checked against the releases page."
+                CategoryRow(
+                    label = when {
+                        checking -> "Checking"
+                        newer -> "Version ${latest?.version} is out"
+                        else -> "Up to date"
                     },
-                )
-
-                MenuRow(
-                    title = if (checking) "Checking..." else "Check now",
-                    subtitle = "Asks GitHub which release is newest.",
+                    description = "You have ${BuildConfig.VERSION_NAME}",
                     onClick = { check(manual = true) },
                 )
 
                 if (newer) {
-                    MenuRow(
-                        title = when {
+                    CategoryRow(
+                        label = when {
                             ready != null -> "Install ${latest?.version}"
-                            downloading -> "Downloading..."
+                            downloading -> "Downloading"
                             else -> "Download ${latest?.version}"
                         },
-                        subtitle = if (ready != null) {
-                            "Opens the system installer."
-                        } else {
-                            "About 30 MB."
-                        },
                         onClick = {
-                            val release = latest ?: return@MenuRow
+                            val release = latest ?: return@CategoryRow
                             val have = Updates.downloaded(context, release)
                             if (have != null) {
                                 context.startActivity(Updates.installIntent(context, have))
-                                return@MenuRow
+                                return@CategoryRow
                             }
-                            if (downloading) return@MenuRow
+                            if (downloading) return@CategoryRow
                             if (Build.VERSION.SDK_INT >= 33 &&
                                 ContextCompat.checkSelfPermission(
                                     context, Manifest.permission.POST_NOTIFICATIONS,
@@ -161,32 +145,29 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
                     )
                 }
 
-                val notes = latest?.notes.orEmpty()
-                if (newer && notes.isNotBlank()) {
-                    SectionHeader(title = "What changed")
-                    StubNote(text = notes.take(NOTES_LIMIT))
-                }
-
-                SectionHeader(title = "Checking")
                 ToggleItem(
                     title = "Check automatically",
-                    subtitle = "Once a day, when this app is open. WhatsApp itself never goes online.",
                     checked = auto,
+                    divider = false,
                     onCheckedChange = { auto = it; prefs.updateAutoCheck = it },
                 )
 
-                SectionHeader(
-                    title = "Telegram",
-                    subtitle = "Release posts, and somewhere to ask.",
-                )
-                MenuRow(
-                    title = "Updates channel",
-                    subtitle = "@wathemer",
+                val notes = latest?.notes.orEmpty()
+                if (newer && notes.isNotBlank()) {
+                    SectionHeader("What changed")
+                    NoteText(notes.take(NOTES_LIMIT))
+                }
+
+                SectionHeader("Telegram")
+                CategoryRow(
+                    label = "Updates channel",
+                    description = "@wathemer",
                     onClick = { openLink(context, "https://t.me/wathemer", onMessage) },
                 )
-                MenuRow(
-                    title = "Chat group",
-                    subtitle = "@wathemer_chat",
+                CategoryRow(
+                    label = "Chat group",
+                    description = "@wathemer_chat",
+                    divider = false,
                     onClick = { openLink(context, "https://t.me/wathemer_chat", onMessage) },
                 )
             }
@@ -200,7 +181,7 @@ private fun openLink(context: Context, url: String, onMessage: (String) -> Unit)
         context.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
-    }.onFailure { onMessage("Nothing on this device opens links") }
+    }.onFailure { onMessage("Nothing on this device opens links.") }
 }
 
 private const val DAY_MS = 24L * 60 * 60 * 1000

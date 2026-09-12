@@ -14,8 +14,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
@@ -29,7 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.wathemer.app.settings.components.RestartWhatsAppButton
+import com.wathemer.app.settings.components.RestartBar
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.nav.Screen
 import com.wathemer.app.settings.nav.rememberNavController
@@ -38,39 +43,22 @@ import com.wathemer.app.settings.prefs.FontLibrary
 import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.settings.prefs.ServiceBridge
 import com.wathemer.app.settings.preview.ThemeSnapshotHost
-import com.wathemer.app.settings.screens.BackdropScreen
 import com.wathemer.app.settings.screens.CategoryListScreen
 import com.wathemer.app.settings.screens.ChatBubbleShapesScreen
 import com.wathemer.app.settings.screens.ChatRequest
-import com.wathemer.app.settings.screens.ChatWallpapersScreen
-import com.wathemer.app.settings.screens.pendingChatRequest
-import com.wathemer.app.settings.screens.ChatBubblesScreen
-import com.wathemer.app.settings.screens.ChatHeaderToolbarScreen
-import com.wathemer.app.settings.screens.ChatInputBarScreen
-import com.wathemer.app.settings.screens.ChatMiscScreen
-import com.wathemer.app.settings.screens.ChatQuoteRepliesScreen
 import com.wathemer.app.settings.screens.ChatScreen
+import com.wathemer.app.settings.screens.ChatWallpapersScreen
 import com.wathemer.app.settings.screens.ExtrasScreen
 import com.wathemer.app.settings.screens.GlobalColorsScreen
-import com.wathemer.app.settings.screens.GlobalColorsTokensScreen
 import com.wathemer.app.settings.screens.GlobalColorsToolbarScreen
 import com.wathemer.app.settings.screens.GlobalColorsUnreadScreen
-import com.wathemer.app.settings.screens.HomescreenChatListRowsScreen
-import com.wathemer.app.settings.screens.HomescreenChatListScreen
-import com.wathemer.app.settings.screens.HomescreenChatListSearchScreen
-import com.wathemer.app.settings.screens.HomescreenFabMainScreen
-import com.wathemer.app.settings.screens.HomescreenFabMiniFabScreen
-import com.wathemer.app.settings.screens.HomescreenFabScreen
-import com.wathemer.app.settings.screens.HomescreenHeaderScreen
 import com.wathemer.app.settings.screens.HomescreenScreen
-import com.wathemer.app.settings.screens.HomescreenTabBarBarScreen
-import com.wathemer.app.settings.screens.HomescreenTabBarItemsScreen
-import com.wathemer.app.settings.screens.HomescreenTabBarScreen
 import com.wathemer.app.settings.screens.LiquidGlassScreen
 import com.wathemer.app.settings.screens.StatusBarScreen
 import com.wathemer.app.settings.screens.ThemesScreen
 import com.wathemer.app.settings.screens.UpdatesScreen
 import com.wathemer.app.settings.screens.WallpaperScreen
+import com.wathemer.app.settings.screens.pendingChatRequest
 
 /** Hosts the settings UI over an in-memory nav stack; system back pops until the root, then Android closes the activity. */
 class MainActivity : ComponentActivity() {
@@ -82,10 +70,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         armCropInsetFix()
+        // Wired before the store opens: the reconcile and the migrations below are writes WhatsApp has not seen either.
+        PendingRestart.load(this)
+        Prefs.onWrite = { PendingRestart.mark(applicationContext) }
         val prefs = Prefs.open(this, ServiceBridge.awaitPrefs())
         openPrefs = prefs
         // Before the reconcile: an update hands over through the snapshot, an uninstall leaves none to import.
-        val carried = runCatching { prefs.importSnapshotIfEmpty() }.getOrNull()
+        val carried = runCatching { prefs.importSnapshotIfEmpty() }
+            .onFailure { Log.w("WaThemer.Prefs", "importSnapshotIfEmpty threw: $it") }
+            .getOrNull()
         carried?.let {
             if (it.imported > 0) Log.i("WaThemer.Prefs", "carried over ${it.imported} settings from ${it.source}")
         }
@@ -119,15 +112,18 @@ class MainActivity : ComponentActivity() {
                     Log.i("WaThemer.Prefs", "bubble-style migration: rewrote $n side(s)")
                 }
             }
+            .onFailure { Log.w("WaThemer.Prefs", "bubble-style migration threw: $it") }
         runCatching { prefs.migrateCollidingTokens() }
             .onSuccess { n ->
                 if (n > 0) Log.i("WaThemer.Prefs", "token-collision migration: dodged $n token(s)")
             }
+            .onFailure { Log.w("WaThemer.Prefs", "token-collision migration threw: $it") }
         // Moves the pre-library Downloads font into the library; WhatsApp could never read it there.
         runCatching { FontLibrary.migrateLegacyDownloadsFont(this, prefs) }
             .onSuccess { e ->
                 if (e != null) Log.i("WaThemer.Prefs", "legacy user font imported: ${e.name}")
             }
+            .onFailure { Log.w("WaThemer.Prefs", "legacy font import threw: $it") }
         // Last, so the snapshot holds the reconciled and migrated state rather than what preceded it.
         runCatching { prefs.exportForMigration() }
             .onSuccess { n -> if (n != null) Log.i("WaThemer.Prefs", "migration snapshot: $n settings") }
@@ -205,22 +201,22 @@ private var importWarn = false
 
 @Composable
 private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
-    // App chrome stays locked to AppAccent no matter which WhatsApp theme is being configured.
     // Padded here, not on the banner: the screens' Scaffolds subtract an inset an ancestor took, so the banner clears the clock and the title follows it.
     val banner = !prefs.moduleStoreActive || importWarn
     // A hand-off from WhatsApp replaces the stack; landing on top of wherever the user last was leaves back walking through it.
     val pending by pendingChatRequest
+    val restartPending by PendingRestart.pending
     LaunchedEffect(pending) {
         if (pending != null && nav.current != Screen.ChatWallpapers) {
-            nav.replaceAll(listOf(Screen.CategoryList, Screen.Backdrop, Screen.ChatWallpapers))
+            nav.replaceAll(listOf(Screen.CategoryList, Screen.Wallpaper, Screen.ChatWallpapers))
         }
     }
     Column(modifier = Modifier.fillMaxSize().then(if (banner) Modifier.statusBarsPadding() else Modifier)) {
         // Standing banner, never a toast: with the module inactive every control silently changes nothing.
         if (!prefs.moduleStoreActive) {
             Text(
-                text = "Module not active. Enable WaThemer in your Xposed manager, add WhatsApp to " +
-                    "its scope, then reopen this app. Changes made now will NOT apply.",
+                text = "WaThemer is not active in your Xposed manager, so nothing here reaches WhatsApp. " +
+                    "Enable it, add WhatsApp to its scope, then reopen this app.",
                 color = Color(0xFF1A1207),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
@@ -242,57 +238,43 @@ private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Uni
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
         }
+        // While the bar shows it owns the bottom inset, so the screens' Scaffolds must not pad for it too.
         Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .then(
+                    if (restartPending) Modifier.consumeWindowInsets(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                    else Modifier,
+                ),
         ) {
             ScreenSwitch(nav, prefs, onMessage)
         }
-        RestartWhatsAppButton(onMessage = onMessage)
+        RestartBar(onMessage = onMessage)
     }
 }
 
 @Composable
 private fun ScreenSwitch(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
     when (nav.current) {
-        Screen.CategoryList            -> CategoryListScreen(nav, prefs)
+        Screen.CategoryList        -> CategoryListScreen(nav, prefs, onMessage)
 
-        Screen.GlobalColors            -> GlobalColorsScreen(nav, prefs, onMessage)
-        Screen.GlobalColorsTokens      -> GlobalColorsTokensScreen(nav, prefs)
-        Screen.GlobalColorsUnread      -> GlobalColorsUnreadScreen(nav, prefs)
-        Screen.GlobalColorsToolbar     -> GlobalColorsToolbarScreen(nav, prefs)
-        Screen.Backdrop                -> BackdropScreen(nav, prefs)
-        Screen.Wallpaper               -> WallpaperScreen(nav, prefs)
-        Screen.StatusBar               -> StatusBarScreen(nav, prefs)
-        Screen.LiquidGlass             -> LiquidGlassScreen(nav, prefs)
-        Screen.ChatWallpapers          -> ChatWallpapersScreen(nav, prefs, onMessage)
+        Screen.GlobalColors        -> GlobalColorsScreen(nav, prefs, onMessage)
+        Screen.GlobalColorsUnread  -> GlobalColorsUnreadScreen(nav, prefs)
+        Screen.GlobalColorsToolbar -> GlobalColorsToolbarScreen(nav, prefs)
+        Screen.StatusBar           -> StatusBarScreen(nav, prefs)
 
-        // Homescreen tree
-        Screen.Homescreen              -> HomescreenScreen(nav, prefs)
-        Screen.HomescreenChatList      -> HomescreenChatListScreen(nav, prefs)
-        Screen.HomescreenChatListRows  -> HomescreenChatListRowsScreen(nav, prefs)
-        Screen.HomescreenChatListSearch -> HomescreenChatListSearchScreen(nav, prefs)
-        Screen.HomescreenTabBar        -> HomescreenTabBarScreen(nav, prefs)
-        Screen.HomescreenTabBarBar     -> HomescreenTabBarBarScreen(nav, prefs)
-        Screen.HomescreenTabBarItems   -> HomescreenTabBarItemsScreen(nav, prefs)
-        Screen.HomescreenHeader        -> HomescreenHeaderScreen(nav, prefs)
-        Screen.HomescreenFab           -> HomescreenFabScreen(nav, prefs)
-        Screen.HomescreenFabMain       -> HomescreenFabMainScreen(nav, prefs)
-        Screen.HomescreenFabMiniFab    -> HomescreenFabMiniFabScreen(nav, prefs)
+        Screen.Wallpaper           -> WallpaperScreen(nav, prefs)
+        Screen.LiquidGlass         -> LiquidGlassScreen(nav, prefs)
+        Screen.ChatWallpapers      -> ChatWallpapersScreen(nav, prefs, onMessage)
 
-        // Chat tree
-        Screen.Chat                    -> ChatScreen(nav, prefs)
-        Screen.ChatBubbles             -> ChatBubblesScreen(nav, prefs)
-        Screen.ChatBubblesCustom       -> ChatBubbleShapesScreen(nav, prefs)
-        Screen.ChatInputBar            -> ChatInputBarScreen(nav, prefs)
-        Screen.ChatHeaderToolbar       -> ChatHeaderToolbarScreen(nav, prefs)
-        Screen.ChatQuoteReplies        -> ChatQuoteRepliesScreen(nav, prefs)
-        Screen.ChatMisc                -> ChatMiscScreen(nav, prefs)
+        Screen.Homescreen          -> HomescreenScreen(nav, prefs)
+        Screen.Chat                -> ChatScreen(nav, prefs)
+        Screen.ChatBubbleShapes   -> ChatBubbleShapesScreen(nav, prefs)
 
-        Screen.Extras                  -> ExtrasScreen(nav, prefs, onMessage)
-        Screen.Themes                  -> ThemesScreen(nav, prefs, onMessage)
-        Screen.Updates                 -> UpdatesScreen(nav, prefs, onMessage)
+        Screen.Extras              -> ExtrasScreen(nav, prefs, onMessage)
+        Screen.Themes              -> ThemesScreen(nav, prefs, onMessage)
+        Screen.Updates             -> UpdatesScreen(nav, prefs, onMessage)
     }
 }
 

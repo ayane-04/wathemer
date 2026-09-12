@@ -1,4 +1,4 @@
-// The Chat category tree: Bubbles (with the Custom bubble shape picker), Input, Header, Quote, Misc.
+// The Chats page: every override of a conversation, in sections, under a preview that follows the section in hand.
 package com.wathemer.app.settings.screens
 
 import androidx.compose.foundation.background
@@ -14,13 +14,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,11 +33,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wathemer.app.settings.components.AppAccent
 import com.wathemer.app.settings.components.CategoryRow
-import com.wathemer.app.settings.components.ExpandableSection
+import com.wathemer.app.settings.components.ExpandGroup
 import com.wathemer.app.settings.components.NavTopBar
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.PreviewPanel
-import com.wathemer.app.settings.components.StubNote
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.nav.Screen
 import com.wathemer.app.settings.prefs.BubbleStyles
@@ -49,128 +45,92 @@ import com.wathemer.app.settings.preview.BubbleThumb
 import com.wathemer.app.settings.preview.LocalThemeSnapshot
 import com.wathemer.app.settings.preview.SingleBubblePreview
 import com.wathemer.app.settings.preview.SnapshotOverrideRow
+import com.wathemer.app.settings.preview.ThemeSnapshot
 import com.wathemer.app.settings.preview.WaPreview
 import com.wathemer.app.settings.preview.WaPreviewKind
 import com.wathemer.app.settings.preview.updateBubbleStyleIncoming
 import com.wathemer.app.settings.preview.updateBubbleStyleOutgoing
 
-/* ── Root: Chat ──────────────────────────────────────────── */
-
 @Composable
 fun ChatScreen(nav: NavController, prefs: Prefs) {
-    Scaffold(containerColor = Palette.Bg) { inner ->
-        Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(
-                title = "Chat screen",
-                subtitle = "5 areas",
-                onBack = { nav.pop() },
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                CategoryRow(
-                    label = "Bubbles",
-                    description = "Message bubbles, both sides.",
-                    onClick = { nav.push(Screen.ChatBubbles) },
-                )
-                CategoryRow(
-                    label = "Input & compose bar",
-                    description = "The compose bar at the bottom.",
-                    onClick = { nav.push(Screen.ChatInputBar) },
-                )
-                CategoryRow(
-                    label = "Header & toolbar",
-                    description = "The conversation's top bar.",
-                    onClick = { nav.push(Screen.ChatHeaderToolbar) },
-                )
-                CategoryRow(
-                    label = "Quote & replies",
-                    description = "Quoted replies.",
-                    onClick = { nav.push(Screen.ChatQuoteReplies) },
-                )
-                CategoryRow(
-                    label = "Other misc settings",
-                    description = "Ticks, forwarded labels, captions and links.",
-                    onClick = { nav.push(Screen.ChatMisc) },
-                )
+    val snapshot = LocalThemeSnapshot.current
+    val snap = snapshot.value
+    // The preview shows the part of the conversation the last touched row belongs to.
+    var kind by remember { mutableStateOf<WaPreviewKind>(WaPreviewKind.ChatBubbles) }
 
-                Spacer(Modifier.size(8.dp))
-                StubNote("Rows follow your global colours until you change them. ↺ puts one back.")
-            }
+    @Composable
+    fun row(
+        name: String,
+        key: String,
+        fallback: Int,
+        focus: WaPreviewKind,
+        divider: Boolean = true,
+        getter: ThemeSnapshot.() -> Int,
+        copier: ThemeSnapshot.(Int) -> ThemeSnapshot,
+    ) {
+        SnapshotOverrideRow(
+            name = name, prefs = prefs, prefKey = key, fallback = fallback,
+            divider = divider, onOpen = { kind = focus }, getter = getter, copier = copier,
+        )
+    }
+
+    val shapeHint = listOf(snap.bubbleStyleIncoming, snap.bubbleStyleOutgoing)
+        .map { BubbleStyles.NAMES.getOrNull(it) ?: "Stock" }
+        .let { (i, o) -> if (i == o) i else "$i · $o" }
+
+    // The group rows carry the bubble each side actually shows.
+    val incomingSwatch = snap.bubbleLeftBg.let { if (it != 0) it else prefs.background }
+    val outgoingSwatch = snap.bubbleRightBg.let { if (it != 0) it else prefs.primary }
+
+    SubScreenScaffold(
+        nav = nav,
+        title = "Chats",
+        preview = { WaPreview(kind, snap) },
+    ) {
+        ExpandGroup("Incoming bubbles", swatchColor = incomingSwatch, onOpen = { kind = WaPreviewKind.ChatBubbles }) {
+            row("Bubble background", Prefs.BUBBLE_LEFT_BG,   prefs.background, WaPreviewKind.ChatBubbles, getter = { bubbleLeftBg },   copier = { copy(bubbleLeftBg = it) })
+            row("Message text", Prefs.BUBBLE_LEFT_TEXT, prefs.text,       WaPreviewKind.ChatBubbles, getter = { bubbleLeftText }, copier = { copy(bubbleLeftText = it) })
+            row("Timestamp", Prefs.BUBBLE_LEFT_DATE, prefs.text,       WaPreviewKind.ChatBubbles, getter = { bubbleLeftDate }, copier = { copy(bubbleLeftDate = it) })
+        }
+        ExpandGroup("Outgoing bubbles", swatchColor = outgoingSwatch, onOpen = { kind = WaPreviewKind.ChatBubbles }) {
+            row("Bubble background", Prefs.BUBBLE_RIGHT_BG,   prefs.primary, WaPreviewKind.ChatBubbles, getter = { bubbleRightBg },   copier = { copy(bubbleRightBg = it) })
+            row("Message text", Prefs.BUBBLE_RIGHT_TEXT, prefs.text,    WaPreviewKind.ChatBubbles, getter = { bubbleRightText }, copier = { copy(bubbleRightText = it) })
+            row("Timestamp", Prefs.BUBBLE_RIGHT_DATE, prefs.text,    WaPreviewKind.ChatBubbles, getter = { bubbleRightDate }, copier = { copy(bubbleRightDate = it) })
+        }
+        CategoryRow(
+            label = "Bubble shape",
+            trailingHint = shapeHint,
+            onClick = { nav.push(Screen.ChatBubbleShapes) },
+        )
+        ExpandGroup("Input & compose bar", onOpen = { kind = WaPreviewKind.ChatInputBar }) {
+            row("Bar background", Prefs.COMPOSE_BAR_BG,     prefs.background, WaPreviewKind.ChatInputBar, getter = { composeBarBg },     copier = { copy(composeBarBg = it) })
+            row("Entry text", Prefs.COMPOSE_ENTRY_TEXT, prefs.text,       WaPreviewKind.ChatInputBar, getter = { composeEntryText }, copier = { copy(composeEntryText = it) })
+            row("Send button background", Prefs.COMPOSE_SEND_BG,    prefs.primary,    WaPreviewKind.ChatInputBar, getter = { composeSendBg },    copier = { copy(composeSendBg = it) })
+            row("Mic/Send icon", Prefs.COMPOSE_SEND_ICON,  prefs.text,       WaPreviewKind.ChatInputBar, getter = { composeSendIcon },  copier = { copy(composeSendIcon = it) })
+            row("Icon colour", Prefs.COMPOSE_ICON_TINT,  prefs.text,       WaPreviewKind.ChatInputBar, getter = { composeIconTint },  copier = { copy(composeIconTint = it) })
+        }
+        ExpandGroup("Header & toolbar", onOpen = { kind = WaPreviewKind.ChatHeader }) {
+            row("Bar fill", Prefs.CHAT_TOOLBAR_BG,      prefs.background, WaPreviewKind.ChatHeader, getter = { chatToolbarBg },      copier = { copy(chatToolbarBg = it) })
+            row("Title text", Prefs.CHAT_HEADER_TITLE,    prefs.text,       WaPreviewKind.ChatHeader, getter = { chatHeaderTitle },    copier = { copy(chatHeaderTitle = it) })
+            row("Subtitle text", Prefs.CHAT_HEADER_SUBTITLE, prefs.text,       WaPreviewKind.ChatHeader, getter = { chatHeaderSubtitle }, copier = { copy(chatHeaderSubtitle = it) })
+            row("Action icons", Prefs.CHAT_TOOLBAR_ICONS,   prefs.text,       WaPreviewKind.ChatHeader, getter = { chatToolbarIcons },   copier = { copy(chatToolbarIcons = it) })
+        }
+        ExpandGroup("Quote & replies", onOpen = { kind = WaPreviewKind.ChatQuote }) {
+            row("Quote bar (accent stripe)", Prefs.QUOTE_BAR_COLOR,  prefs.primary,    WaPreviewKind.ChatQuote, getter = { quoteBarColor },  copier = { copy(quoteBarColor = it) })
+            row("Quote background", Prefs.QUOTE_BG_COLOR,   prefs.background, WaPreviewKind.ChatQuote, getter = { quoteBgColor },   copier = { copy(quoteBgColor = it) })
+            row("Quote text", Prefs.QUOTE_TEXT_COLOR, prefs.text,       WaPreviewKind.ChatQuote, getter = { quoteTextColor }, copier = { copy(quoteTextColor = it) })
+        }
+        ExpandGroup("Misc", onOpen = { kind = WaPreviewKind.ChatMisc }) {
+            row("Read tick (blue ✓✓)", Prefs.TICK_SEEN_COLOR,       prefs.primary, WaPreviewKind.ChatMisc, getter = { tickSeenColor },       copier = { copy(tickSeenColor = it) })
+            row("Delivered tick (grey)", Prefs.TICK_UNSEEN_COLOR,     prefs.text,    WaPreviewKind.ChatMisc, getter = { tickUnseenColor },     copier = { copy(tickUnseenColor = it) })
+            row("Forwarded label", Prefs.FORWARDED_LABEL_COLOR, prefs.text,    WaPreviewKind.ChatMisc, getter = { forwardedLabelColor }, copier = { copy(forwardedLabelColor = it) })
+            row("Media caption",   Prefs.MEDIA_CAPTION_COLOR,   prefs.text,    WaPreviewKind.ChatMisc, getter = { mediaCaptionColor },   copier = { copy(mediaCaptionColor = it) })
+            row("Link colour", Prefs.LINK_COLOR,            prefs.primary, WaPreviewKind.ChatMisc, getter = { linkColor },           copier = { copy(linkColor = it) })
         }
     }
 }
 
-/* ── Chat > Bubbles ──────────────────────────────────────── */
-
-@Composable
-fun ChatBubblesScreen(nav: NavController, prefs: Prefs) {
-    val snap = LocalThemeSnapshot.current
-    var incomingOpen by remember { mutableStateOf(false) }
-    var outgoingOpen by remember { mutableStateOf(false) }
-    val incomingSwatch = snap.value.bubbleLeftBg.let { if (it != 0) it else prefs.background }
-    val outgoingSwatch = snap.value.bubbleRightBg.let { if (it != 0) it else prefs.primary }
-    Scaffold(containerColor = Palette.Bg) { inner ->
-        Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(title = "Bubbles", subtitle = "Chat · Bubbles", onBack = { nav.pop() })
-            PreviewPanel(modifier = Modifier.weight(0.4f).fillMaxWidth()) {
-                WaPreview(
-                    WaPreviewKind.ChatBubbles,
-                    LocalThemeSnapshot.current.value,
-                )
-            }
-            Column(
-                modifier = Modifier
-                    .weight(0.6f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                ExpandableSection(label = "Incoming bubbles", expanded = incomingOpen, onToggle = { incomingOpen = !incomingOpen }, swatchColor = incomingSwatch) {
-                    SnapshotOverrideRow(
-                        "Bubble background", prefs, Prefs.BUBBLE_LEFT_BG, prefs.background, "Incoming",
-                        getter = { bubbleLeftBg }, copier = { copy(bubbleLeftBg = it) },
-                    )
-                    SnapshotOverrideRow(
-                        "Message text", prefs, Prefs.BUBBLE_LEFT_TEXT, prefs.text, "Incoming",
-                        getter = { bubbleLeftText }, copier = { copy(bubbleLeftText = it) },
-                    )
-                    SnapshotOverrideRow(
-                        "Timestamp", prefs, Prefs.BUBBLE_LEFT_DATE, prefs.text, "Incoming",
-                        getter = { bubbleLeftDate }, copier = { copy(bubbleLeftDate = it) },
-                    )
-                }
-                ExpandableSection(label = "Outgoing bubbles", expanded = outgoingOpen, onToggle = { outgoingOpen = !outgoingOpen }, swatchColor = outgoingSwatch) {
-                    SnapshotOverrideRow(
-                        "Bubble background", prefs, Prefs.BUBBLE_RIGHT_BG, prefs.primary, "Outgoing",
-                        getter = { bubbleRightBg }, copier = { copy(bubbleRightBg = it) },
-                    )
-                    SnapshotOverrideRow(
-                        "Message text", prefs, Prefs.BUBBLE_RIGHT_TEXT, prefs.text, "Outgoing",
-                        getter = { bubbleRightText }, copier = { copy(bubbleRightText = it) },
-                    )
-                    SnapshotOverrideRow(
-                        "Timestamp", prefs, Prefs.BUBBLE_RIGHT_DATE, prefs.text, "Outgoing",
-                        getter = { bubbleRightDate }, copier = { copy(bubbleRightDate = it) },
-                    )
-                }
-                CategoryRow(
-                    label = "Custom bubble",
-                    description = "Pick a bubble shape per side. The first " +
-                        "${BubbleStyles.FIRST_COLOUR_STYLE - 1} take your colour.",
-                    onClick = { nav.push(Screen.ChatBubblesCustom) },
-                )
-            }
-        }
-    }
-}
-
-/* ── Chat > Bubbles > Custom bubble ──────────────────────────────────────── */
+// ── Chats > Bubble shape ─────────────────────────────────────────────────
 
 /** Shape picker: one thumbnail grid with a side switch; the drawing, not the number label, is the identifier. */
 @Composable
@@ -188,13 +148,7 @@ fun ChatBubbleShapesScreen(nav: NavController, prefs: Prefs) {
 
     Scaffold(containerColor = Palette.Bg) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(
-                title = "Bubble shape",
-                subtitle = (if (editingOutgoing) "Outgoing" else "Incoming") +
-                    " · 1-${BubbleStyles.FIRST_COLOUR_STYLE - 1} take your colour, " +
-                    "${BubbleStyles.FIRST_COLOUR_STYLE}+ are fixed artwork",
-                onBack = { nav.pop() },
-            )
+            NavTopBar(title = "Bubble shape", onBack = { nav.pop() })
             PreviewPanel(modifier = Modifier.height(150.dp).fillMaxWidth()) {
                 SingleBubblePreview(isOutgoing = editingOutgoing, style = current, tint = Color(tintInt))
             }
@@ -202,13 +156,13 @@ fun ChatBubbleShapesScreen(nav: NavController, prefs: Prefs) {
             SideSwitch(
                 editingOutgoing = editingOutgoing,
                 onSelect = { editingOutgoing = it },
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
             // A fixed bottom strip, two rows scrolling sideways, so the preview keeps the screen.
             LazyHorizontalGrid(
                 rows = GridCells.Fixed(2),
                 modifier = Modifier.height(206.dp).fillMaxWidth(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 14.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -236,8 +190,7 @@ private fun SideSwitch(editingOutgoing: Boolean, onSelect: (Boolean) -> Unit, mo
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(Palette.SurfaceElev, RoundedCornerShape(8.dp))
-            .border(1.dp, Palette.Rule, RoundedCornerShape(8.dp))
+            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(20.dp))
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -246,7 +199,7 @@ private fun SideSwitch(editingOutgoing: Boolean, onSelect: (Boolean) -> Unit, mo
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .background(if (on) AppAccent.copy(alpha = 0.20f) else Color.Transparent, RoundedCornerShape(8.dp))
+                    .background(if (on) AppAccent.copy(alpha = 0.20f) else Color.Transparent, RoundedCornerShape(17.dp))
                     .clickable { onSelect(isOut) }
                     .padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center,
@@ -254,8 +207,8 @@ private fun SideSwitch(editingOutgoing: Boolean, onSelect: (Boolean) -> Unit, mo
                 Text(
                     text,
                     color = if (on) Palette.Fg else Palette.FgMuted,
-                    fontSize = 13.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    fontSize = 14.sp,
+                    fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
                 )
             }
         }
@@ -275,7 +228,6 @@ private fun ShapeCell(
     Column(
         modifier = Modifier
             .width(96.dp)
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
             .border(
                 if (selected) 1.5.dp else 1.dp,
                 if (selected) AppAccent else Palette.Rule,
@@ -301,166 +253,8 @@ private fun ShapeCell(
             fontSize = 11.sp,
             maxLines = 1,
             softWrap = false,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             modifier = Modifier.padding(top = 5.dp),
         )
-    }
-}
-
-/* ── Chat > stub leaves (Input / Header / Quote / Misc) ──── */
-
-@Composable
-fun ChatInputBarScreen(nav: NavController, prefs: Prefs) {
-    val snapshot = LocalThemeSnapshot.current
-    Scaffold(containerColor = Palette.Bg) { inner ->
-        Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(title = "Input & compose bar", subtitle = "Chat · Input", onBack = { nav.pop() })
-            PreviewPanel(modifier = Modifier.weight(0.4f).fillMaxWidth()) {
-                WaPreview(WaPreviewKind.ChatInputBar, snapshot.value)
-            }
-            Column(
-                modifier = Modifier
-                    .weight(0.6f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                SnapshotOverrideRow(
-                    "Bar background", snapshot, prefs, Prefs.COMPOSE_BAR_BG, prefs.background, "Chat · Input",
-                    getter = { composeBarBg }, copier = { copy(composeBarBg = it) },
-                )
-                SnapshotOverrideRow(
-                    "Entry text", snapshot, prefs, Prefs.COMPOSE_ENTRY_TEXT, prefs.text, "Chat · Input",
-                    getter = { composeEntryText }, copier = { copy(composeEntryText = it) },
-                )
-                SnapshotOverrideRow(
-                    "Send button background", snapshot, prefs, Prefs.COMPOSE_SEND_BG, prefs.primary, "Chat · Input",
-                    getter = { composeSendBg }, copier = { copy(composeSendBg = it) },
-                )
-                SnapshotOverrideRow(
-                    "Mic/Send icon", snapshot, prefs, Prefs.COMPOSE_SEND_ICON, prefs.text, "Chat · Input",
-                    getter = { composeSendIcon }, copier = { copy(composeSendIcon = it) },
-                )
-                SnapshotOverrideRow(
-                    "Icon colour", snapshot, prefs, Prefs.COMPOSE_ICON_TINT, prefs.text, "Chat · Input",
-                    getter = { composeIconTint }, copier = { copy(composeIconTint = it) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ChatHeaderToolbarScreen(nav: NavController, prefs: Prefs) {
-    val snapshot = LocalThemeSnapshot.current
-    Scaffold(containerColor = Palette.Bg) { inner ->
-        Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(title = "Header & toolbar", subtitle = "Chat · Header", onBack = { nav.pop() })
-            PreviewPanel(modifier = Modifier.weight(0.4f).fillMaxWidth()) {
-                WaPreview(WaPreviewKind.ChatHeader, snapshot.value)
-            }
-            Column(
-                modifier = Modifier
-                    .weight(0.6f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                SnapshotOverrideRow(
-                    "Bar fill", snapshot, prefs, Prefs.CHAT_TOOLBAR_BG, prefs.background, "Chat · Header",
-                    getter = { chatToolbarBg }, copier = { copy(chatToolbarBg = it) },
-                )
-                SnapshotOverrideRow(
-                    "Title text", snapshot, prefs, Prefs.CHAT_HEADER_TITLE, prefs.text, "Chat · Header",
-                    getter = { chatHeaderTitle }, copier = { copy(chatHeaderTitle = it) },
-                )
-                SnapshotOverrideRow(
-                    "Subtitle text", snapshot, prefs, Prefs.CHAT_HEADER_SUBTITLE, prefs.text, "Chat · Header",
-                    getter = { chatHeaderSubtitle }, copier = { copy(chatHeaderSubtitle = it) },
-                )
-                SnapshotOverrideRow(
-                    "Action icons", snapshot, prefs, Prefs.CHAT_TOOLBAR_ICONS, prefs.text, "Chat · Header",
-                    getter = { chatToolbarIcons }, copier = { copy(chatToolbarIcons = it) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ChatQuoteRepliesScreen(nav: NavController, prefs: Prefs) {
-    val snapshot = LocalThemeSnapshot.current
-    Scaffold(containerColor = Palette.Bg) { inner ->
-        Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(title = "Quote & replies", subtitle = "Chat · Quote", onBack = { nav.pop() })
-            PreviewPanel(modifier = Modifier.weight(0.4f).fillMaxWidth()) {
-                WaPreview(WaPreviewKind.ChatQuote, snapshot.value)
-            }
-            Column(
-                modifier = Modifier
-                    .weight(0.6f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                SnapshotOverrideRow(
-                    "Quote bar (accent stripe)", prefs, Prefs.QUOTE_BAR_COLOR, prefs.primary, "Quote",
-                    getter = { quoteBarColor }, copier = { copy(quoteBarColor = it) },
-                )
-                SnapshotOverrideRow(
-                    "Quote background", prefs, Prefs.QUOTE_BG_COLOR, prefs.background, "Quote",
-                    getter = { quoteBgColor }, copier = { copy(quoteBgColor = it) },
-                )
-                SnapshotOverrideRow(
-                    "Quote text", prefs, Prefs.QUOTE_TEXT_COLOR, prefs.text, "Quote",
-                    getter = { quoteTextColor }, copier = { copy(quoteTextColor = it) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ChatMiscScreen(nav: NavController, prefs: Prefs) {
-    val snapshot = LocalThemeSnapshot.current
-    Scaffold(containerColor = Palette.Bg) { inner ->
-        Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            NavTopBar(title = "Other misc settings", subtitle = "Chat · Misc", onBack = { nav.pop() })
-            PreviewPanel(modifier = Modifier.weight(0.4f).fillMaxWidth()) {
-                WaPreview(WaPreviewKind.ChatMisc, snapshot.value)
-            }
-            Column(
-                modifier = Modifier
-                    .weight(0.6f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                SnapshotOverrideRow(
-                    "Read tick (blue ✓✓)", prefs, Prefs.TICK_SEEN_COLOR, prefs.primary, "Misc",
-                    getter = { tickSeenColor }, copier = { copy(tickSeenColor = it) },
-                )
-                SnapshotOverrideRow(
-                    "Delivered tick (grey)", prefs, Prefs.TICK_UNSEEN_COLOR, prefs.text, "Misc",
-                    getter = { tickUnseenColor }, copier = { copy(tickUnseenColor = it) },
-                )
-                SnapshotOverrideRow(
-                    "Forwarded label", prefs, Prefs.FORWARDED_LABEL_COLOR, prefs.text, "Misc",
-                    getter = { forwardedLabelColor }, copier = { copy(forwardedLabelColor = it) },
-                )
-                SnapshotOverrideRow(
-                    "Media caption", prefs, Prefs.MEDIA_CAPTION_COLOR, prefs.text, "Misc",
-                    getter = { mediaCaptionColor }, copier = { copy(mediaCaptionColor = it) },
-                )
-                SnapshotOverrideRow(
-                    "Link colour", prefs, Prefs.LINK_COLOR, prefs.primary, "Misc",
-                    getter = { linkColor }, copier = { copy(linkColor = it) },
-                )
-            }
-        }
     }
 }

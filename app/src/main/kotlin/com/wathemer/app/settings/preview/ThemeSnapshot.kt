@@ -237,19 +237,18 @@ fun MutableState<ThemeSnapshot>.updateBubbleStyleOutgoing(prefs: Prefs, v: Int) 
     prefs.setOverride(Prefs.BUBBLE_STYLE_OUTGOING, v)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Snapshot-aware row helper: every update writes both the observable snapshot and prefs.
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Snapshot-aware row helper ───────────────────────────────────────────────
+// Every update writes both the observable snapshot and prefs.
 
-/** Pulls the snapshot from [LocalThemeSnapshot] and hands it to the explicit overload below. */
+/** Pulls the snapshot from [LocalThemeSnapshot] and hands it to the explicit overload below. [onOpen] fires on any touch of the row. */
 @Composable
 fun SnapshotOverrideRow(
     name: String,
     prefs: Prefs,
     prefKey: String,
     fallback: Int,
-    pickerSubtitle: String,
-    isNew: Boolean = false,
+    divider: Boolean = true,
+    onOpen: (() -> Unit)? = null,
     getter: ThemeSnapshot.() -> Int,
     copier: ThemeSnapshot.(Int) -> ThemeSnapshot,
 ) {
@@ -259,8 +258,8 @@ fun SnapshotOverrideRow(
         prefs = prefs,
         prefKey = prefKey,
         fallback = fallback,
-        pickerSubtitle = pickerSubtitle,
-        isNew = isNew,
+        divider = divider,
+        onOpen = onOpen,
         getter = getter,
         copier = copier,
     )
@@ -273,8 +272,8 @@ fun SnapshotOverrideRow(
     prefs: Prefs,
     prefKey: String,
     fallback: Int,
-    pickerSubtitle: String,
-    isNew: Boolean = false,
+    divider: Boolean = true,
+    onOpen: (() -> Unit)? = null,
     getter: ThemeSnapshot.() -> Int,
     copier: ThemeSnapshot.(Int) -> ThemeSnapshot,
 ) {
@@ -285,17 +284,17 @@ fun SnapshotOverrideRow(
         name = name,
         overrideValue = current,
         globalValue = fallback,
-        onPickCustom = { showPicker = true },
+        divider = divider,
+        onPickCustom = { onOpen?.invoke(); showPicker = true },
         onResetToGlobal = {
+            onOpen?.invoke()
             snapshot.value = snapshot.value.copier(0)
             prefs.setOverride(prefKey, 0)
         },
-        isNew = isNew,
     )
     if (showPicker) {
         ColorPickerSheet(
             title = name,
-            subtitle = pickerSubtitle,
             initialColor = if (current != 0) current else fallback,
             recents = recents,
             onDismiss = { showPicker = false },

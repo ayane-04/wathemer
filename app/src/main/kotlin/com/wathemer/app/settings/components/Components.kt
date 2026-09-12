@@ -1,10 +1,14 @@
+// The settings app's rows, bars and controls, drawn in WhatsApp's own grammar: flat lists, one label, a value where there is one.
 package com.wathemer.app.settings.components
 
+import android.content.Context
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,11 +16,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -24,28 +33,37 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wathemer.app.R
+import com.wathemer.app.settings.PendingRestart
 import com.wathemer.app.util.RestartWhatsApp
 
-/* ── Shared design tokens (must match the locked design system) ─────────── */
+// ── Shared design tokens ──────────────────────────────────────────────────
 
 object Palette {
     val Bg = Color(0xFF0A0A0A)
     val Surface = Color(0xFF141414)
-    val SurfaceElev = Color(0xFF111111)  // very subtle lift over Bg, used for inset surfaces
     val Rule = Color.White.copy(alpha = 0.09f)
     val RuleStrong = Color.White.copy(alpha = 0.14f)
     val Fg = Color.White
@@ -59,99 +77,63 @@ val AppAccent = Color(0xFFC95548)
 /** Ambient accent for app chrome, fixed at [AppAccent]. Never `provides Color(prefs.primary)`: the UI then follows the user's WA theme. */
 val LocalAccent = compositionLocalOf { AppAccent }
 
-/** Soft accent-tinted drop shadow matching the card corners, deliberately subtle. */
-fun Modifier.cardGlow(
-    accent: Color,
-    elevation: Dp = 5.dp,
-    cornerRadius: Dp = 10.dp,
-    intensity: Float = 0.6f,
-): Modifier = this.shadow(
-    elevation = elevation,
-    shape = RoundedCornerShape(cornerRadius),
-    ambientColor = accent.copy(alpha = intensity),
-    spotColor = accent.copy(alpha = intensity),
-)
+private val RowPadding = 16.dp
+private val IconSlot = 24.dp
+private val IconGap = 20.dp
 
-/** Halo for the small swatch boxes: the swatch's own colour as shadow, so it looks softly lit. */
-fun Modifier.swatchHalo(swatchColor: Color, cornerRadius: Dp = 8.dp): Modifier =
-    this.shadow(
-        elevation = 9.dp,
-        shape = RoundedCornerShape(cornerRadius),
-        ambientColor = swatchColor.copy(alpha = 0.9f),
-        spotColor = swatchColor.copy(alpha = 0.9f),
+// ── Chrome icons ────────────────────────────────────────────────────────
+// Generated bitmaps tinted at draw time; the dots stay drawn because three circles need no bitmap.
+@Composable
+fun BitmapIcon(@DrawableRes id: Int, tint: Color, size: Dp, modifier: Modifier = Modifier) {
+    Image(
+        bitmap = ImageBitmap.imageResource(id),
+        contentDescription = null,
+        modifier = modifier.size(size),
+        colorFilter = ColorFilter.tint(tint),
+        filterQuality = FilterQuality.High,
     )
+}
 
-/* ── Chrome icons ────────────────────────────────────────────────────────
- * Drawn, not typed: text glyphs render in the system font and do not match the preview Canvas icons. */
+/** A Home row's leading icon. */
+@Composable
+fun RowIcon(@DrawableRes id: Int) = BitmapIcon(id, Palette.FgMuted, 22.dp)
 
 @Composable
-internal fun BackIcon(tint: Color, size: Dp = 16.dp) {
-    Canvas(modifier = Modifier.size(size)) {
-        val w = this.size.width; val h = this.size.height
-        val s = 1.7.dp.toPx()
-        drawLine(tint, Offset(w * 0.16f, h * 0.5f), Offset(w * 0.86f, h * 0.5f), s)
-        drawLine(tint, Offset(w * 0.16f, h * 0.5f), Offset(w * 0.44f, h * 0.24f), s)
-        drawLine(tint, Offset(w * 0.16f, h * 0.5f), Offset(w * 0.44f, h * 0.76f), s)
-    }
-}
+private fun BackIcon(tint: Color, size: Dp = 22.dp) = BitmapIcon(R.drawable.ic_ui_back, tint, size)
 
 /** Disclosure chevron. Rotate 90° for the expand/collapse caret. */
 @Composable
-internal fun ChevronIcon(tint: Color, size: Dp = 14.dp, degrees: Float = 0f) {
-    Canvas(modifier = Modifier.size(size).rotate(degrees)) {
-        val w = this.size.width; val h = this.size.height
-        val s = 1.6.dp.toPx()
-        drawLine(tint, Offset(w * 0.36f, h * 0.22f), Offset(w * 0.66f, h * 0.5f), s)
-        drawLine(tint, Offset(w * 0.66f, h * 0.5f), Offset(w * 0.36f, h * 0.78f), s)
-    }
-}
+internal fun ChevronIcon(tint: Color, size: Dp = 14.dp, degrees: Float = 0f) =
+    BitmapIcon(R.drawable.ic_ui_chevron, tint, size, Modifier.rotate(degrees))
 
 /** Reset to default: a circular arrow. */
 @Composable
-internal fun ResetIcon(tint: Color, size: Dp = 14.dp) {
-    Canvas(modifier = Modifier.size(size)) {
-        val w = this.size.width; val h = this.size.height
-        val s = 1.5.dp.toPx()
-        drawArc(
-            color = tint,
-            startAngle = 55f, sweepAngle = 285f, useCenter = false,
-            topLeft = Offset(w * 0.16f, h * 0.16f),
-            size = Size(w * 0.68f, h * 0.68f),
-            style = Stroke(s),
-        )
-        drawLine(tint, Offset(w * 0.80f, h * 0.72f), Offset(w * 0.88f, h * 0.46f), s)
-        drawLine(tint, Offset(w * 0.80f, h * 0.72f), Offset(w * 0.54f, h * 0.68f), s)
-    }
-}
+private fun ResetIcon(tint: Color, size: Dp = 16.dp) = BitmapIcon(R.drawable.ic_ui_reset, tint, size)
 
 @Composable
-internal fun CloseIcon(tint: Color, size: Dp = 14.dp) {
-    Canvas(modifier = Modifier.size(size)) {
-        val w = this.size.width; val h = this.size.height
-        val s = 1.6.dp.toPx()
-        drawLine(tint, Offset(w * 0.22f, h * 0.22f), Offset(w * 0.78f, h * 0.78f), s)
-        drawLine(tint, Offset(w * 0.78f, h * 0.22f), Offset(w * 0.22f, h * 0.78f), s)
-    }
-}
+internal fun CloseIcon(tint: Color, size: Dp = 14.dp) = BitmapIcon(R.drawable.ic_ui_close, tint, size)
 
 @Composable
-internal fun CheckIcon(tint: Color, size: Dp = 15.dp) {
+internal fun CheckIcon(tint: Color, size: Dp = 15.dp) = BitmapIcon(R.drawable.ic_ui_check, tint, size)
+
+/** The three dots of an overflow menu. */
+@Composable
+internal fun OverflowIcon(tint: Color, size: Dp = 22.dp) {
     Canvas(modifier = Modifier.size(size)) {
         val w = this.size.width; val h = this.size.height
-        val s = 1.9.dp.toPx()
-        drawLine(tint, Offset(w * 0.18f, h * 0.52f), Offset(w * 0.42f, h * 0.76f), s)
-        drawLine(tint, Offset(w * 0.42f, h * 0.76f), Offset(w * 0.84f, h * 0.26f), s)
+        val r = 2.dp.toPx()
+        drawCircle(tint, r, Offset(w * 0.5f, h * 0.24f))
+        drawCircle(tint, r, Offset(w * 0.5f, h * 0.50f))
+        drawCircle(tint, r, Offset(w * 0.5f, h * 0.76f))
     }
 }
 
-/* ── NavTopBar: reusable back-button header ────────────────────────────── */
+// ── NavTopBar: the screen's bar ─────────────────────────────────────────
 
 /** Top bar for any screen; [onBack] = null at the root removes the back arrow. */
 @Composable
 fun NavTopBar(
     title: String,
-    subtitle: String,
-    accent: Color = LocalAccent.current,
     onBack: (() -> Unit)? = null,
     trailing: @Composable () -> Unit = {},
 ) {
@@ -159,64 +141,59 @@ fun NavTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(Palette.Bg)
-            .padding(start = 14.dp, end = 18.dp, top = 18.dp, bottom = 16.dp),
+            .height(56.dp)
+            .padding(start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
             Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .cardGlow(accent, elevation = 4.dp, cornerRadius = 9.dp, intensity = 0.4f)
-                    .border(1.dp, Palette.RuleStrong, RoundedCornerShape(8.dp))
-                    .background(Palette.SurfaceElev, RoundedCornerShape(8.dp))
-                    .clickable(onClick = onBack),
+                modifier = Modifier.size(48.dp).clickable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
                 BackIcon(Palette.Fg)
             }
-            Spacer(Modifier.size(12.dp))
         } else {
-            Spacer(Modifier.size(6.dp))
+            Spacer(Modifier.width(12.dp))
         }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Palette.Fg, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, lineHeight = 24.sp)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                // Soft accent dot with a glow halo behind it.
-                Box(
-                    modifier = Modifier
-                        .size(5.dp)
-                        .shadow(6.dp, CircleShape, ambientColor = accent.copy(alpha = 0.95f), spotColor = accent.copy(alpha = 0.95f))
-                        .background(accent, CircleShape),
-                )
-                Spacer(Modifier.size(6.dp))
-                Text(subtitle.uppercase(), color = Palette.FgMuted, fontSize = 11.sp, letterSpacing = 1.8.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
+        Text(
+            title,
+            color = Palette.Fg,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            modifier = Modifier.weight(1f).padding(start = if (onBack != null) 4.dp else 0.dp),
+        )
         trailing()
     }
-    HorizontalRule(accent = accent)
 }
 
-/** Hairline rule with a soft accent bloom in the middle third. */
+/** An overflow button with its menu; [items] are label and action. */
 @Composable
-fun HorizontalRule(accent: Color = LocalAccent.current) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(
-                Brush.horizontalGradient(
-                    0.00f to Palette.Rule,
-                    0.30f to Palette.Rule,
-                    0.50f to accent.copy(alpha = 0.30f),
-                    0.70f to Palette.Rule,
-                    1.00f to Palette.Rule,
+fun TopBarMenu(items: List<Pair<String, () -> Unit>>) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            modifier = Modifier.size(48.dp).clickable { open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            OverflowIcon(Palette.Fg)
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            containerColor = Palette.Surface,
+        ) {
+            items.forEach { (label, action) ->
+                DropdownMenuItem(
+                    text = { Text(label, color = Palette.Fg, fontSize = 15.sp) },
+                    onClick = { open = false; action() },
                 )
-            )
-    )
+            }
+        }
+    }
 }
 
-/* ── PreviewPanel ───────────────────────────────────────────────────────── */
+// ── PreviewPanel ─────────────────────────────────────────────────────────
 
 /** Preview frame, deliberately unlabelled: an untouched mock is itself the signal the hook is not working. */
 @Composable
@@ -227,7 +204,7 @@ fun PreviewPanel(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Box(
             modifier = Modifier
@@ -240,299 +217,116 @@ fun PreviewPanel(
     }
 }
 
-/* ── CategoryRow: tap-to-enter row ─────────────────────────────────────── */
+// ── SectionHeader: the group label ──────────────────────────────────────
+
+/** Sentence case, in the accent. */
+@Composable
+fun SectionHeader(title: String) {
+    Text(
+        title,
+        color = LocalAccent.current,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(start = RowPadding, end = RowPadding, top = 18.dp, bottom = 4.dp),
+    )
+}
+
+// ── Row primitives ───────────────────────────────────────────────────────
 
 @Composable
-fun CategoryRow(
+private fun RowDivider(inset: Dp) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = inset)
+            .height(1.dp)
+            .background(Palette.Rule),
+    )
+}
+
+/** The list row every other row is: a leading slot, a label with an optional second line, a trailing slot. */
+@Composable
+private fun ListRow(
     label: String,
-    description: String,
+    secondary: String = "",
     leading: (@Composable () -> Unit)? = null,
-    trailingHint: String? = null,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
+    divider: Boolean = true,
+    trailing: @Composable () -> Unit = {},
 ) {
-    val accent = LocalAccent.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .cardGlow(accent, elevation = 6.dp, intensity = 0.5f)
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
-            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (leading != null) {
-            leading()
-            Spacer(Modifier.size(14.dp))
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
-            Text(description, color = Palette.FgMuted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 3.dp))
-        }
-        Spacer(Modifier.size(10.dp))
-        Column(horizontalAlignment = Alignment.End) {
-            if (trailingHint != null) {
-                Text(trailingHint, color = accent.copy(alpha = 0.85f), fontSize = 9.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
-            }
-            Box(modifier = Modifier.padding(top = if (trailingHint != null) 2.dp else 0.dp)) { ChevronIcon(Palette.FgMuted) }
-        }
-    }
-}
-
-/* ── SectionHeader: small caps category title within a screen ─────────── */
-
-@Composable
-fun SectionHeader(title: String, subtitle: String? = null) {
-    Column {
-        Text(title.uppercase(), color = Palette.Fg, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-        if (subtitle != null) {
-            Text(subtitle, color = Palette.FgMuted, fontSize = 13.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
-        }
-    }
-}
-
-/* ── ExpandableSection: tap to expand a labeled card with token rows inside ── */
-
-@Composable
-fun ExpandableSection(
-    label: String,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    swatchColor: Int = 0,
-    content: @Composable () -> Unit,
-) {
-    val accent = LocalAccent.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
-            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(12.dp)),
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onToggle)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .heightIn(min = if (secondary.isBlank()) 56.dp else 64.dp)
+                .padding(horizontal = RowPadding, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (swatchColor != 0) {
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .background(Color(swatchColor), CircleShape)
-                        .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
-                )
-                Spacer(Modifier.size(10.dp))
+            if (leading != null) {
+                Box(Modifier.size(IconSlot), contentAlignment = Alignment.Center) { leading() }
+                Spacer(Modifier.width(IconGap))
             }
-            Text(
-                label,
-                color = Palette.Fg,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.2).sp,
-                modifier = Modifier.weight(1f),
-            )
-            ChevronIcon(accent, degrees = if (expanded) 90f else 0f)
-        }
-        if (expanded) {
-            Column(
-                modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 0.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) { content() }
-        }
-    }
-}
-
-/* ── TokenRow: color-chip row (clickable to open picker) ───────────────── */
-
-@Composable
-fun TokenRow(
-    icon: String,
-    name: String,
-    color: Int,
-    onClick: () -> Unit,
-) {
-    val accent = LocalAccent.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .cardGlow(accent, elevation = 5.dp, intensity = 0.5f)
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
-            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .swatchHalo(Color(color), cornerRadius = 23.dp)
-                .background(Color(color), CircleShape)
-                .border(1.5.dp, Color.White.copy(alpha = 0.15f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                icon,
-                color = if (luminance(color) > 0.5f) Color.Black else Color.White,
-                fontSize = 22.sp, fontWeight = FontWeight.Bold,
-            )
-        }
-        Spacer(Modifier.size(14.dp))
-        Text(
-            name,
-            color = Palette.Fg,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = (-0.2).sp,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.size(10.dp))
-        Column(horizontalAlignment = Alignment.End) {
-            Text("#%08X".format(color), color = Palette.Fg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
-            Text("EDIT", color = accent.copy(alpha = 0.75f), fontSize = 9.sp, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
-        }
-    }
-}
-
-/* ── StubNote: a small explanatory note under a list ───────────────────── */
-
-@Composable
-fun StubNote(text: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, Palette.Rule, RoundedCornerShape(8.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(5.dp).background(Palette.FgSubtle, CircleShape))
-            Spacer(Modifier.size(8.dp))
-            Text(text, color = Palette.FgMuted, fontSize = 11.sp, lineHeight = 16.sp)
-        }
-    }
-}
-
-/* ── OverrideRow: per-element override (use global / custom) ───────────── */
-
-/** Override token row: 0 shows [globalValue] as GLOBAL, non-zero shows CUSTOM plus a reset icon. [isNew] opts into the NEW tag. */
-@Composable
-fun OverrideRow(
-    name: String,
-    overrideValue: Int,
-    globalValue: Int,
-    onPickCustom: () -> Unit,
-    onResetToGlobal: () -> Unit,
-    isNew: Boolean = false,
-) {
-    val accent = LocalAccent.current
-    val isOverridden = overrideValue != 0
-    val effective = if (isOverridden) overrideValue else globalValue
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .cardGlow(accent, elevation = 5.dp, intensity = 0.5f)
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
-            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(12.dp))
-            .clickable(onClick = onPickCustom)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .swatchHalo(Color(effective), cornerRadius = 20.dp)
-                .background(Color(effective), CircleShape)
-                .border(1.5.dp, Color.White.copy(alpha = 0.15f), CircleShape),
-        )
-        Spacer(Modifier.size(14.dp))
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                name,
-                color = Palette.Fg,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.2).sp,
-            )
-            if (isNew) {
-                Spacer(Modifier.size(8.dp))
-                Box(
-                    modifier = Modifier
-                        .background(accent.copy(alpha = 0.18f), RoundedCornerShape(4.dp))
-                        .border(1.dp, accent.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 5.dp, vertical = 1.dp),
-                ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, color = Palette.Fg, fontSize = 16.sp, lineHeight = 22.sp)
+                if (secondary.isNotBlank()) {
                     Text(
-                        "NEW",
-                        color = accent,
-                        fontSize = 9.sp,
-                        letterSpacing = 1.2.sp,
-                        fontWeight = FontWeight.Bold,
+                        secondary,
+                        color = Palette.FgMuted,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        maxLines = 2,
+                        modifier = Modifier.padding(top = 2.dp),
                     )
                 }
             }
+            Spacer(Modifier.width(12.dp))
+            trailing()
         }
-        Spacer(Modifier.size(10.dp))
-        Column(horizontalAlignment = Alignment.End) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (isOverridden) {
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clickable(onClick = onResetToGlobal),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ResetIcon(Palette.FgMuted)
-                    }
-                    Spacer(Modifier.size(4.dp))
-                }
-                Text(
-                    if (isOverridden) "CUSTOM" else "GLOBAL",
-                    color = if (isOverridden) accent.copy(alpha = 0.95f) else Palette.FgSubtle,
-                    fontSize = 9.sp,
-                    letterSpacing = 1.4.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Text(
-                "#%08X".format(effective),
-                color = Palette.FgMuted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.4.sp,
-                modifier = Modifier.padding(top = 3.dp),
-            )
-        }
+        if (divider) RowDivider(if (leading != null) RowPadding + IconSlot + IconGap else RowPadding)
     }
 }
 
-/* ── ToggleItem: labelled switch row ──────────────────────────────────── */
+/** Muted value text on the right of a row. */
+@Composable
+private fun ValueText(text: String) {
+    Text(text, color = Palette.FgMuted, fontSize = 14.sp, maxLines = 1)
+}
+
+// ── CategoryRow: tap-to-enter row ───────────────────────────────────────
+
+/** A row that leads somewhere or does something. [description] draws under the label only when given; [trailingHint] is the value shown before the chevron. */
+@Composable
+fun CategoryRow(
+    label: String,
+    description: String = "",
+    leading: (@Composable () -> Unit)? = null,
+    trailingHint: String? = null,
+    divider: Boolean = true,
+    onClick: () -> Unit,
+) {
+    ListRow(label = label, secondary = description, leading = leading, onClick = onClick, divider = divider) {
+        if (!trailingHint.isNullOrBlank()) {
+            ValueText(trailingHint)
+            Spacer(Modifier.width(8.dp))
+        }
+        ChevronIcon(Palette.FgMuted)
+    }
+}
+
+
+// ── ToggleItem: labelled switch row ────────────────────────────────────
 
 @Composable
 fun ToggleItem(
     title: String,
-    subtitle: String,
+    subtitle: String = "",
     checked: Boolean,
+    divider: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val accent = LocalAccent.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .cardGlow(accent, elevation = 5.dp, intensity = 0.5f)
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
-            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(12.dp))
-            .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
-            Text(subtitle, color = Palette.FgMuted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 3.dp))
-        }
-        Spacer(Modifier.size(10.dp))
+    ListRow(label = title, secondary = subtitle, onClick = { onCheckedChange(!checked) }, divider = divider) {
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -548,82 +342,225 @@ fun ToggleItem(
     }
 }
 
-/* ── MenuRow: tap-to-launch row ────────────────────────────────────────── */
+// ── SliderItem: label, track, value on one line ────────────────────────
 
-@Composable
-fun MenuRow(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-) {
-    val accent = LocalAccent.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .cardGlow(accent, elevation = 5.dp, intensity = 0.5f)
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
-            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
-            Text(subtitle, color = Palette.FgMuted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 3.dp))
-        }
-        Spacer(Modifier.size(10.dp))
-        ChevronIcon(Palette.FgMuted)
-    }
-}
-
-/* ── SliderItem: labelled slider with value display ───────────────────── */
-
+/** The compact control: the label on the left, a thin track, the value on the right. */
 @Composable
 fun SliderItem(
     title: String,
-    subtitle: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     steps: Int,
+    divider: Boolean = true,
     onValueChange: (Float) -> Unit,
     valueLabel: (Float) -> String,
 ) {
     val accent = LocalAccent.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .cardGlow(accent, elevation = 5.dp, intensity = 0.5f)
-            .background(Palette.SurfaceElev, RoundedCornerShape(12.dp))
-            .border(1.dp, Palette.RuleStrong, RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = Palette.Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
-                Text(subtitle, color = Palette.FgMuted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 3.dp))
-            }
-            Spacer(Modifier.size(8.dp))
-            Text(valueLabel(value), color = accent, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .padding(horizontal = RowPadding, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title,
+                color = Palette.Fg,
+                fontSize = 16.sp,
+                lineHeight = 18.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.width(136.dp),
+            )
+            ThinSlider(
+                value = value,
+                range = range,
+                steps = steps,
+                accent = accent,
+                onValueChange = onValueChange,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            Text(
+                valueLabel(value),
+                color = Palette.Fg,
+                fontSize = 15.sp,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                modifier = Modifier.width(52.dp),
+            )
         }
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = range,
-            steps = steps,
-            colors = SliderDefaults.colors(
-                thumbColor = accent,
-                activeTrackColor = accent,
-                activeTickColor = Color.Transparent,
-                inactiveTickColor = Color.Transparent,
-                inactiveTrackColor = Palette.Rule,
-            ),
-            modifier = Modifier.padding(top = 6.dp),
-        )
+        if (divider) RowDivider(RowPadding)
     }
 }
 
-/* ── Util ───────────────────────────────────────────────────────────────── */
+/** A hairline track and a round thumb, the slider WhatsApp itself draws. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThinSlider(
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    accent: Color,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val colors = SliderDefaults.colors(
+        thumbColor = accent,
+        activeTrackColor = accent,
+        inactiveTrackColor = Palette.RuleStrong,
+        activeTickColor = Color.Transparent,
+        inactiveTickColor = Color.Transparent,
+    )
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        valueRange = range,
+        steps = steps,
+        interactionSource = interaction,
+        colors = colors,
+        modifier = modifier,
+        thumb = {
+            SliderDefaults.Thumb(
+                interactionSource = interaction,
+                colors = colors,
+                thumbSize = DpSize(18.dp, 18.dp),
+            )
+        },
+        track = { state ->
+            SliderDefaults.Track(
+                sliderState = state,
+                colors = colors,
+                thumbTrackGapSize = 0.dp,
+                trackInsideCornerSize = 0.dp,
+                drawStopIndicator = null,
+                modifier = Modifier.height(3.dp),
+            )
+        },
+    )
+}
 
+// ── Swatch rows ─────────────────────────────────────────────────────────
+
+@Composable
+private fun Swatch(color: Int, size: Dp) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .background(Color(color), CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape),
+    )
+}
+
+/** A colour that is always set: the swatch is the value. */
+@Composable
+fun TokenRow(
+    name: String,
+    color: Int,
+    divider: Boolean = true,
+    onClick: () -> Unit,
+) {
+    ListRow(label = name, leading = { Swatch(color, 24.dp) }, onClick = onClick, divider = divider) {
+        ChevronIcon(Palette.FgMuted)
+    }
+}
+
+/** A colour that may follow the global: 0 shows the global's swatch and says so, a value shows its own and offers the way back. */
+@Composable
+fun OverrideRow(
+    name: String,
+    overrideValue: Int,
+    globalValue: Int,
+    onPickCustom: () -> Unit,
+    onResetToGlobal: () -> Unit,
+    divider: Boolean = true,
+) {
+    val isOverridden = overrideValue != 0
+    val effective = if (isOverridden) overrideValue else globalValue
+    ListRow(label = name, leading = { Swatch(effective, 20.dp) }, onClick = onPickCustom, divider = divider) {
+        if (isOverridden) {
+            Box(
+                modifier = Modifier.size(32.dp).clickable(onClick = onResetToGlobal),
+                contentAlignment = Alignment.Center,
+            ) {
+                ResetIcon(Palette.FgMuted)
+            }
+        } else {
+            ValueText("Global")
+        }
+    }
+}
+
+// ── ExpandableSection: a group that opens on tap ────────────────────────
+
+@Composable
+private fun ExpandableSection(
+    label: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    swatchColor: Int = 0,
+    trailingText: String? = null,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        ListRow(
+            label = label,
+            leading = if (swatchColor != 0) ({ Swatch(swatchColor, 20.dp) }) else null,
+            onClick = onToggle,
+        ) {
+            if (!trailingText.isNullOrBlank()) {
+                ValueText(trailingText)
+                Spacer(Modifier.width(8.dp))
+            }
+            ChevronIcon(Palette.FgMuted, degrees = if (expanded) 90f else 0f)
+        }
+        if (expanded) {
+            // Indented a step, so the rows read as the group's and the next group row reads as a sibling.
+            Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp)) { content() }
+        }
+    }
+}
+
+/** A group that opens on tap and remembers whether it is open across rotation. Collapsed to begin with. */
+@Composable
+fun ExpandGroup(
+    label: String,
+    swatchColor: Int = 0,
+    trailingText: String? = null,
+    onOpen: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    ExpandableSection(
+        label = label,
+        expanded = open,
+        onToggle = {
+            open = !open
+            if (open) onOpen?.invoke()
+        },
+        swatchColor = swatchColor,
+        trailingText = trailingText,
+        content = content,
+    )
+}
+
+// ── NoteText: one plain line under a list ───────────────────────────────
+
+@Composable
+fun NoteText(text: String) {
+    Text(
+        text,
+        color = Palette.FgMuted,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = RowPadding, vertical = 14.dp),
+    )
+}
+
+// ── Util ─────────────────────────────────────────────────────────────────
+
+/** Perceived luminance, for picking dark or light text on a coloured background. */
 fun luminance(argb: Int): Float {
     val r = android.graphics.Color.red(argb) / 255f
     val g = android.graphics.Color.green(argb) / 255f
@@ -631,96 +568,58 @@ fun luminance(argb: Int): Float {
     return 0.2126f * r + 0.7152f * g + 0.0722f * b
 }
 
-/* ── Restart WhatsApp button (sticky bottom on every screen) ───────────── */
+// ── RestartBar: shown only while a change waits for WhatsApp to restart ──
 
-/** Sticky bottom button that restarts WhatsApp: both kill paths always run, then a plain launcher intent, so auto-rotate stays untouched. */
+/** Restarts WhatsApp and reports the outcome; a success also clears the pending flag. */
+fun restartWhatsApp(context: Context, onMessage: (String) -> Unit) {
+    RestartWhatsApp.restart(context) { result ->
+        val msg = when (result) {
+            RestartWhatsApp.Result.SUCCESS -> {
+                PendingRestart.clear(context)
+                "Restarting WhatsApp"
+            }
+            RestartWhatsApp.Result.NOT_INSTALLED -> "WhatsApp is not installed."
+            RestartWhatsApp.Result.LAUNCH_FAILED -> "Could not launch WhatsApp."
+        }
+        onMessage(msg)
+    }
+}
+
+/** One line and one action, at the bottom of every screen, only while a change is pending. */
 @Composable
-fun RestartWhatsAppButton(
+fun RestartBar(
     accent: Color = LocalAccent.current,
     onMessage: (String) -> Unit,
 ) {
+    val pending by PendingRestart.pending
+    if (!pending) return
     val context = LocalContext.current
-    val onAccent = if (relativeLuminance(accent) > 0.55f)
-        Color(0xFF101010)
-    else
-        Color.White
-
-    // Vertical gradient: slightly brighter at top -> slightly muted at bottom.
-    val topShade = accent.copy(alpha = 1f)
-    val bottomShade = accent.copy(red = (accent.red * 0.88f).coerceIn(0f, 1f),
-                                    green = (accent.green * 0.88f).coerceIn(0f, 1f),
-                                    blue = (accent.blue * 0.88f).coerceIn(0f, 1f),
-                                    alpha = 1f)
-
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Palette.Bg)
-            .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .background(Palette.Surface)
+            .navigationBarsPadding(),
     ) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Rule))
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .shadow(
-                    elevation = 12.dp,
-                    shape = RoundedCornerShape(24.dp),
-                    ambientColor = accent.copy(alpha = 0.85f),
-                    spotColor = accent.copy(alpha = 0.85f),
-                )
-                .background(
-                    Brush.verticalGradient(listOf(topShade, bottomShade)),
-                    RoundedCornerShape(24.dp),
-                )
-                .clickable {
-                    RestartWhatsApp.restart(context) { result ->
-                        val msg = when (result) {
-                            RestartWhatsApp.Result.SUCCESS -> "Restarting WhatsApp…"
-                            RestartWhatsApp.Result.NOT_INSTALLED -> "WhatsApp not installed."
-                            RestartWhatsApp.Result.LAUNCH_FAILED -> "Could not launch WhatsApp."
-                        }
-                        onMessage(msg)
-                    }
-                }
-                .padding(horizontal = 16.dp, vertical = 13.dp),
-            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth().padding(start = RowPadding, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RestartGlyph(onAccent)
-            Spacer(Modifier.size(9.dp))
             Text(
-                "Restart WhatsApp",
-                color = onAccent,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.6.sp,
+                "Changes apply the next time WhatsApp starts.",
+                color = Palette.FgMuted,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "Restart",
+                color = accent,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clickable { restartWhatsApp(context, onMessage) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             )
         }
     }
 }
-
-@Composable
-private fun RestartGlyph(tint: Color) {
-    Canvas(modifier = Modifier.size(15.dp)) {
-        val w = size.width; val h = size.height
-        val s = 1.6.dp.toPx()
-        drawArc(
-            color = tint,
-            startAngle = 30f,
-            sweepAngle = 290f,
-            useCenter = false,
-            topLeft = Offset(w * 0.15f, h * 0.15f),
-            size = Size(w * 0.7f, h * 0.7f),
-            style = Stroke(s),
-        )
-        // Arrow head at the open end of the arc (~30° = top-right)
-        val tipX = w * 0.78f; val tipY = h * 0.32f
-        drawLine(tint, Offset(tipX, tipY),
-            Offset(tipX - 5.dp.toPx(), tipY - 1.dp.toPx()), s)
-        drawLine(tint, Offset(tipX, tipY),
-            Offset(tipX + 1.dp.toPx(), tipY + 5.dp.toPx()), s)
-    }
-}
-
-internal fun relativeLuminance(c: Color): Float =
-    0.2126f * c.red + 0.7152f * c.green + 0.0722f * c.blue

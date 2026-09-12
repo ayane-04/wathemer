@@ -18,7 +18,7 @@ object WallpaperAsset {
     private const val TAG = "WaThemer.Wallpaper"
 
     /** The public copy WhatsApp reads; its path is what [Prefs.wallpaperPath] holds. */
-    fun activeFile(): File = File(publicDir(), "wallpaper.png")
+    private fun activeFile(): File = File(publicDir(), "wallpaper.png")
 
     /** The private master copy. Survives anything except an uninstall. */
     fun masterFile(context: Context): File = File(context.filesDir, "wallpaper_master.png")
@@ -49,7 +49,7 @@ object WallpaperAsset {
                 staging.delete()
                 return null
             }
-            // Swap only once the bytes are on disk; rename can fail on some storage layers, hence the fallback copy.
+            // Swap only once the bytes are on disk; rename can fail on some storage layers, so a copy is the fallback.
             dest.delete()
             if (!staging.renameTo(dest)) {
                 Log.w(TAG, "persist: rename ${staging.name} -> ${dest.name} failed; copying")

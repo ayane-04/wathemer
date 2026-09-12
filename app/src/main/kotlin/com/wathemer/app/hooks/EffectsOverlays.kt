@@ -31,7 +31,7 @@ object EffectsOverlays {
         // Dispatched after the wallpaper client; the flakes sit in content, above the wallpaper, whichever attaches first.
         ActivityLifecycle.onCreated("snow") { a ->
             if (a.packageName == "com.whatsapp") {
-                runCatching { attach(a) }
+                runCatching { attach(a) }.onFailure { XposedBridge.log("$TAG: snow attach failed on ${a.javaClass.simpleName}: $it") }
             }
         }
         XposedBridge.log("$TAG: snow armed")

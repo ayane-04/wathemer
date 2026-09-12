@@ -76,7 +76,7 @@ class ModernEntry : XposedModule() {
             catch (t: Throwable) { HookLog.fail("install/WallpaperImage", t) }
             try { ChatWallpapers.install(app); HookLog.arm("install/ChatWallpapers") }
             catch (t: Throwable) { HookLog.fail("install/ChatWallpapers", t) }
-            try { ChatWallpaperMenu.install(app, classLoader); HookLog.arm("install/ChatWallpaperMenu") }
+            try { ChatWallpaperMenu.install(classLoader); HookLog.arm("install/ChatWallpaperMenu") }
             catch (t: Throwable) { HookLog.fail("install/ChatWallpaperMenu", t) }
             try { EffectsOverlays.install(); HookLog.arm("install/EffectsOverlays") }
             catch (t: Throwable) { HookLog.fail("install/EffectsOverlays", t) }
