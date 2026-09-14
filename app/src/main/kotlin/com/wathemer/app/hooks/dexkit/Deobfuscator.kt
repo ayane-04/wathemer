@@ -86,6 +86,43 @@ object Deobfuscator {
     private var balloonBorderDrawableMethod: Method? = null
     private var balloonInsetMethod: Method? = null
 
+    private var reactionsTrayClass: Class<*>? = null
+    private var reactionsTrayResolved = false
+
+    /** The reaction tray's class: the one LinearLayout whose code carries the tray's own id number. Idempotent. */
+    @Synchronized
+    fun loadReactionsTrayClass(classLoader: ClassLoader, trayId: Int): Class<*>? {
+        if (reactionsTrayResolved) return reactionsTrayClass
+        reactionsTrayResolved = true
+        cache.getString("reactions_tray_class")?.let { name ->
+            try {
+                val cls = Class.forName(name, false, classLoader)
+                reactionsTrayClass = cls
+                dlog("reactions tray via cache -> $name")
+                return cls
+            } catch (_: Throwable) {
+                cache.remove("reactions_tray_class")
+            }
+        }
+        val bridge = bridgeOrNull() ?: run {
+            dlog("reactions tray UNRESOLVED; DexKit bridge not open")
+            return null
+        }
+        val hits = bridge.findMethod(
+            FindMethod.create().matcher(MethodMatcher.create().addUsingNumber(trayId)),
+        )
+        for (h in hits) {
+            val cls = runCatching { Class.forName(h.declaredClassName, false, classLoader) }.getOrNull() ?: continue
+            if (!android.widget.LinearLayout::class.java.isAssignableFrom(cls)) continue
+            reactionsTrayClass = cls
+            cache.putString("reactions_tray_class", cls.name)
+            dlog("reactions tray via id number -> ${cls.name}")
+            return cls
+        }
+        dlog("reactions tray UNRESOLVED; ${hits.size} methods use the id, none on a LinearLayout")
+        return null
+    }
+
     /** Resolve the bubble provider class + 4 methods. Idempotent. */
     @Synchronized
     fun loadBubbleProviderClass(classLoader: ClassLoader): Class<*>? {

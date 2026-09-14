@@ -140,6 +140,16 @@ class BackdropCapture(
         src?.getLocationOnScreen(sourceLocation)
         val dx = if (src == null) 0f else (hostLocation[0] - sourceLocation[0]).toFloat()
         val dy = if (src == null) 0f else (hostLocation[1] - sourceLocation[1]).toFloat()
+        // A scaled ancestor shrinks the pane on screen; the span behind it shrinks with it, or the right part samples past the edge.
+        var sx = 1f
+        var sy = 1f
+        var anc: View? = host
+        while (anc != null) {
+            sx *= anc.scaleX
+            sy *= anc.scaleY
+            anc = anc.parent as? View
+        }
+        if (sx < 0.01f || sy < 0.01f) return false
 
         // Computed before the log line so it prints the current value; indexed to stay allocation-free.
         for (i in underlay.indices) {
@@ -160,8 +170,9 @@ class BackdropCapture(
         val canvas = node.beginRecording(w, h)
         capturing = true
         try {
-            // Scale first, then translate: the offsets are in pre-downsample pixels.
+            // Scale first, then translate: the offsets are in pre-downsample pixels, and then in on-screen pixels.
             canvas.scale(1f / scale, 1f / scale)
+            canvas.scale(1f / sx, 1f / sy)
 
             // In draw order: the wallpaper is an image plus a separate dim overlay; draw both.
             for (i in underlay.indices) {
@@ -171,7 +182,7 @@ class BackdropCapture(
                 // View.draw() skips the view's own RenderNode, so re-apply its alpha via a layer.
                 val save = if (u.alpha < 1f) {
                     canvas.saveLayerAlpha(
-                        0f, 0f, host.width.toFloat(), host.height.toFloat(),
+                        0f, 0f, host.width * sx, host.height * sy,
                         (u.alpha * 255f).toInt().coerceIn(0, 255),
                     )
                 } else {

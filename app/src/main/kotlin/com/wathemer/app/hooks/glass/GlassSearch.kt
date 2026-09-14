@@ -398,7 +398,8 @@ private fun animateSearchEntry(toolbar: View, root: ViewGroup) {
 
 /** The return leg animates the INCOMING bar: the fragment dies in one frame, and an outgoing pill would glide away empty. */
 private fun animateHomeBarReturn() {
-    val bar = searchBarRef?.get() ?: return
+    // The page on screen owns the return; a second chats page's bar would glide back off-screen.
+    val bar = currentChatsPage()?.bar?.get() ?: searchBarRef?.get() ?: return
     if (bar.height <= 0 || searchFieldRestH <= 0 || homeBarTop < 0 || homeBarHeight <= 0) return
     val delta = (searchFieldRestTop + searchFieldRestH / 2f) -
         (homeBarTop + homeBarHeight / 2f)
@@ -488,7 +489,7 @@ internal fun injectSearchFieldGlass(inner: View) {
     bar.setTag(innerGlassTag, true)
 
     val glass = GlassView(bar.context).apply {
-        backdrop = listRef?.get()
+        backdrop = chatsPageOf(bar)?.list?.get()
         underlay = wallpaperUnderlay(bar)
         params.apply {
             downsample = DOWNSAMPLE
@@ -505,7 +506,7 @@ internal fun injectSearchFieldGlass(inner: View) {
     val sync = Runnable {
         if (inner.width <= 0 || inner.height <= 0) return@Runnable
         // Resolve, don't remember: a backdrop bound once at construction can end up a detached list, frozen or blank.
-        listRef?.get()?.let { l -> if (glass.backdrop !== l) glass.backdrop = l }
+        chatsPageOf(bar)?.list?.get()?.let { l -> if (glass.backdrop !== l) glass.backdrop = l }
         val lp = glass.layoutParams as? FrameLayout.LayoutParams ?: return@Runnable
         if (lp.width != inner.width || lp.height != inner.height ||
             lp.leftMargin != inner.left || lp.topMargin != inner.top

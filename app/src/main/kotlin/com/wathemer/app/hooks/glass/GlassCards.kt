@@ -19,6 +19,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.wathemer.app.glass.GlassView
 import com.wathemer.app.hooks.WaIds
+import com.wathemer.app.hooks.WaeCompat
 import com.wathemer.app.hooks.waId
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -28,10 +29,44 @@ import java.util.Collections
 import java.util.WeakHashMap
 import kotlin.math.abs
 
-private var listPanelRef: WeakReference<View>? = null
+/** One per chats-style page: the pager keeps neighbours realised, and a module can add a second such page, so shared refs would track whichever attached last. */
+internal class ChatsPage(host: ViewGroup) {
+    /** The card's host: the page's own conversations_coordinator_layout, inside the pager so the card pages. */
+    val host = WeakReference(host)
+    var panel: WeakReference<GlassView>? = null
+    var list: WeakReference<View>? = null
+    var bar: WeakReference<View>? = null
+}
 
-/** The card's host: conversations_coordinator_layout, inside the pager so the card pages; not id/content. */
-internal var cardHostRef: WeakReference<ViewGroup>? = null
+/** Keyed by the page's coordinator; weak, so a destroyed page takes its state with it. */
+internal val chatsPages = WeakHashMap<ViewGroup, ChatsPage>()
+
+/** conversations_coordinator_layout's id, for the walk from a list or a search bar up to its page. */
+internal var coordIdPin = 0
+
+/** The chats page [v] belongs to, by its coordinator ancestor; null anywhere else. */
+internal fun chatsPageOf(v: View): ChatsPage? {
+    if (coordIdPin == 0) return null
+    var p: View? = v
+    var hops = 0
+    while (p != null && hops < 12) {
+        if (p.id == coordIdPin && p is ViewGroup) return chatsPages[p]
+        p = p.parent as? View
+        hops++
+    }
+    return null
+}
+
+/** The chats page on screen: a pager page shares the pager's left edge only while it is the current one. */
+internal fun currentChatsPage(): ChatsPage? {
+    for (page in chatsPages.values.toList()) {
+        val host = page.host.get() ?: continue
+        if (host.width <= 0 || !host.isShown) continue
+        host.getLocationOnScreen(hostAt)
+        if (abs(hostAt[0]) < host.width / 2) return page
+    }
+    return null
+}
 
 // ── The updates page ──────────────────────────────────────────────────────────────
 // Its own refs: the page's shape differs from Chats, and the host measures as a FrameLayout in both tab states.
@@ -45,9 +80,10 @@ private var updatesTitleRef: WeakReference<View>? = null
 
 private val updatesTitleTag = tagKey("wathemer-updates-title")
 
-/** The chat-list card, at index 0 of the page's own coordinator so it travels with the page; Chats-only, geometry in [syncListCard]. */
-internal fun injectListPanel(parent: ViewGroup) {
-    if (listPanelRef?.get()?.parent === parent) return
+/** The chat-list card, at index 0 of the page's own coordinator so it travels with the page; one per chats page, geometry in [syncListCard]. */
+internal fun injectListPanel(page: ChatsPage) {
+    val parent = page.host.get() ?: return
+    if (page.panel?.get()?.parent === parent) return
     if (!parent.isAttachedToWindow) return
 
     val glass = GlassView(parent.context).apply {
@@ -66,9 +102,9 @@ internal fun injectListPanel(parent: ViewGroup) {
     }
     // Zero-sized until syncListCard measures; plain MarginLayoutParams keeps out a compile-time coordinatorlayout dependency.
     parent.addView(glass, 0, ViewGroup.MarginLayoutParams(0, 0))
-    listPanelRef = WeakReference(glass)
-    syncListCard()
-    XposedBridge.log("[$TAG] list card inserted at index 0 of ${parent.javaClass.simpleName}")
+    page.panel = WeakReference(glass)
+    syncListCard(page)
+    XposedBridge.log("[$TAG] list card inserted at index 0 of ${parent.javaClass.simpleName} (${chatsPages.size} chats pages)")
 }
 
 private val cardRect = Rect()
@@ -103,7 +139,7 @@ internal fun injectUpdatesCard(host: ViewGroup) {
 
     val ctx = host.context
     val tv = TextView(ctx).apply {
-        text = navLabel(1) ?: "Updates"
+        text = navLabelForPage(host) ?: navLabel(1) ?: "Updates"
         setTextSize(TypedValue.COMPLEX_UNIT_SP, TITLE_SP)
         typeface = Typeface.create(
             Typeface.DEFAULT, Typeface.BOLD,
@@ -123,6 +159,7 @@ internal fun injectUpdatesCard(host: ViewGroup) {
         ),
     )
     updatesTitleRef = WeakReference(tv)
+    registerBigTitle(tv)
     XposedBridge.log("[$TAG] updates card + title '${tv.text}' inserted")
 }
 
@@ -198,11 +235,16 @@ internal fun syncUpdatesCard() {
     }
 }
 
-/** Size the card and clip the list to the same rect; runs on every global layout, so every write is guarded to stay idempotent. */
+/** Every chats page from its own refs; the driver calls this per global layout. */
 internal fun syncListCard() {
-    val host = cardHostRef?.get() ?: return
-    val glass = listPanelRef?.get() as? GlassView ?: return
-    val list = listRef?.get() ?: return
+    for (page in chatsPages.values.toList()) syncListCard(page)
+}
+
+/** Size the card and clip the list to the same rect; runs on every global layout, so every write is guarded to stay idempotent. */
+internal fun syncListCard(page: ChatsPage) {
+    val host = page.host.get() ?: return
+    val glass = page.panel?.get() ?: return
+    val list = page.list?.get() ?: return
     if (host.width <= 0 || host.height <= 0) return
     if (list.width <= 0 || list.height <= 0) return
     // Archived inflates this coordinator too and has no floating nav, so the inset is taken only when the nav is in THIS window.
@@ -234,7 +276,14 @@ internal fun syncListCard() {
 
     // paddingTop already carries the content pad (syncListExtension owns it), so take it back off to land on the border.
     val pad = (CARD_CONTENT_PAD_DP * d).toInt()
-    val top = listTop + list.paddingTop - pad
+    var top = listTop + list.paddingTop - pad
+    // WaEnhancer's IGStatus strip stands above the list in the same container; the card grows up to take it in.
+    val strip = if (WaeCompat.enabled) (list.parent as? ViewGroup)?.let { waeStatusStrip(it) } else null
+    if (strip != null && strip.isShown && strip.height > 0) {
+        seatWaeStatusStrip(strip, side + pad, gap + pad)
+        r.set(0, 0, strip.width, strip.height)
+        if (runCatching { host.offsetDescendantRectToMyCoords(strip, r) }.isSuccess) top = minOf(top, r.top - pad)
+    }
     val bottom = host.height - inset - gap
     val right = host.width - side
     if (bottom - top < gap || right - side < gap) return
@@ -477,11 +526,40 @@ internal fun injectContentCard(list: View, label: String, frameCard: Boolean = f
                 return true
             }
         })
+    } else {
+        // A collapsing appbar and the pager both move the list by offset, never by layout; the card follows its live box from pre-draw.
+        val glassRef = WeakReference(glass)
+        val obs = host.viewTreeObserver
+        val lAt = IntArray(2)
+        val hAt = IntArray(2)
+        obs.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                val lv = ref.get()
+                val gl = glassRef.get()
+                if (lv == null || gl == null || gl.parent == null) {
+                    (if (obs.isAlive) obs else host.viewTreeObserver)
+                        .removeOnPreDrawListener(this)
+                    return true
+                }
+                if (!lv.isAttachedToWindow || gl.visibility != View.VISIBLE) return true
+                val off = gl.getTag(cardOffsetTag) as? IntArray ?: return true
+                lv.getLocationOnScreen(lAt)
+                host.getLocationOnScreen(hAt)
+                val tx = (lAt[0] - hAt[0] + off[0] - gl.left).toFloat()
+                val ty = (lAt[1] - hAt[1] + off[1] - gl.top).toFloat()
+                if (abs(tx - gl.translationX) > 0.5f) gl.translationX = tx
+                if (abs(ty - gl.translationY) > 0.5f) gl.translationY = ty
+                return true
+            }
+        })
     }
     XposedBridge.log("[$TAG] $label card inserted into ${host.javaClass.simpleName}")
 }
 
 private val frameGapTag = tagKey("wathemer-frame-gap")
+
+/** The card's left and top relative to its list's box, so a pre-draw can re-derive them from the list's live position. */
+private val cardOffsetTag = tagKey("wathemer-card-offset")
 
 private val appbarPinTag = tagKey("wathemer-appbar-pin")
 
@@ -701,6 +779,13 @@ private fun syncContentCard(list: View, label: String, frameCard: Boolean) {
         alignIconlessRows(list, (64f * den).toInt(), (24f * den).toInt(), 0)
     }
 
+    // Recorded before the margins: the follower needs them the frame the layout params change, not the frame after.
+    if (!frameCard) {
+        val off = (glass.getTag(cardOffsetTag) as? IntArray)
+            ?: IntArray(2).also { glass.setTag(cardOffsetTag, it) }
+        off[0] = l - r.left
+        off[1] = t - r.top
+    }
     // Margins measure from the host's padding box, which carries the status bar inset, so a margin of t alone lands a status bar too low.
     val ml = l - host.paddingLeft
     val mt = t - host.paddingTop
@@ -852,16 +937,26 @@ internal fun extendList(list: View) {
     if (!WaIds.classIs(parent, "ConversationsContainer")) return
     // Archived inflates this container too; only the window that has header is home.
     if (headerIdPin != 0 && list.rootView?.findViewById<View>(headerIdPin) == null) return
+    // The coordinator attaches before its list, so its page exists; a list with none above it is a layout this file does not know.
+    val page = chatsPageOf(list) ?: run {
+        logOnce("chat list with no coordinator page above it; card skipped")
+        return
+    }
     list.setTag(doneTag, true)
-    listRef = WeakReference(list)
+    page.list = WeakReference(list)
     (list as? ViewGroup)?.clipToPadding = false
-    syncListCard()                  // the nav may already have floated
+    syncListCard(page)              // the nav may already have floated
     list.requestLayout()
 }
 
-/** Re-derives from the invariant top + paddingTop on every layout; never snapshot the measurement. */
+/** Every chats page's list; the driver calls this per global layout, before the cards read the lists' tops. */
 internal fun syncListExtension() {
-    val v = listRef?.get() ?: return
+    for (page in chatsPages.values.toList()) syncListExtension(page)
+}
+
+/** Re-derives from the invariant top + paddingTop on every layout; never snapshot the measurement. */
+internal fun syncListExtension(page: ChatsPage) {
+    val v = page.list?.get() ?: return
     if (!v.isLaidOut) return
     val lp = v.layoutParams as? ViewGroup.MarginLayoutParams ?: return
     // The content pad is excluded here and added back below, so the recurrence is the same one that already converges.
@@ -995,7 +1090,7 @@ private fun injectPageCard(card: PageCard, host: ViewGroup) {
     // The title's margins cancel its height in this sequencing host, and it must go before the match_parent list or it measures to nothing forever.
     val ctx = host.context
     val tv = TextView(ctx).apply {
-        text = navLabel(card.navIndex) ?: card.titleFallback
+        text = navLabelForPage(host) ?: navLabel(card.navIndex) ?: card.titleFallback
         setTextSize(TypedValue.COMPLEX_UNIT_SP, TITLE_SP)
         typeface = Typeface.create(
             Typeface.DEFAULT, Typeface.BOLD,
@@ -1015,6 +1110,7 @@ private fun injectPageCard(card: PageCard, host: ViewGroup) {
         ),
     )
     card.title = WeakReference(tv)
+    registerBigTitle(tv)
     XposedBridge.log("[$TAG] ${card.titleFallback} card + title '${tv.text}' inserted")
 }
 

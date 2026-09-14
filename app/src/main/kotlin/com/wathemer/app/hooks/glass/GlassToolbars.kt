@@ -23,6 +23,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.wathemer.app.glass.GlassView
 import com.wathemer.app.hooks.HookLog
+import com.wathemer.app.hooks.WaeCompat
 import com.wathemer.app.hooks.WaIds
 import com.wathemer.app.hooks.waId
 import de.robv.android.xposed.XC_MethodHook
@@ -305,6 +306,14 @@ internal var actionsGlassRef: WeakReference<View>? = null
 
 private val chipAnchors = mutableListOf<WeakReference<View>>()
 
+/** WhatsApp's toolbar profile photo, when a me-tab variant seats one among the actions or after the toolbar. */
+private var meTabPhotoId = -1
+
+/** The photo's cell gets an icon's air on both sides, so the pill's insets match. */
+private const val ME_TAB_PHOTO_PAD_DP = 12f
+
+private val meTabWatchTag = tagKey("wathemer-me-tab-watch")
+
 /** Which toolbar an action icon belongs to. See the registration and [syncActionsGlass]. */
 private val actionGroupTag = tagKey("wathemer-action-group")
 
@@ -413,6 +422,17 @@ private fun syncActionsGlass() {
             n++
             }
     }
+    // The profile photo is a plain action view or the stub after the toolbar, and the icon walk sees neither.
+    if (!searchOverlay && !selectionMode) meTabPhoto(liveHeader)?.let { photo ->
+        val rect = Rect(0, 0, photo.width, photo.height)
+        if (runCatching { content.offsetDescendantRectToMyCoords(photo, rect) }.isSuccess) {
+            l = minOf(l, rect.left)
+            t = minOf(t, rect.top)
+            r = maxOf(r, rect.right)
+            b = maxOf(b, rect.bottom)
+            n++
+        }
+    }
     // No anchor on screen: collapse by SIZE, never visibility, which belongs to [syncPaneVisibility] alone; a second writer would fight it.
     if (n == 0) {
         val lp = glass.layoutParams
@@ -459,6 +479,31 @@ private fun searchOverlayShown(content: ViewGroup): Boolean {
         if (v.isShown && v.height > 0) return true
     }
     return false
+}
+
+/** The me-tab photo's tap area in the header; its stub seat is outside the menu, so it drives the re-sync itself. */
+private fun meTabPhoto(header: View?): View? {
+    if (header == null) return null
+    if (meTabPhotoId == -1) {
+        meTabPhotoId = header.resources.waId("my_profile_photo_tap_area", header.context.packageName)
+    }
+    if (meTabPhotoId == 0) return null
+    val photo = header.findViewById<View>(meTabPhotoId) ?: return null
+    padMeTabPhoto(photo)
+    if (photo.getTag(meTabWatchTag) == null) {
+        photo.setTag(meTabWatchTag, true)
+        photo.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncActionsGlass() }
+    }
+    if (!photo.isShown || photo.width <= 0 || photo.height <= 0) return null
+    return photo
+}
+
+/** The photo in a cell like an icon's, so the pill's insets match on every tab; WhatsApp's stub seat pads only the end. */
+internal fun padMeTabPhoto(v: View) {
+    val pad = (ME_TAB_PHOTO_PAD_DP * v.resources.displayMetrics.density).toInt()
+    if (v.paddingStart != pad || v.paddingEnd != pad) {
+        v.setPaddingRelative(pad, v.paddingTop, pad, v.paddingBottom)
+    }
 }
 
 private val actionIconsTag = tagKey("wathemer-action-icons")
@@ -549,6 +594,7 @@ private fun syncActionBarCover(root: ViewGroup, bar: View, toolbarId: Int) {
     if (active) {
         // Same family as the toolbar: glass owns the fill, and the band or the wallpaper behind is the material.
         if (bar.background != null) clearBg(bar, "action_mode_bar")
+        if (WaeCompat.enabled) runCatching { dressActionModeClose(bar) }
         // AppCompat creates the guard lazily, which is why there is a second, delayed pass.
         val inset = runCatching {
             root.rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())?.top
@@ -608,7 +654,32 @@ internal val toolbarTitleTag = tagKey("wathemer-toolbar-title")
 
 private val hidTitleTag = tagKey("wathemer-hid-title")
 
-/** Hide the small toolbar title on tabs with a big one; the shared bar's title is id-less, so it is matched by text against nav labels. */
+/** Our big titles, alive: the toolbar's small title is hidden wherever one of these exists, matched by text because the bar's title is id-less. */
+private val bigTitleViews = WeakHashMap<TextView, Boolean>()
+
+internal fun registerBigTitle(tv: TextView) {
+    bigTitleViews[tv] = true
+}
+
+/** A title inserted at attach read its tab off a page not laid out yet, whose left is 0; every pass re-reads the label at the real position, writing on change only. */
+private fun syncBigTitleTexts(): List<String> {
+    val labels = navLabels()
+    val texts = ArrayList<String>()
+    for (tv in bigTitleViews.keys.toList()) {
+        if (labels.isNotEmpty()) {
+            val idx = pageIndexOf(tv)
+            val label = labels.getOrNull(idx)?.toString()
+            if (idx >= 0 && !label.isNullOrBlank() && tv.text?.toString() != label) {
+                tv.text = label
+                XposedBridge.log("[$TAG] big title -> '$label' (page $idx)")
+            }
+        }
+        tv.text?.toString()?.takeIf { it.isNotBlank() }?.let { texts.add(it) }
+    }
+    return texts
+}
+
+/** The stock positions, the fallback until a big title has registered. */
 private val bigTitleTabs = listOf(1, 2, 3)   // Updates, Communities, Calls.
 
 internal fun syncToolbarTitle() {
@@ -619,7 +690,9 @@ internal fun syncToolbarTitle() {
         } ?: toolbarRef?.get()
         ) as? ViewGroup ?: return
     if (toolbarRef?.get() !== toolbar) toolbarRef = WeakReference(toolbar)
-    val wanted = bigTitleTabs.mapNotNull { navLabel(it)?.toString() }
+    // From the titles themselves, so a tab a module adds or hides never shifts which labels are hidden.
+    val live = syncBigTitleTexts()
+    val wanted = if (live.isNotEmpty()) live else bigTitleTabs.mapNotNull { navLabel(it)?.toString() }
     for (i in 0 until toolbar.childCount) {
         val tv = toolbar.getChildAt(i) as? TextView ?: continue
         // Only restore titles we hid: WhatsApp keeps a "WhatsApp" TextView deliberately hidden and it must stay that way.
@@ -678,7 +751,7 @@ internal fun injectBigTitle(bar: View) {
         if (seated) (list?.paddingTop ?: 0) + container.dp(4f).toInt() else barLp.topMargin
     val ctx = container.context
     val tv = TextView(ctx).apply {
-        text = navLabel() ?: "Chats"
+        text = navLabelForPage(container) ?: navLabel() ?: "Chats"
         setTextSize(TypedValue.COMPLEX_UNIT_SP, TITLE_SP)
         typeface = Typeface.create(
             Typeface.DEFAULT, Typeface.BOLD,
@@ -698,6 +771,7 @@ internal fun injectBigTitle(bar: View) {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = headerClearance },
     )
+    registerBigTitle(tv)
     // A seated bar keeps its margin: it is the list's row inset, and the extension recurrence lands the rows under the title.
     if (!seated) {
         barLp.topMargin = container.dp(2f).toInt()
@@ -803,4 +877,22 @@ internal fun themeNavBadge(d: Drawable) {
         .get(helper) as? TextPaint ?: return
     tp.color = if (navUnreadText != 0) navUnreadText else 0xFFFFFFFF.toInt()
     logOnce("nav count badge themed (${cls.name})")
+}
+
+/** WhatsApp's theme nulls the selection bar's close drawable and the floating-menu mode sets none, so the button is a bare tap target; give it the back arrow. */
+private fun dressActionModeClose(bar: View) {
+    val res = bar.resources
+    val pkg = bar.context.packageName
+    val closeId = res.waId("action_mode_close_button", pkg)
+    if (closeId == 0) return
+    val close = bar.findViewById<View>(closeId) as? ImageView ?: return
+    if (close.drawable == null) {
+        // AppCompat's own glyphs keep their names in WhatsApp's table; the back arrow is what the classic bar shows.
+        val glyph = res.getIdentifier("abc_ic_ab_back_material", "drawable", pkg)
+        if (glyph == 0) return
+        close.setImageResource(glyph)
+    }
+    val colour = if (actionModeIconsColor != 0) actionModeIconsColor else Color.WHITE
+    close.imageTintList = ColorStateList.valueOf(colour)
+    HookLog.hit("compat/actionModeClose")
 }

@@ -63,7 +63,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Dividers, overlay effects and the font swap. Everything here is read once at hook install, so changes need a WhatsApp restart. */
+/** Dividers, overlay effects, the font swap and the WaEnhancer switch. Everything here is read once at hook install, so changes need a WhatsApp restart. */
 @Composable
 fun ExtrasScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
     val context = LocalContext.current
@@ -71,6 +71,7 @@ fun ExtrasScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
     var importing by remember { mutableStateOf(false) }
     var divider by remember { mutableStateOf(prefs.chatListDivider) }
     var snow by remember { mutableStateOf(prefs.effectSnow) }
+    var waeCompat by remember { mutableStateOf(prefs.waeCompat) }
     var fontChoice by remember { mutableStateOf(prefs.customFont) }
     var fontMono by remember { mutableStateOf(prefs.fontMapMonospace) }
     var library by remember { mutableStateOf(FontLibrary.list(context, prefs)) }
@@ -151,6 +152,13 @@ fun ExtrasScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                         title = "Also restyle monospace",
                         checked = fontMono,
                         onCheckedChange = { fontMono = it; prefs.fontMapMonospace = it },
+                    )
+                }
+                ExpandGroup("WaEnhancer") {
+                    ToggleItem(
+                        title = "WaEnhancer compatibility",
+                        checked = waeCompat,
+                        onCheckedChange = { waeCompat = it; prefs.waeCompat = it },
                     )
                 }
             }

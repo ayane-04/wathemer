@@ -10,6 +10,7 @@ import android.widget.FrameLayout
 import com.wathemer.app.glass.GlassBubblePane
 import com.wathemer.app.glass.GlassParams
 import com.wathemer.app.glass.RectList
+import com.wathemer.app.hooks.WaeCompat
 import de.robv.android.xposed.XposedBridge
 import java.lang.ref.WeakReference
 import kotlin.math.abs
@@ -33,8 +34,23 @@ internal object GlassNavDroplet {
 
     private const val SQUEEZE_FLOOR = 0.9f
 
+    /** The drop spans at most this many of its own widths; beyond it the tail is towed. */
+    private const val MAX_STRETCH = 1.6f
+
+    // Fixed sub-steps keep the explicit springs stable at any frame time; the catch-up cap bounds a stall's work.
+    private const val STEP_MS = 8L
+
+    private const val MAX_CATCHUP_MS = 200L
+
     /** Alpha 1, not 0: a fully transparent drawable is still the ripple's mask, and a null one has no size. */
     private const val MASK_ARGB = 0x01FFFFFF
+
+    // Material's stock indicator shape; WhatsApp's settings-tab variant shrinks its own to a circle, and the pill keeps this shape over it, clamped to its tab.
+    private const val STADIUM_W_DP = 64f
+
+    private const val STADIUM_H_DP = 32f
+
+    private const val STADIUM_SIDE_ROOM_DP = 4f
 
     private val indicators = ArrayList<WeakReference<View>>()
     private var paneRef: WeakReference<GlassBubblePane>? = null
@@ -157,12 +173,23 @@ internal object GlassNavDroplet {
         // The container's screen position plus the indicator's layout box: its own position carries Material's scale.
         val container = target.parent as? View ?: return
         container.getLocationOnScreen(at)
-        val w = target.width
-        val h = target.height
+        var w = target.width
+        var h = target.height
         if (w <= 0 || h <= 0) return
-        val top = (at[1] + target.top).toFloat()
-        val tl = (at[0] + target.left).toFloat()
-        val tr = tl + w
+        val cx = at[0] + target.left + target.width / 2f
+        val cy0 = at[1] + target.top + target.height / 2f
+        // The indicator's centre stays WhatsApp's; only a shrunken box is grown back to the stadium.
+        if (WaeCompat.enabled) {
+            val d = target.resources.displayMetrics.density
+            val item = container.parent as? View
+            val room = (STADIUM_SIDE_ROOM_DP * 2 * d).toInt()
+            val maxW = if (item != null && item.width > room) item.width - room else Int.MAX_VALUE
+            w = maxOf(w, minOf((STADIUM_W_DP * d).toInt(), maxW))
+            h = maxOf(h, (STADIUM_H_DP * d).toInt())
+        }
+        val top = cy0 - h / 2f
+        val tl = cx - w / 2f
+        val tr = cx + w / 2f
 
         val now = SystemClock.uptimeMillis()
         if (edgeL.isNaN()) {
@@ -172,17 +199,33 @@ internal object GlassNavDroplet {
             velR = 0f
             lastMs = now
         }
-        // Clamped: a frame lost to a stall must not fling the drop across the bar.
-        val dt = (now - lastMs).coerceIn(1L, 32L) / 1000f
+        // Stepped to the wall clock, so a stalled frame does not slow the drop; a long stall is capped, not flung.
+        var leftMs = (now - lastMs).coerceIn(1L, MAX_CATCHUP_MS)
         lastMs = now
         // One direction for the whole pill: per-edge tests swap the springs over during the settle.
         val rightLeads = tl + tr > edgeL + edgeR
         val kL = if (rightLeads) TRAIL_STIFFNESS else LEAD_STIFFNESS
         val kR = if (rightLeads) LEAD_STIFFNESS else TRAIL_STIFFNESS
-        velL += (-kL * (edgeL - tl) - 2f * DAMPING * sqrt(kL) * velL) * dt
-        velR += (-kR * (edgeR - tr) - 2f * DAMPING * sqrt(kR) * velR) * dt
-        edgeL += velL * dt
-        edgeR += velR * dt
+        val maxSpan = w * MAX_STRETCH
+        while (leftMs > 0) {
+            val stepMs = minOf(leftMs, STEP_MS)
+            leftMs -= stepMs
+            val dt = stepMs / 1000f
+            velL += (-kL * (edgeL - tl) - 2f * DAMPING * sqrt(kL) * velL) * dt
+            velR += (-kR * (edgeR - tr) - 2f * DAMPING * sqrt(kR) * velR) * dt
+            edgeL += velL * dt
+            edgeR += velR * dt
+            // Towed at the cap so a jump across several tabs stays a drop rather than a bar.
+            if (edgeR - edgeL > maxSpan) {
+                if (rightLeads) {
+                    edgeL = edgeR - maxSpan
+                    velL = maxOf(velL, velR)
+                } else {
+                    edgeR = edgeL + maxSpan
+                    velR = minOf(velR, velL)
+                }
+            }
+        }
         // Landed: snap, so the rect stops changing and the pane stops asking for frames.
         if (abs(tl - edgeL) < 0.5f && abs(velL) < 1f) {
             edgeL = tl

@@ -32,6 +32,7 @@ import com.wathemer.app.glass.GlassView
 import com.wathemer.app.glass.WallpaperLook
 import com.wathemer.app.hooks.ActivityLifecycle
 import com.wathemer.app.hooks.HookLog
+import com.wathemer.app.hooks.WaeCompat
 import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.WaIds
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
@@ -113,6 +114,7 @@ object GlassHook {
         // ── The chat-list card's host ──────────────────────────────────────────────────
         // conversations_coordinator_layout stacks like a FrameLayout and pages with the content, unlike id/content.
         val coordId = res.waId("conversations_coordinator_layout", pkg)
+        coordIdPin = coordId
         if (coordId != 0) ViewThemeDispatcher.onId(coordId) { v ->
             val vg = v as? ViewGroup ?: return@onId
             // Not home-only: Archived inherits this same layout, and home is the window that has header.
@@ -122,8 +124,9 @@ object GlassHook {
                     .onFailure { XposedBridge.log("[$TAG] injectFolderCard threw: $it") }
                 return@onId
             }
-            cardHostRef = WeakReference(vg)
-            runCatching { injectListPanel(vg) }
+            // One page per coordinator: Separate Groups (WaEnhancer) runs a second chats page beside the first.
+            val page = chatsPages.getOrPut(vg) { ChatsPage(vg) }
+            runCatching { injectListPanel(page) }
                 .onFailure { XposedBridge.log("[$TAG] injectListPanel threw: $it") }
         }
 
@@ -269,6 +272,7 @@ object GlassHook {
             // Lift above the rows that scroll underneath; translationZ, since with no background there is no shadow anyway.
             if (v.translationZ < 1f) v.translationZ = 1f
             searchBarRef = WeakReference(v)
+            chatsPageOf(v)?.bar = WeakReference(v)
             // The search pill starts where this bar rests; layout coords, since getLocationOnScreen samples it mid-flight.
             if (v.getTag(homeBarLayoutTag) == null) {
                 v.setTag(homeBarLayoutTag, true)
@@ -296,6 +300,10 @@ object GlassHook {
             if (cid != 0) ViewThemeDispatcher.onId(cid) { v ->
                 val holder = menuHolder(v); tagGroup(holder, GROUP_NORMAL); registerAction(holder)
             }
+        }
+        // The toolbar profile photo's cell, padded at attach so its first layout is already the padded one.
+        res.waId("my_profile_photo_tap_area", pkg).takeIf { it != 0 }?.let { cid ->
+            ViewThemeDispatcher.onId(cid) { v -> padMeTabPhoto(v) }
         }
         // ── The toolbar bleeds through the selection bar ───────────────────────────────
         // action_mode_bar's own visibility is the signal; overlap is not occlusion, never reintroduce a geometric test.
@@ -347,6 +355,34 @@ object GlassHook {
         // The lock pill is styled via ensureLockPane; the trashcan's own disc has no known id.
         val lockId = res.waId("voice_note_lock_container", pkg)
         if (lockId != 0) ViewThemeDispatcher.onId(lockId) { v -> runCatching { ensureLockPane(v) } }
+
+        // ── WaEnhancer's New UI group filter ──────────────────────────────────────────
+        // A Chats/Groups pill it builds inside WhatsApp's filter row; its stock green and 2 dp strokes sit on the card.
+        if (WaeCompat.enabled) {
+            HookLog.arm("compat/filterGroups")
+            // Its IGStatus strip is folded into the chats card by syncListCard; armed here so the ledger names it.
+            HookLog.arm("compat/igStatus")
+            // Its Show Name and Bio: two id-less TextViews it adds to the home toolbar, found by that shape.
+            HookLog.arm("compat/toolbarText")
+            // Its Copy selection button under the reaction emojis, dressed from frostReactionsTray.
+            HookLog.arm("compat/trayButtons")
+            HookLog.arm("compat/trayStack")
+            // WhatsApp measures the tray before it shows; the column must be what it measures.
+            HookLog.arm("compat/trayPlace")
+            runCatching { hookWaeTrayPlacement(app, app.classLoader) }
+                .onFailure { logOnce("tray placement hook threw: $it") }
+            ViewThemeDispatcher.onView { v ->
+                if (v.tag == WAE_FILTERS_TAG) {
+                    (v as? ViewGroup)?.let { row ->
+                        runCatching { dressWaeFilterRow(row) }.onFailure { logOnce("wae filter row threw: $it") }
+                    }
+                } else if (isWaeToolbarText(v, homeToolbarId)) {
+                    runCatching { dressWaeToolbarText(v as TextView) }
+                        .onFailure { logOnce("wae toolbar text threw: $it") }
+                }
+                false
+            }
+        }
 
         // ── Filter chips + the filter button ───────────────────────────────────────────
         // No ids, no stacking host, and every capturable subtree is an ancestor, so a frost Drawable is the only option.
@@ -1239,6 +1275,23 @@ object GlassHook {
         menuTitleId = res.waId("menu_title", pkg)
         menuSelRowId = res.waId("message_selection_drop_down_row_text", pkg)
         ensurePopupGlass()
+        // The floating message menu's list carries its own fill; the popup path clears it while the switch is on.
+        if (WaeCompat.enabled) HookLog.arm("compat/floatingMenu")
+        else HookLog.skip("compat/floatingMenu", "waenhancer_compat is off")
+
+        // ── The floating message menu's action card ──────────────────────────────────────
+        // WhatsApp's iOS-style long-press menu (a server flag, or WaEnhancer's toggle) parks its actions in this card over the chat.
+        val selBottomId = res.waId("message_selection_bottom_menu", pkg)
+        if (selBottomId != 0) {
+            if (!WaeCompat.enabled) HookLog.skip("compat/floatingMenuBar", "waenhancer_compat is off")
+            else {
+                HookLog.arm("compat/floatingMenuBar")
+                ViewThemeDispatcher.onId(selBottomId) { v ->
+                    runCatching { glassSelectionBottomMenu(v) }
+                        .onFailure { XposedBridge.log("[$TAG] selection bottom menu glass threw: $it") }
+                }
+            }
+        }
 
         // ── Attachment tile pills ──────────────────────────────────────────────────────
         // The pill is the icon's own background; scoped through the holders because icon is one of the most reused ids.

@@ -2,25 +2,31 @@
 // with no id to hang a pane on. Geometry comes from pre-draw, because layout positions are unsettled.
 package com.wathemer.app.hooks.glass
 
+import android.content.Context
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.PopupWindow
+import android.widget.RelativeLayout
 import com.wathemer.app.glass.FrostDrawable
 import com.wathemer.app.glass.GlassBubblePane
 import com.wathemer.app.glass.GlassParams
 import com.wathemer.app.glass.GlassView
 import com.wathemer.app.hooks.HookLog
+import com.wathemer.app.hooks.WaeCompat
 import com.wathemer.app.glass.RectList
 import com.wathemer.app.hooks.waId
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 import kotlin.math.abs
@@ -205,6 +211,7 @@ internal fun ensurePopupGlass() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val pw = param.thisObject as? PopupWindow ?: return
                         runCatching { GlassPopupMorph.onDismiss(pw) }
+                        runCatching { hideLiveDropdownPane(pw) }
                     }
                 })
                 hooked++
@@ -214,6 +221,14 @@ internal fun ensurePopupGlass() {
             // Bound here, outside the hook: only a drop-down's first argument is the button it hangs from.
             val dropDown = m.name == "showAsDropDown"
             XposedBridge.hookMethod(m, object : XC_MethodHook() {
+                // Before the show: PopupWindow measures the content to place it, and WhatsApp reads that size for the tray's box.
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!WaeCompat.enabled) return
+                    val pw = param.thisObject as? PopupWindow ?: return
+                    runCatching { prepareWaeTray(pw.contentView ?: return) }
+                        .onFailure { logOnce("prepareWaeTray threw: $it") }
+                }
+
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val pw = param.thisObject as? PopupWindow ?: return
                     if (dropDown) (param.args.getOrNull(0) as? View)?.let { popupAnchors[pw] = WeakReference(it) }
@@ -252,6 +267,15 @@ private fun glassPopup(pw: PopupWindow) {
         v = v.parent as? View
         hops++
     }
+    // The floating message menu keeps its fill on the list itself, a child the walk above never reaches.
+    val dropdown = if (WaeCompat.enabled) dropdownMenuList(content) else null
+    if (dropdown != null) {
+        if (radius == null) radius = readCornerRadius(dropdown)
+        clearBg(dropdown, "message selection dropdown")
+        // A transparent fill still casts the list's own shadow, as a rectangle.
+        dropdown.elevation = 0f
+        HookLog.hit("compat/floatingMenu")
+    }
     // The attachment panel keeps its fill and its shadow on a DESCENDANT, which the walk above cannot reach.
     val clipId = content.resources.waId("paper_clip_layout", content.context.packageName)
     val attachPanel = (if (clipId != 0) content.findViewById<View>(clipId) else null)?.also { clip ->
@@ -259,9 +283,19 @@ private fun glassPopup(pw: PopupWindow) {
         clearBg(clip, "paper_clip_layout")
         clip.elevation = 0f
     } != null
-    popupRowGlass(content, radius, popupAnchors[pw]?.get(), pw)
+    // The floating menu's glass is drawn live in the Activity's window, as the card's is; only when that fails
+    // does it fall back to the snapshot pane inside the popup, with the reactions pill's scrim either way.
+    if (dropdown != null && liveDropdownPane(dropdown, pw, radius ?: content.dp(PANEL_ROW_RADIUS_DP))) {
+        content.setTag(panelGlassTag, true)
+    } else {
+        // A message row is no button to rise from: the dropdown keeps its glass in its own window.
+        popupRowGlass(
+            content, radius, if (dropdown != null) null else popupAnchors[pw]?.get(), pw,
+            if (dropdown != null) TRAY_SCRIM else MENU_SCRIM,
+        )
+    }
     // Menu rows on one sheet want seams; a tile grid does not, and its "rows" include the spacers.
-    if (!attachPanel) popupRowDividers(content)
+    if (!attachPanel) popupRowDividers(dropdown ?: content)
     // Class and size in the log so a wrongly glassed popup names itself.
     XposedBridge.log(
         "[$TAG] popup menu glassed ($rows rows, ${content.javaClass.simpleName} " +
@@ -273,7 +307,7 @@ private fun glassPopup(pw: PopupWindow) {
 internal const val MENU_SCRIM = 0xB80E1418.toInt()
 
 /** GlassBubblePane, not panelGlass: cost stays flat as the menu grows, and one union rect avoids scalloped seams between items. */
-private fun popupRowGlass(content: View, radiusPx: Float?, anchor: View?, pw: PopupWindow) {
+private fun popupRowGlass(content: View, radiusPx: Float?, anchor: View?, pw: PopupWindow, scrim: Int = MENU_SCRIM) {
     if (content.getTag(panelGlassTag) != null) return
     if (!content.isAttachedToWindow) return
     // With a button to rise from, the Activity's pane draws this menu's glass and the popup carries none of its own.
@@ -302,7 +336,7 @@ private fun popupRowGlass(content: View, radiusPx: Float?, anchor: View?, pw: Po
             depthRatio = DEPTH_RATIO
             maxDisplacePx = content.dp(DISPLACE_DP)
             fresnelStrength = 0.5f
-            tintColor = MENU_SCRIM
+            tintColor = scrim
             // The snapshot is the composited screen, graded glass included; grading or lifting it again would double both.
             saturation = 1f
             bloom = 0f
@@ -310,7 +344,7 @@ private fun popupRowGlass(content: View, radiusPx: Float?, anchor: View?, pw: Po
             // No rim from the wallpaper over a screen snapshot: the two would not match.
             detail = 0f
         }
-        tint = { MENU_SCRIM }
+        tint = { scrim }
         // The screen if PixelCopy gave us one, else the wallpaper. Both are screen-space.
         backdrop = { screenSnap ?: bubbleBackdrop(content) }
         placement = { if (screenSnap != null) screenSnapPlace else bubblePlacement(content) }
@@ -344,6 +378,17 @@ private fun popupRowGlass(content: View, radiusPx: Float?, anchor: View?, pw: Po
     content.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncPane.run() }
     syncPane.run()
     XposedBridge.log("[$TAG] popup row glass inserted into ${host.javaClass.simpleName}")
+}
+
+/** WhatsApp's floating message menu list, by its unobfuscated class name; the id-less child that carries the fill. */
+private fun dropdownMenuList(content: View): ViewGroup? {
+    fun find(v: View, depth: Int): ViewGroup? {
+        if (v is ViewGroup && v.javaClass.name.endsWith(".MessageSelectionDropDownRecyclerView")) return v
+        if (depth >= 3 || v !is ViewGroup) return null
+        for (i in 0 until v.childCount) find(v.getChildAt(i) ?: continue, depth + 1)?.let { return it }
+        return null
+    }
+    return find(content, 0)
 }
 
 /** The view whose children are the menu rows; some menus wrap it, so descend through single-child groups. */
@@ -387,6 +432,16 @@ private fun popupRowDividers(content: View) {
 
 /** One union rect over the rows: per-item rects notch at the seams, and the content view runs taller than its rows. */
 internal fun collectPopupRowRects(content: View, out: RectList) {
+    // The floating message menu: the list's own box, not a union that would take in the tray beside it.
+    val dropdown = if (WaeCompat.enabled) dropdownMenuList(content) else null
+    if (dropdown != null) {
+        if (dropdown.width <= 0 || dropdown.height <= 0 || dropdown.visibility != View.VISIBLE) return
+        dropdown.getLocationOnScreen(popupContentAt)
+        val l = popupContentAt[0].toFloat()
+        val t = popupContentAt[1].toFloat()
+        out.add(l, t, l + dropdown.width, t + dropdown.height)
+        return
+    }
     val group = menuRowHost(content) ?: return
     if (content.width <= 0) return
     content.getLocationOnScreen(popupContentAt)
@@ -495,9 +550,72 @@ internal fun glassSelfSheet(v: View, name: String) {
 }
 
 /** Tuned by eye: less blur than the panes, a scrim between the menu tint and the panel scrim. */
-private const val TRAY_BLUR_DP = 10f
+internal const val TRAY_BLUR_DP = 10f
 
-private const val TRAY_SCRIM = 0x590E1418
+internal const val TRAY_SCRIM = 0x590E1418
+
+/** WaEnhancer rebuilds the tray in the popup's constructor; the column must stand before PopupWindow measures the content at show. */
+private fun prepareWaeTray(content: View) {
+    val res = content.resources
+    val pkg = content.context.packageName
+    val trayId = res.waId("reactions_tray_layout", pkg)
+    val containerId = res.waId("reactions_tray_container", pkg)
+    if (trayId == 0 || containerId == 0) return
+    val tray = content.findViewById<ViewGroup>(trayId) ?: return
+    val container = tray.findViewById<View>(containerId) ?: return
+    flattenWaeTray(tray, container)
+}
+
+/** The tray pill's recipe, shared with the buttons stacked under it: live over the Activity's content, which is what sits behind a popup. */
+internal fun newTrayPane(ctx: Context, content: ViewGroup, tint: Int): GlassView = GlassView(ctx).apply {
+    backdrop = content
+    underlay = wallpaperUnderlay(content)
+    params.apply {
+        downsample = DOWNSAMPLE
+        blurRadius = content.dp(TRAY_BLUR_DP)
+        refractionEnabled = true
+        bevelFraction = BEVEL_FRACTION
+        depthRatio = DEPTH_RATIO
+        maxDisplacePx = content.dp(DISPLACE_DP)
+        fresnelStrength = 0.5f
+        tintColor = tint
+        // The activity content it captures carries graded and lifted panes already.
+        saturation = 1f
+        bloom = 0f
+        transGamma = 1f
+    }
+}
+
+/** The list's end fade hidden and the plus halo's alpha pinned to zero; WhatsApp animates that alpha, so its setter is hooked too. */
+private fun quietTrayDecorations(tray: ViewGroup, container: ViewGroup) {
+    val res = tray.resources
+    val fadeId = res.waId("reactions_tray_gradient_left_end", tray.context.packageName)
+    if (fadeId != 0) container.findViewById<View>(fadeId)?.let { fade ->
+        if (fade.visibility != View.INVISIBLE) fade.visibility = View.INVISIBLE
+    }
+    val row = container.parent as? ViewGroup ?: return
+    for (i in 0 until row.childCount) {
+        val c = row.getChildAt(i) ?: continue
+        if (!c.javaClass.name.endsWith(".ReactionPlusView")) continue
+        runCatching { XposedHelpers.callMethod(c, "setBackgroundAlpha", 0f) }
+        ensurePlusHaloHook(c.javaClass)
+    }
+}
+
+private var plusHaloHooked = false
+
+/** The reveal animation writes the halo alpha every frame; forced to zero on the way in, once per process. */
+private fun ensurePlusHaloHook(cls: Class<*>) {
+    if (plusHaloHooked) return
+    plusHaloHooked = true
+    runCatching {
+        XposedHelpers.findAndHookMethod(cls, "setBackgroundAlpha", Float::class.javaPrimitiveType, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                param.args[0] = 0f
+            }
+        })
+    }.onFailure { logOnce("plus halo hook threw: $it") }
+}
 
 /** The pill is a live pane INSIDE the tray, so it rides transform animations no external pane can follow. */
 internal fun frostReactionsTray(v: View) {
@@ -518,39 +636,36 @@ internal fun frostReactionsTray(v: View) {
         logOnce("reactions tray frosted (stamp fallback)")
     } else {
         tray.background = null
-        // The pill spans the padding box, wider than the container; the pane pokes past it to reach under the plus button.
+        // The pill spans the emoji row, wider than the container; the pane pokes past it to reach under the plus button.
         container.clipChildren = false
-        val glass = GlassView(tray.context).apply {
-            // The dialogs' recipe: the activity's content is another window, which is exactly what is behind a popup.
-            backdrop = content
-            underlay = wallpaperUnderlay(content)
-            params.apply {
-                downsample = DOWNSAMPLE
-                blurRadius = tray.dp(TRAY_BLUR_DP)
-                refractionEnabled = true
-                bevelFraction = BEVEL_FRACTION
-                depthRatio = DEPTH_RATIO
-                maxDisplacePx = tray.dp(DISPLACE_DP)
-                fresnelStrength = 0.5f
-                tintColor = TRAY_SCRIM
-                // The activity content it captures carries graded and lifted panes already.
-                saturation = 1f
-                bloom = 0f
-                transGamma = 1f
-            }
-        }
+        // Both were drawn for an opaque tray: the fade square at the list's end and the halo disc behind the plus read as stains on glass.
+        runCatching { quietTrayDecorations(tray, container) }
+        // The dialogs' recipe: the activity's content is another window, which is exactly what is behind a popup.
+        val glass = newTrayPane(tray.context, content, TRAY_SCRIM)
         container.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
+        val box = IntArray(4)
         val sync = Runnable {
             if (tray.width <= 0 || tray.height <= 0) return@Runnable
-            val w = tray.width - tray.paddingLeft - tray.paddingRight
-            val h = tray.height - tray.paddingTop - tray.paddingBottom
+            val row = container.parent as? ViewGroup ?: return@Runnable
+            // The pane overflows the container to reach under the plus; the tray lets that through, rows a module adds do not.
+            var up: ViewGroup? = row
+            while (up != null && up !== tray) {
+                if (up.clipChildren) up.clipChildren = false
+                up = up.parent as? ViewGroup
+            }
+            // From the row's content, never the tray: the container wraps this pane, and anything stacked under the row would feed back.
+            rowContentBox(row, container, glass, box)
+            val w = box[2]
+            val h = box[3]
             if (w <= 0 || h <= 0) return@Runnable
             val lp = glass.layoutParams as? FrameLayout.LayoutParams ?: return@Runnable
-            if (lp.width != w || lp.height != h) {
+            val ml = box[0] - container.left
+            val mt = box[1] - container.top
+            if (lp.width != w || lp.height != h || lp.leftMargin != ml || lp.topMargin != mt) {
                 lp.width = w
                 lp.height = h
-                lp.leftMargin = tray.paddingLeft - container.left
-                lp.topMargin = tray.paddingTop - container.top
+                lp.leftMargin = ml
+                lp.topMargin = mt
                 glass.layoutParams = lp
                 glass.params.cornerRadius = h / 2f
             }
@@ -567,6 +682,38 @@ internal fun frostReactionsTray(v: View) {
         p = p.parent as? View
         hops++
     }
+}
+
+/** The emoji row's box: the children's own extents, so the plus sits inside the pill; the height from views other than the pane, which the container wraps. */
+private fun rowContentBox(row: ViewGroup, container: View, glass: View, out: IntArray) {
+    var left = Int.MAX_VALUE
+    var top = Int.MAX_VALUE
+    var right = Int.MIN_VALUE
+    var h = 0
+    for (i in 0 until row.childCount) {
+        val c = row.getChildAt(i) ?: continue
+        if (c === glass || c.visibility == View.GONE) continue
+        val m = c.layoutParams as? ViewGroup.MarginLayoutParams
+        val mt = m?.topMargin ?: 0
+        left = minOf(left, c.left)
+        right = maxOf(right, c.right)
+        top = minOf(top, c.top - mt)
+        if (c !== container) h = maxOf(h, c.height + mt + (m?.bottomMargin ?: 0))
+    }
+    val w = if (right > left) right - left else 0
+    if (container is ViewGroup) for (i in 0 until container.childCount) {
+        val c = container.getChildAt(i) ?: continue
+        if (c === glass || c.visibility == View.GONE) continue
+        h = maxOf(h, c.height)
+    }
+    if (left == Int.MAX_VALUE) {
+        left = 0
+        top = 0
+    }
+    out[0] = left
+    out[1] = top
+    out[2] = w
+    out[3] = h
 }
 
 internal val slabSweepTag = tagKey("wathemer-slab-sweep")
@@ -626,4 +773,197 @@ internal fun hideWdsDividers(root: ViewGroup) {
         if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i) ?: continue)
     }
     walk(root)
+}
+
+private val selBottomTag = tagKey("wathemer-sel-bottom-menu")
+
+private val selBottomPanes = WeakHashMap<View, WeakReference<GlassView>>()
+
+/** The floating message menu's action card: a live pane beneath it in the entry holder, the compose pill's recipe with the menu's scrim. */
+internal fun glassSelectionBottomMenu(card: View) {
+    val parent = card.parent as? ViewGroup ?: return
+    // MaterialCardView: a transparent fill, never null; its shadow and stroke would frame the glass.
+    clearBg(card, "message_selection_bottom_menu")
+    runCatching { XposedHelpers.callMethod(card, "setCardElevation", 0f) }
+    runCatching { XposedHelpers.callMethod(card, "setStrokeWidth", 0) }
+    // WhatsApp builds this holder in code and hands its children whichever params the host takes: a FrameLayout in the
+    // reply screen, a RelativeLayout in the conversation. Both can seat a child at an absolute box; anything else cannot.
+    val paneParams: ViewGroup.MarginLayoutParams? = when (parent) {
+        is FrameLayout -> FrameLayout.LayoutParams(0, 0).apply { gravity = Gravity.TOP or Gravity.START }
+        is RelativeLayout -> RelativeLayout.LayoutParams(0, 0).apply {
+            addRule(RelativeLayout.ALIGN_PARENT_TOP)
+            addRule(RelativeLayout.ALIGN_PARENT_START)
+        }
+        else -> null
+    }
+    if (paneParams == null) {
+        frostSelectionBottomMenu(card)
+        return
+    }
+    var pane = selBottomPanes[card]?.get()
+    if (pane == null || pane.parent !== parent) {
+        pane = GlassView(parent.context).apply {
+            backdrop = convListHost(parent)
+            underlay = wallpaperUnderlay(parent)
+            params.apply {
+                downsample = DOWNSAMPLE
+                blurRadius = parent.dp(BLUR_DP)
+                refractionEnabled = true
+                bevelFraction = BEVEL_FRACTION
+                depthRatio = DEPTH_RATIO
+                maxDisplacePx = parent.dp(DISPLACE_DP)
+                fresnelStrength = 0.5f
+                // The reactions pill's scrim, so the tray, the list and this card read as one composition.
+                tintColor = TRAY_SCRIM
+            }
+        }
+        // Right beneath the card: over the list, under the card's own icons.
+        parent.addView(pane, parent.indexOfChild(card).coerceAtLeast(0), paneParams)
+        selBottomPanes[card] = WeakReference(pane)
+        bindPane(pane, card, "selection bottom menu")
+        HookLog.hit("compat/floatingMenuBar")
+    }
+    val glass = pane
+    val sync = Runnable {
+        if (card.width <= 0 || card.height <= 0) return@Runnable
+        val lp = glass.layoutParams as? ViewGroup.MarginLayoutParams ?: return@Runnable
+        if (lp.width != card.width || lp.height != card.height ||
+            lp.leftMargin != card.left || lp.topMargin != card.top
+        ) {
+            lp.width = card.width
+            lp.height = card.height
+            lp.leftMargin = card.left
+            lp.topMargin = card.top
+            glass.layoutParams = lp
+            glass.params.cornerRadius = runCatching { XposedHelpers.callMethod(card, "getRadius") as? Float }
+                .getOrNull()?.takeIf { it > 0f } ?: card.dp(PANEL_ROW_RADIUS_DP)
+        }
+    }
+    if (card.getTag(selBottomTag) == null) {
+        card.setTag(selBottomTag, true)
+        card.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> sync.run() }
+        // The card slides and fades on its own animators; the pane follows per frame, each write on change only.
+        card.viewTreeObserver.addOnPreDrawListener {
+            val g = selBottomPanes[card]?.get()
+            if (g != null && g.parent != null) {
+                if (g.translationX != card.translationX) g.translationX = card.translationX
+                if (g.translationY != card.translationY) g.translationY = card.translationY
+                if (g.alpha != card.alpha) g.alpha = card.alpha
+                // Nothing else sweeps pane bindings on this screen.
+                syncPaneVisibility()
+            }
+            // WhatsApp hides the compose row under this card; the compose pill would otherwise show beside it.
+            val shown = card.isShown && card.alpha > 0.01f && card.width > 0
+            if (shown != convSelectionCardShown) {
+                convSelectionCardShown = shown
+                runCatching { syncConvFooter() }
+            }
+            true
+        }
+    }
+    sync.run()
+}
+
+/** The card's fallback where the host is neither a FrameLayout nor a RelativeLayout: frosted like the snackbar. */
+internal fun frostSelectionBottomMenu(card: View) {
+    val apply = Runnable {
+        runCatching {
+            if (card.width <= 0 || card.height <= 0) return@runCatching
+            // Material's own shadow and stroke would frame the glass; the frost carries its rim.
+            runCatching { XposedHelpers.callMethod(card, "setCardElevation", 0f) }
+            runCatching { XposedHelpers.callMethod(card, "setStrokeWidth", 0) }
+            val radius = runCatching { XposedHelpers.callMethod(card, "getRadius") as? Float }.getOrNull()
+                ?.takeIf { it > 0f } ?: card.dp(PANEL_ROW_RADIUS_DP)
+            // The menu's scrim, not the wallpaper tint: the card floats over content, the snackbar's recipe.
+            frost(
+                card, tintOverride = MENU_SCRIM, allowSquare = true, ignorePadding = true,
+                radiusOverride = radius, forceLabel = "message_selection_bottom_menu",
+            )
+            HookLog.hit("compat/floatingMenuBar")
+        }.onFailure { logOnce("selection bottom menu frost threw: $it") }
+    }
+    // Posted: the card measures after attach, and frost needs a real size.
+    card.post(apply)
+    if (card.getTag(selBottomTag) == null) {
+        card.setTag(selBottomTag, true)
+        card.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply.run() }
+    }
+}
+
+private val livePopupPaneTag = tagKey("wathemer-live-popup-pane")
+
+/** The popup each live pane is showing for, so a dismiss can put the pane away before the next frame. */
+private val livePopupPanes = WeakHashMap<PopupWindow, WeakReference<GlassView>>()
+
+/** The floating menu's glass drawn live in the Activity's window: the chat blurred beneath and the wallpaper under that, as the card has. */
+private fun liveDropdownPane(list: ViewGroup, pw: PopupWindow, radius: Float): Boolean {
+    val row = popupAnchors[pw]?.get() ?: return false
+    val decor = activityOf(row)?.window?.decorView ?: return false
+    val host = decor.findViewById<View>(android.R.id.content) as? FrameLayout ?: return false
+    var pane = host.getTag(livePopupPaneTag) as? GlassView
+    if (pane == null || pane.parent !== host) {
+        pane = GlassView(host.context).apply {
+            underlay = wallpaperUnderlay(host)
+            params.apply {
+                downsample = DOWNSAMPLE
+                blurRadius = host.dp(BLUR_DP)
+                refractionEnabled = true
+                bevelFraction = BEVEL_FRACTION
+                depthRatio = DEPTH_RATIO
+                maxDisplacePx = host.dp(DISPLACE_DP)
+                fresnelStrength = 0.5f
+                tintColor = TRAY_SCRIM
+            }
+        }
+        // The top of the Activity's content: over everything this window draws, under the popup's own rows.
+        host.addView(pane, FrameLayout.LayoutParams(0, 0).apply { gravity = Gravity.TOP or Gravity.START })
+        host.setTag(livePopupPaneTag, pane)
+    }
+    val glass = pane
+    // The list host is the footer's sibling; without it the pane still shows the wallpaper it stands on.
+    glass.backdrop = (convFooterRef?.get()?.parent as? ViewGroup)?.let { convListHost(it) }
+    glass.params.cornerRadius = radius
+    glass.alpha = 0f
+    glass.visibility = View.VISIBLE
+    livePopupPanes[pw] = WeakReference(glass)
+    val hostAt = IntArray(2)
+    val listAt = IntArray(2)
+    // The list lives in another window and animates in there; the Activity's own pre-draw follows it, one frame at a time.
+    host.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+        override fun onPreDraw(): Boolean {
+            if (!pw.isShowing || !list.isAttachedToWindow || livePopupPanes[pw]?.get() !== glass) {
+                if (glass.visibility != View.GONE) glass.visibility = View.GONE
+                host.viewTreeObserver.removeOnPreDrawListener(this)
+                return true
+            }
+            // Its own heartbeat: the popup's frames do not redraw this window, so the pane asks for the next one.
+            glass.postInvalidateOnAnimation()
+            if (list.visibility != View.VISIBLE || list.width <= 0 || list.height <= 0) {
+                if (glass.alpha != 0f) glass.alpha = 0f
+                return true
+            }
+            val lp = glass.layoutParams as? FrameLayout.LayoutParams ?: return true
+            if (lp.width != list.width || lp.height != list.height) {
+                lp.width = list.width
+                lp.height = list.height
+                glass.layoutParams = lp
+            }
+            host.getLocationOnScreen(hostAt)
+            list.getLocationOnScreen(listAt)
+            val x = (listAt[0] - hostAt[0]).toFloat()
+            val y = (listAt[1] - hostAt[1]).toFloat()
+            if (glass.translationX != x) glass.translationX = x
+            if (glass.translationY != y) glass.translationY = y
+            if (glass.alpha != list.alpha) glass.alpha = list.alpha
+            return true
+        }
+    })
+    logOnce("floating menu: live pane in ${host.context.javaClass.simpleName}")
+    return true
+}
+
+/** Called from the popup's dismiss: the pane goes before the next frame instead of lingering until one is drawn. */
+private fun hideLiveDropdownPane(pw: PopupWindow) {
+    val glass = livePopupPanes.remove(pw)?.get() ?: return
+    if (glass.visibility != View.GONE) glass.visibility = View.GONE
 }

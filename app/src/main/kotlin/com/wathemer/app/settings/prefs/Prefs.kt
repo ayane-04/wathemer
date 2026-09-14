@@ -105,6 +105,11 @@ class Prefs(
         get() = sp.getBoolean(KEY_EFFECT_SNOW, false)
         set(value) { commitBoolean(KEY_EFFECT_SNOW, value) }
 
+    /** Styles the surfaces WaEnhancer adds or reveals; read once at hook install, so it takes effect on the next WhatsApp start. */
+    var waeCompat: Boolean
+        get() = sp.getBoolean(KEY_WAE_COMPAT, true)
+        set(value) { commitBoolean(KEY_WAE_COMPAT, value) }
+
     /** Repairs stores from builds that allowed a token equal to another token's seed; idempotent and cheap. */
     fun migrateCollidingTokens(): Int {
         var fixed = 0
@@ -581,6 +586,7 @@ class Prefs(
 
         const val KEY_CHATLIST_DIVIDER = "chatlist_divider"
         const val KEY_EFFECT_SNOW = "effect_snow"
+        const val KEY_WAE_COMPAT = "waenhancer_compat"
 
         const val KEY_PRIMARY = "primary_color"
         const val KEY_BACKGROUND = "background_color"

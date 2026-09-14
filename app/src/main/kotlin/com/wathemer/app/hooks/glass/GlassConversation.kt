@@ -21,6 +21,9 @@ internal var convCoordRef: WeakReference<ViewGroup>? = null
 
 internal var convFooterRef: WeakReference<ViewGroup>? = null
 
+/** True while the floating menu's action card covers the compose row; the pill collapses under it. */
+@Volatile internal var convSelectionCardShown = false
+
 /** The strip above the messages, pinned message included; the floated toolbar sits over its whole height. */
 internal var convBannerRef: WeakReference<ViewGroup>? = null
 
@@ -491,7 +494,7 @@ internal fun convHeaderOwns(v: View): Boolean =
 internal var convListRef: WeakReference<ViewGroup>? = null
 
 /** Found structurally, child 0 is a zero-height clipper; never derive from an index you did not set. */
-private fun convListHost(parent: ViewGroup): ViewGroup? {
+internal fun convListHost(parent: ViewGroup): ViewGroup? {
     for (i in 0 until parent.childCount) {
         val c = parent.getChildAt(i) as? ViewGroup ?: continue
         if (c.height <= 0) continue
@@ -570,6 +573,11 @@ internal fun syncConvFooter() {
     val footer = convFooterRef?.get() ?: return
     if (footer.width <= 0 || footer.height <= 0) return
     if (footer.getTag(convFloatTag) != null) liftConvFooter(footer)
+    // The selection card stands where the compose row was, and WhatsApp only hides the row, never removes it.
+    if (convSelectionCardShown) {
+        collapseConvPanes(footer)
+        return
+    }
     val res = footer.resources
     val pkg = footer.context.packageName
     val inputId = res.waId("input_layout", pkg)

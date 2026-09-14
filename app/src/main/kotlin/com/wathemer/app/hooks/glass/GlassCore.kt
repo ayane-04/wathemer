@@ -197,9 +197,13 @@ internal fun loadGlassPrefs(): Boolean {
         tokenTabPillSet = p.getInt(k.OVR_TAB_ACTIVE_PILL, 0) != 0
         navUnreadBg = p.getInt(k.KEY_UNREAD_ACCENT, 0)
         navUnreadText = p.getInt(k.KEY_UNREAD_COUNT_TEXT, 0)
+        actionModeIconsColor = p.getInt(k.OVR_ACTION_MODE_ICONS, 0)
     }.onFailure { XposedBridge.log("[$TAG] glass prefs unreadable: $it") }
     return enabled
 }
+
+/** The user's action-mode icon colour, 0 when unset; the selection bar's close glyph takes it over white. */
+internal var actionModeIconsColor = 0
 
 /** Read at install: a set pill colour keeps the stock/user pill and the frost never registers. */
 internal var tokenTabPillSet = false
@@ -359,8 +363,6 @@ internal var navBarRef: WeakReference<View>? = null
 
 internal var pagerHolderRef: WeakReference<View>? = null
 
-internal var listRef: WeakReference<View>? = null
-
 /** bottom_nav_container: the nav pane's anchor, not its parent (a LinearLayout would displace the pane). */
 internal var navHostRef: WeakReference<View>? = null
 
@@ -507,18 +509,54 @@ internal fun wallpaperUnderlayOf(v: View): List<View> {
 internal fun navLabel(): CharSequence? = navLabel(0)
 
 /** Nav item [index]'s localised label; string resource names are stripped, and findViewById stops at the first match. */
-internal fun navLabel(index: Int): CharSequence? = runCatching {
-    val nav = navBarRef?.get() ?: return null
+internal fun navLabel(index: Int): CharSequence? = navLabels().getOrNull(index)
+
+/** Every nav item's small label in tree order, which is tab order; one walk serves a whole sync pass. */
+internal fun navLabels(): List<CharSequence> = runCatching {
+    val nav = navBarRef?.get() ?: return emptyList()
     val id = nav.resources.waId("navigation_bar_item_small_label_view", nav.context.packageName)
-    if (id == 0) return null
+    if (id == 0) return emptyList()
     val found = ArrayList<CharSequence>()
     fun walk(v: View) {
         if (v.id == id && v is TextView && v.text.isNotBlank()) found.add(v.text)
         if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i) ?: continue)
     }
     walk(nav)
-    found.getOrNull(index)
-}.getOrNull()
+    found
+}.getOrDefault(emptyList())
+
+/** The pager page [v] sits on, as its index: the page's left edge over the pager's width, since pages are laid out side by side. */
+internal fun pageIndexOf(v: View): Int = runCatching {
+    var child: View = v
+    var parent = child.parent as? View
+    var hops = 0
+    while (parent != null && hops < 16) {
+        if (isPager(parent)) {
+            if (parent.width <= 0) return@runCatching -1
+            return@runCatching Math.round(child.left.toFloat() / parent.width)
+        }
+        child = parent
+        parent = child.parent as? View
+        hops++
+    }
+    -1
+}.getOrDefault(-1)
+
+/** By class hierarchy name, never `is`: WhatsApp's pager is androidx's ViewPager from another classloader. */
+private fun isPager(v: View): Boolean {
+    var c: Class<*>? = v.javaClass
+    while (c != null && c != Any::class.java) {
+        if (c.name.contains("ViewPager")) return true
+        c = c.superclass
+    }
+    return false
+}
+
+/** The nav label of the page [v] sits on, whatever tabs WhatsApp or a module put in the bar; null off the pager. */
+internal fun navLabelForPage(v: View): CharSequence? {
+    val index = pageIndexOf(v)
+    return if (index < 0) null else navLabel(index)
+}
 
 internal fun primaryTextColor(ctx: Context): Int {
     val a = ctx.obtainStyledAttributes(intArrayOf(android.R.attr.textColorPrimary))

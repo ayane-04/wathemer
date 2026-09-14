@@ -775,7 +775,7 @@ object HomeActivityHook {
         for (i in 0 until menu.size()) {
             val item = menu.getItem(i) ?: continue
             val entry = runCatching { waRes.getResourceEntryName(item.itemId) }.getOrNull()
-            val key = navTabKey(entry, i) ?: continue
+            val key = navTabKey(item.itemId, entry, i) ?: continue
             val (normalName, selectedName) = NAV_ICON_NAMES[key] ?: continue
             val normal = navDrawable(modRes, normalName) ?: continue
             val selected = navDrawable(modRes, selectedName) ?: normal
@@ -789,7 +789,15 @@ object HomeActivityHook {
         }
     }
 
-    private fun navTabKey(entryName: String?, index: Int): String? {
+    private fun navTabKey(itemId: Int, entryName: String?, index: Int): String? {
+        // WhatsApp's tab ids are plain ints, not resources (200 chats, 300 updates, 400 calls, 600 communities); a tab another module adds keeps its own glyph.
+        when (itemId) {
+            200 -> return "chats"
+            300 -> return "status"
+            400 -> return "calls"
+            600 -> return "comm"
+        }
+        if (itemId in 1..0xFFFF) return null
         val n = entryName?.lowercase()
         return when {
             n == null -> NAV_INDEX_FALLBACK.getOrNull(index)

@@ -19,6 +19,7 @@ import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.QuoteAndLabelColors
 import com.wathemer.app.hooks.SystemBars
 import com.wathemer.app.hooks.ThemeHook
+import com.wathemer.app.hooks.WaeCompat
 import com.wathemer.app.hooks.TickAndLinkColors
 import com.wathemer.app.hooks.WaIds
 import com.wathemer.app.hooks.dexkit.Deobfuscator
@@ -71,6 +72,9 @@ class ModernEntry : XposedModule() {
             // Registers the one Activity callback set; every lifecycle client rides it, whenever it registered.
             try { ActivityLifecycle.attach(app) }
             catch (t: Throwable) { HookLog.fail("lifecycle/activity", t) }
+            // Read before the installers below; the ones covering WaEnhancer's surfaces consult it as they register.
+            try { WaeCompat.load() }
+            catch (t: Throwable) { HookLog.fail("compat/waenhancer", t) }
             // Order here is not load-bearing; anything that must run after all installers must be posted, not placed last.
             try { WallpaperImage.install(classLoader); HookLog.arm("install/WallpaperImage") }
             catch (t: Throwable) { HookLog.fail("install/WallpaperImage", t) }
