@@ -212,7 +212,7 @@ private val msgSelectAt = IntArray(2)
 private fun msgSelectPaneActive(): Boolean =
     convMsgSelectPaneRef?.get()?.let { it.parent != null } == true
 
-/** Runs after ensureBubblePane and both insert at 0, so the panel lands beneath the bubbles; do not reorder. */
+/** Inserted at 0, beneath the list whose own background carries the bubbles, so the panel lands under them. */
 internal fun ensureMsgSelectPane(listHost: ViewGroup, list: AbsListView) {
     val existing = convMsgSelectPaneRef?.get()
     if (existing != null && existing.parent === listHost) return
@@ -251,7 +251,7 @@ internal fun ensureMsgSelectPane(listHost: ViewGroup, list: AbsListView) {
     convMsgSelectPaneRef = WeakReference(pane)
     // Rows already on screen reshaped their own fill; re-record so they stop and latch their tag.
     for (i in 0 until list.childCount) list.getChildAt(i)?.invalidate()
-    XposedBridge.log("[$TAG] message selection pane inserted under the bubble pane")
+    XposedBridge.log("[$TAG] message selection pane inserted beneath the list")
 }
 
 /** The mark lives on the view that drew the fill; only that owner re-recording without one counts as deselection. */

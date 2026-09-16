@@ -15,7 +15,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** One rounded rect of bubble glass, shared by GlassBubblePane and GlassBubbleDrawable so the material cannot drift; never cache a position here, a stale position is behind every artefact. */
+/** One bubble of glass, a rounded rect or a pack silhouette, shared by every stamping surface and GlassBubbleDrawable so the material cannot drift; never cache a position here, a stale position is behind every artefact. */
 class BubbleGlassPainter(private val density: Float) {
 
     /** Transmission, dim and light in one pass; null falls back to the panes' two programs below. */
@@ -54,6 +54,9 @@ class BubbleGlassPainter(private val density: Float) {
     private val sharpMatrix = Matrix()
     private var uniformSharpDim = -1f
     private var uniformDetail = -1f
+    private val fieldMatrix = Matrix()
+    private var uniformUseField = -1f
+    private var uniformFieldRange = -1f
 
     /** Each draw op snapshots the shader, so per-bubble re-pushes are safe; the guard skips them when nothing changed. */
     private var uniformW = 0f
@@ -121,7 +124,7 @@ class BubbleGlassPainter(private val density: Float) {
         dim: Float,
         rimColor: Int,
         rimWidth: Float,
-        /** Screen y where the dissolve begins, plus length; the list's fading edge cannot reach the pane. */
+        /** Screen y where the dissolve begins, plus length; the list's fading edge cannot reach the glass layer. */
         fadeLineScreenY: Float = 0f,
         fadeLen: Float = 0f,
         /** Per-corner radii (TL, TR, BR, BL) in px; null keeps the uniform radius. Caller-owned scratch, copied here. */
@@ -132,6 +135,8 @@ class BubbleGlassPainter(private val density: Float) {
         sharpDim: Float = 0f,
         /** Draw the stroke even with the light program present; for a surface that transmits nothing. */
         forceRim: Boolean = false,
+        /** The pack silhouette this bubble takes as its edge, fused path only; null keeps the rounded rect. */
+        mask: MaskRef? = null,
     ) {
         if (clip.width() <= 0f || clip.height() <= 0f) return
         val rcap = minOf(clip.height() / 2f, clip.width() / 2f)
@@ -154,9 +159,13 @@ class BubbleGlassPainter(private val density: Float) {
         // No source means no rim for this draw; the copy stands in as the child and the detail is pushed as zero.
         val hasSharp = sharp != null && sharpPlace != null && sharp.width > 0 && sharp.height > 0 && !sharp.isRecycled
         val detailNow = if (hasSharp) params.detail else 0f
+        // The field is a fused-path input; the two-program path keeps the rounded rect whatever the pack says.
+        val useFieldNow = if (mask != null && fused != null) 1f else 0f
+        val fieldRangeNow = if (mask != null && useFieldNow > 0f) mask.field.rangePxFor(mask.w) else 0f
         if (params !== lastParams || clip.width() != uniformW || clip.height() != uniformH || tint != uniformTint ||
             fadeOffset != uniformFade || fadeLen != uniformFadeLen || radiiChanged || dimNow != uniformDim ||
-            sharpDimNow != uniformSharpDim || detailNow != uniformDetail
+            sharpDimNow != uniformSharpDim || detailNow != uniformDetail ||
+            useFieldNow != uniformUseField || fieldRangeNow != uniformFieldRange
         ) {
             lastParams = params
             uniformW = clip.width()
@@ -167,6 +176,8 @@ class BubbleGlassPainter(private val density: Float) {
             uniformDim = dimNow
             uniformSharpDim = sharpDimNow
             uniformDetail = detailNow
+            uniformUseField = useFieldNow
+            uniformFieldRange = fieldRangeNow
             curRadii.copyInto(lastRadii)
             pushedOnce = true
             params.cornerRadii = lastRadii
@@ -186,7 +197,9 @@ class BubbleGlassPainter(private val density: Float) {
         val fs = fused
         if (fs != null && bmp != null && place != null && bmp.width > 0 && bmp.height > 0) {
             if (!fusedPushed) {
-                GlassShader.applyBubbleUniforms(fs, params, iw, ih, density, dimNow, sharpDimNow, detailNow)
+                GlassShader.applyBubbleUniforms(
+                    fs, params, iw, ih, density, dimNow, sharpDimNow, detailNow, useFieldNow, fieldRangeNow,
+                )
                 fusedPushed = true
             }
             fs.setLocalMatrix(local)
@@ -206,6 +219,15 @@ class BubbleGlassPainter(private val density: Float) {
                 fs.setInputShader("sharp", ss)
             } else {
                 fs.setInputShader("sharp", cs)
+            }
+            // Bound every draw like the others; with no pack it points at the copy and is never read.
+            if (mask != null && useFieldNow > 0f) {
+                val f = mask.field
+                fieldMatrix.setScale(mask.w.toFloat() / f.bitmap.width, mask.h.toFloat() / f.bitmap.height)
+                f.shader.setLocalMatrix(fieldMatrix)
+                fs.setInputShader("field", f.shader)
+            } else {
+                fs.setInputShader("field", cs)
             }
             // Re-assigned every draw: the Paint must snapshot this bubble's uniforms, not the last one's.
             fusedPaint.shader = fs
@@ -270,9 +292,7 @@ class BubbleGlassPainter(private val density: Float) {
         }
         canvas.restoreToCount(save)
 
-        // Fallback rim, or one asked for: over a transmitted image a stroke reads as an outline, but a surface
-        // with nothing to transmit has only the Fresnel ring, and a hard line is what makes it read as glass.
-        // Uniform corners on purpose: the fallback path is below Tiramisu, where merging is not worth a path stroke.
+        // Fallback rim, or one asked for: a surface with nothing to transmit has only the Fresnel ring, and a hard line is what makes it read as glass.
         if ((ls == null || forceRim) && !transmitted && rimWidth > 0f && rimColor ushr 24 != 0) {
             tintPaint.color = rimColor
             tintPaint.style = Paint.Style.STROKE
@@ -281,6 +301,7 @@ class BubbleGlassPainter(private val density: Float) {
             clip.inset(h, h)
             // Lit at both ends of the light axis and clear across the middle, as a pane's own stroke is.
             if (forceRim) aimRimHighlight(clip, params.rimStrokeAngle, rimColor)
+            // Uniform corners on purpose: this path runs below Tiramisu, where merging is not worth a path stroke.
             canvas.drawRoundRect(clip, r - h, r - h, tintPaint)
             clip.inset(-h, -h)
             tintPaint.shader = null

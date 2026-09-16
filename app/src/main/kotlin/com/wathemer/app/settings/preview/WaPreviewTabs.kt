@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.wathemer.app.R
 import com.wathemer.app.settings.components.BitmapIcon
 import com.wathemer.app.settings.prefs.Prefs
+import com.wathemer.app.settings.prefs.TickStyles
 
 // ── Mock icons ──────────────────────────────────────────────────────────
 // Generated bitmaps tinted at draw time; the dots and ticks stay drawn.
@@ -78,6 +79,7 @@ sealed class WaPreviewKind {
     object ChatInputBar : WaPreviewKind()
     object ChatQuote : WaPreviewKind()
     object ChatMisc : WaPreviewKind()
+    object ChatTray : WaPreviewKind()
 
     object Selection : WaPreviewKind()
 }
@@ -99,6 +101,7 @@ fun WaPreview(kind: WaPreviewKind, snapshot: ThemeSnapshot, modifier: Modifier =
         WaPreviewKind.ChatInputBar   -> ComposeScope(snapshot, modifier)
         WaPreviewKind.ChatQuote      -> QuoteScope(snapshot, modifier)
         WaPreviewKind.ChatMisc       -> MiscScope(snapshot, modifier)
+        WaPreviewKind.ChatTray       -> TrayScope(snapshot, modifier)
         WaPreviewKind.Selection      -> SelectionScope(snapshot, modifier)
     }
 }
@@ -119,10 +122,23 @@ private fun BubblesScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
             Box(modifier = Modifier.align(Alignment.CenterHorizontally)) {
                 DatePill(pal.surface, pal.subtle)
             }
-            ChatRow(end = false) { IncomingBubble(pal, "Hey, are you home?", "10:14") }
-            ChatRow(end = true)  { OutgoingBubble(pal, "Yes! Just got back.", "10:14", TickKind.Read) }
-            ChatRow(end = false) { IncomingBubble(pal, "Want me to bring dinner?", "10:15") }
-            ChatRow(end = true)  { OutgoingBubble(pal, "Yes please. Pasta?", "10:15", TickKind.Delivered) }
+            val avatar = snap.msgAvatarSize * PREVIEW_TICK_SCALE
+            ChatRow(end = false) {
+                if (snap.msgAvatarChats) PreviewAvatar(pal, avatar, "M")
+                IncomingBubble(pal, "Hey, are you home?", "10:14")
+            }
+            ChatRow(end = true) {
+                OutgoingBubble(pal, "Yes! Just got back.", "10:14", TickKind.Read)
+                if (snap.msgAvatarMine) PreviewAvatar(pal, avatar, "Y", end = true)
+            }
+            ChatRow(end = false) {
+                if (snap.msgAvatarChats) PreviewAvatar(pal, avatar, "M")
+                IncomingBubble(pal, "Want me to bring dinner?", "10:15")
+            }
+            ChatRow(end = true) {
+                OutgoingBubble(pal, "Yes please. Pasta?", "10:15", TickKind.Delivered)
+                if (snap.msgAvatarMine) PreviewAvatar(pal, avatar, "Y", end = true)
+            }
         }
     }
 }
@@ -349,7 +365,7 @@ private fun CaptionedMediaBubble(pal: ChatPalette, caption: String, time: String
             Row(modifier = Modifier.align(Alignment.End).padding(end = 5.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(time, color = pal.rightDate, fontSize = 8.sp)
                 Spacer(Modifier.size(4.dp))
-                TickGlyph(TickKind.Read, defaultColor = pal.tickUnseen, accent = pal.tickSeen)
+                TickGlyph(TickKind.Read, defaultColor = pal.tickUnseen, accent = pal.tickSeen, style = pal.tickStyle)
             }
         }
     }
@@ -402,6 +418,8 @@ internal data class ChatPalette(
     // Misc tokens
     val tickSeen: Color, val tickUnseen: Color,
     val forwardedLabel: Color, val mediaCaption: Color, val linkColor: Color,
+    // The receipt style, so the mock draws the same art as the rows.
+    val tickStyle: Int,
 )
 
 @Composable
@@ -433,6 +451,7 @@ private fun chatPalette(snap: ThemeSnapshot): ChatPalette {
         forwardedLabel = snap.forwardedLabelColor.toColorOr(subtle),
         mediaCaption   = snap.mediaCaptionColor.toColorOr(text),
         linkColor      = snap.linkColor.toColorOr(Color(0xFF027EB5)),  // WA's actual default link blue
+        tickStyle      = snap.tickStyle,
     )
 }
 
@@ -440,7 +459,11 @@ internal fun Int.toColorOr(fallback: Color): Color = if (this != 0) Color(this) 
 
 @Composable
 private fun ChatRow(end: Boolean, content: @Composable () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (end) Arrangement.End else Arrangement.Start) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (end) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Bottom,
+    ) {
         content()
     }
 }
@@ -462,8 +485,14 @@ private fun DatePill(surface: Color, subtle: Color) {
 
 internal enum class TickKind { Delivered, Read }
 
+/** A picked tick style draws its own art; stock draws the mock's glyph in the read or delivered colour. */
 @Composable
-private fun TickGlyph(kind: TickKind, defaultColor: Color, accent: Color) {
+private fun TickGlyph(kind: TickKind, defaultColor: Color, accent: Color, style: Int = 0) {
+    val art = rememberTickArt(style, if (kind == TickKind.Read) TickStyles.State.READ else TickStyles.State.DELIVERED)
+    if (art != null) {
+        TickArt(art, scale = PREVIEW_TICK_SCALE)
+        return
+    }
     val color = if (kind == TickKind.Read) accent else defaultColor
     DoubleTick(color)
 }
@@ -497,7 +526,7 @@ internal fun OutgoingBubble(pal: ChatPalette, text: String, time: String, tickKi
         Text(time, color = pal.rightDate, fontSize = 8.sp)
         Spacer(Modifier.size(4.dp))
         // Read = tickSeen, Delivered and Sent = tickUnseen
-        TickGlyph(tickKind, defaultColor = pal.tickUnseen, accent = pal.tickSeen)
+        TickGlyph(tickKind, defaultColor = pal.tickUnseen, accent = pal.tickSeen, style = pal.tickStyle)
     }
 }
 
@@ -558,7 +587,7 @@ private fun OutgoingQuotedBubble(pal: ChatPalette, quoteAuthor: String, quoteTex
             Row(modifier = Modifier.align(Alignment.End).padding(end = 6.dp, top = 1.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(time, color = pal.rightDate, fontSize = 8.sp)
                 Spacer(Modifier.size(4.dp))
-                TickGlyph(tickKind, defaultColor = pal.tickUnseen, accent = pal.tickSeen)
+                TickGlyph(tickKind, defaultColor = pal.tickUnseen, accent = pal.tickSeen, style = pal.tickStyle)
             }
         }
     }
@@ -638,4 +667,59 @@ internal fun ThemeSnapshot.toTokens(): Tokens = Tokens(
     systemBarsEnabled = systemBarsEnabled,
     // Same test the hook makes, in the same order: enabled, and an actual image.
     wallpaperOwnsBars = wallpaperEnabled && !wallpaperPath.isNullOrBlank(),
+    tickStyle = tickStyle,
 )
+
+/** The emoji and sticker tray under a short chat: tab bar, search, then the grid; each takes its token or the mock's tone. */
+@Composable
+private fun TrayScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
+    val pal = chatPalette(snap)
+    val body = snap.trayBg.toColorOr(pal.bg)
+    val header = snap.trayHeaderBg.toColorOr(pal.surface)
+    val icons = snap.trayIconTint.toColorOr(pal.text.copy(alpha = 0.7f))
+    Column(modifier = modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))) {
+        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            ChatWallpaper(baseColor = pal.bg, doodleColor = pal.text, snap = snap)
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ChatRow(end = false) { IncomingBubble(pal, "Send me the pasta emoji", "10:14") }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().background(header).padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            EmojiIcon(icons)
+            Text("GIF", color = icons, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Box(modifier = Modifier.size(12.dp).border(1.5.dp, icons, RoundedCornerShape(3.dp)))
+            Spacer(Modifier.weight(1f))
+            Box(modifier = Modifier.size(11.dp).border(1.5.dp, icons, CircleShape))
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().height(96.dp).background(body).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            repeat(3) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    repeat(8) { Box(modifier = Modifier.size(16.dp).background(pal.text.copy(alpha = 0.18f), CircleShape)) }
+                }
+            }
+        }
+    }
+}
+
+/** The picture beside a message as the rows draw it: a circle at the pref's size, scaled like the rest of the mock. */
+@Composable
+private fun PreviewAvatar(pal: ChatPalette, sizeDp: Float, letter: String, end: Boolean = false) {
+    if (end) Spacer(Modifier.size(4.dp))
+    Box(
+        modifier = Modifier.size(sizeDp.dp).background(pal.accent.copy(alpha = 0.55f), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(letter, color = pal.onAccent, fontSize = (sizeDp * 0.45f).sp, fontWeight = FontWeight.Bold)
+    }
+    if (!end) Spacer(Modifier.size(4.dp))
+}

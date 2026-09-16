@@ -1,6 +1,7 @@
 // The Chats page: every override of a conversation, in sections, under a preview that follows the section in hand.
 package com.wathemer.app.settings.screens
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,18 +10,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,21 +36,34 @@ import com.wathemer.app.settings.components.AppAccent
 import com.wathemer.app.settings.components.CategoryRow
 import com.wathemer.app.settings.components.ExpandGroup
 import com.wathemer.app.settings.components.NavTopBar
+import com.wathemer.app.settings.components.NoteText
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.PreviewPanel
+import com.wathemer.app.settings.components.SliderItem
+import com.wathemer.app.settings.components.ToggleItem
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.nav.Screen
 import com.wathemer.app.settings.prefs.BubbleStyles
 import com.wathemer.app.settings.prefs.Prefs
+import com.wathemer.app.settings.prefs.TickStyles
 import com.wathemer.app.settings.preview.BubbleThumb
 import com.wathemer.app.settings.preview.LocalThemeSnapshot
 import com.wathemer.app.settings.preview.SingleBubblePreview
 import com.wathemer.app.settings.preview.SnapshotOverrideRow
 import com.wathemer.app.settings.preview.ThemeSnapshot
+import com.wathemer.app.settings.preview.TickStylePreview
+import com.wathemer.app.settings.preview.TickThumb
 import com.wathemer.app.settings.preview.WaPreview
 import com.wathemer.app.settings.preview.WaPreviewKind
 import com.wathemer.app.settings.preview.updateBubbleStyleIncoming
 import com.wathemer.app.settings.preview.updateBubbleStyleOutgoing
+import com.wathemer.app.settings.preview.updateMsgAvatarChats
+import com.wathemer.app.settings.preview.updateMsgAvatarFirstOnly
+import com.wathemer.app.settings.preview.updateMsgAvatarGroups
+import com.wathemer.app.settings.preview.updateMsgAvatarMine
+import com.wathemer.app.settings.preview.updateMsgAvatarSize
+import com.wathemer.app.settings.preview.updateTickStyle
+import kotlin.math.roundToInt
 
 @Composable
 fun ChatScreen(nav: NavController, prefs: Prefs) {
@@ -102,6 +116,11 @@ fun ChatScreen(nav: NavController, prefs: Prefs) {
             trailingHint = shapeHint,
             onClick = { nav.push(Screen.ChatBubbleShapes) },
         )
+        CategoryRow(
+            label = "Tick style",
+            trailingHint = TickStyles.NAMES.getOrNull(snap.tickStyle) ?: "Stock",
+            onClick = { nav.push(Screen.ChatTickStyles) },
+        )
         ExpandGroup("Input & compose bar", onOpen = { kind = WaPreviewKind.ChatInputBar }) {
             row("Bar background", Prefs.COMPOSE_BAR_BG,     prefs.background, WaPreviewKind.ChatInputBar, getter = { composeBarBg },     copier = { copy(composeBarBg = it) })
             row("Entry text", Prefs.COMPOSE_ENTRY_TEXT, prefs.text,       WaPreviewKind.ChatInputBar, getter = { composeEntryText }, copier = { copy(composeEntryText = it) })
@@ -126,6 +145,27 @@ fun ChatScreen(nav: NavController, prefs: Prefs) {
             row("Forwarded label", Prefs.FORWARDED_LABEL_COLOR, prefs.text,    WaPreviewKind.ChatMisc, getter = { forwardedLabelColor }, copier = { copy(forwardedLabelColor = it) })
             row("Media caption",   Prefs.MEDIA_CAPTION_COLOR,   prefs.text,    WaPreviewKind.ChatMisc, getter = { mediaCaptionColor },   copier = { copy(mediaCaptionColor = it) })
             row("Link colour", Prefs.LINK_COLOR,            prefs.primary, WaPreviewKind.ChatMisc, getter = { linkColor },           copier = { copy(linkColor = it) })
+        }
+        ExpandGroup("Emoji & sticker tray", onOpen = { kind = WaPreviewKind.ChatTray }) {
+            if (prefs.glassEnabled) NoteText("Liquid Glass is on; these colours wait until it is off.")
+            row("Panel background", Prefs.TRAY_BG,        prefs.background, WaPreviewKind.ChatTray, getter = { trayBg },       copier = { copy(trayBg = it) })
+            row("Tab bar",          Prefs.TRAY_HEADER_BG, prefs.background, WaPreviewKind.ChatTray, getter = { trayHeaderBg }, copier = { copy(trayHeaderBg = it) })
+            row("Icons",            Prefs.TRAY_ICON_TINT, prefs.text,       WaPreviewKind.ChatTray, getter = { trayIconTint }, copier = { copy(trayIconTint = it) })
+        }
+        ExpandGroup("Pictures beside messages", onOpen = { kind = WaPreviewKind.ChatBubbles }) {
+            ToggleItem("In chats", subtitle = "The contact's picture beside their messages", checked = snap.msgAvatarChats, onCheckedChange = { snapshot.updateMsgAvatarChats(prefs, it) })
+            ToggleItem("In groups", subtitle = "Each sender's picture beside their messages", checked = snap.msgAvatarGroups, onCheckedChange = { snapshot.updateMsgAvatarGroups(prefs, it) })
+            ToggleItem("My picture", subtitle = "Beside your own messages", checked = snap.msgAvatarMine, onCheckedChange = { snapshot.updateMsgAvatarMine(prefs, it) })
+            ToggleItem("First message of a run only", subtitle = "Groups only", checked = snap.msgAvatarFirstOnly, onCheckedChange = { snapshot.updateMsgAvatarFirstOnly(prefs, it) })
+            SliderItem(
+                title = "Size",
+                value = snap.msgAvatarSize.toFloat(),
+                range = Prefs.MSG_AVATAR_SIZE_MIN.toFloat()..Prefs.MSG_AVATAR_SIZE_MAX.toFloat(),
+                steps = (Prefs.MSG_AVATAR_SIZE_MAX - Prefs.MSG_AVATAR_SIZE_MIN) / 4 - 1,
+                divider = false,
+                onValueChange = { snapshot.updateMsgAvatarSize(prefs, it.roundToInt()) },
+                valueLabel = { "${it.roundToInt()} dp" },
+            )
         }
     }
 }
@@ -152,16 +192,31 @@ fun ChatBubbleShapesScreen(nav: NavController, prefs: Prefs) {
             PreviewPanel(modifier = Modifier.height(150.dp).fillMaxWidth()) {
                 SingleBubblePreview(isOutgoing = editingOutgoing, style = current, tint = Color(tintInt))
             }
-            Spacer(Modifier.weight(1f))
             SideSwitch(
                 editingOutgoing = editingOutgoing,
                 onSelect = { editingOutgoing = it },
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
-            // A fixed bottom strip, two rows scrolling sideways, so the preview keeps the screen.
-            LazyHorizontalGrid(
-                rows = GridCells.Fixed(2),
-                modifier = Modifier.height(206.dp).fillMaxWidth(),
+            if (prefs.glassEnabled) {
+                NoteText(
+                    when {
+                        // Mask shaping needs the fused program, which exists from Android 13 on.
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ->
+                            "Liquid Glass is on: colour artwork keeps its own look; mask shapes take the plain rounded glass before Android 13."
+                        prefs.glassShapedBubbles ->
+                            "Liquid Glass is on: a mask shape becomes the outline of the glass, colour artwork keeps its own look."
+                        else ->
+                            "Liquid Glass is on: colour artwork keeps its own look; mask shapes need \"Glass fills shaped bubbles\" on the Liquid Glass page."
+                    },
+                )
+            }
+            // The grid takes the rest of the screen and scrolls down; the preview above it stays put.
+            val grid = rememberLazyGridState()
+            LaunchedEffect(editingOutgoing) { grid.scrollToItem(gridStart(current)) }
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 96.dp),
+                state = grid,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -183,6 +238,9 @@ fun ChatBubbleShapesScreen(nav: NavController, prefs: Prefs) {
         }
     }
 }
+
+/** Open with the selection one row below the top, so it is in view with a row of context above it. */
+private fun gridStart(selected: Int): Int = (selected - 3).coerceAtLeast(0)
 
 /** Two-state segmented control for which side the grid is editing. */
 @Composable
@@ -227,7 +285,7 @@ private fun ShapeCell(
 ) {
     Column(
         modifier = Modifier
-            .width(96.dp)
+            .fillMaxWidth()
             .border(
                 if (selected) 1.5.dp else 1.dp,
                 if (selected) AppAccent else Palette.Rule,
@@ -245,6 +303,81 @@ private fun ShapeCell(
                 Text("Stock", color = Palette.FgMuted, fontSize = 13.sp)
             } else {
                 BubbleThumb(style = index, isOutgoing = isOutgoing, tint = tint)
+            }
+        }
+        Text(
+            label,
+            color = if (selected) Palette.Fg else Palette.FgMuted,
+            fontSize = 11.sp,
+            maxLines = 1,
+            softWrap = false,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            modifier = Modifier.padding(top = 5.dp),
+        )
+    }
+}
+
+// ── Chats > Tick style ───────────────────────────────────────────────────
+
+/** Tick picker: one thumbnail grid under a three-state preview; the drawing, not the number label, is the identifier. */
+@Composable
+fun ChatTickStylesScreen(nav: NavController, prefs: Prefs) {
+    val snap = LocalThemeSnapshot.current
+    val current = snap.value.tickStyle
+
+    Scaffold(containerColor = Palette.Bg) { inner ->
+        Column(modifier = Modifier.fillMaxSize().padding(inner)) {
+            NavTopBar(title = "Tick style", onBack = { nav.pop() })
+            PreviewPanel(modifier = Modifier.height(150.dp).fillMaxWidth()) {
+                TickStylePreview(style = current)
+            }
+            NoteText("Your tick colours apply to the stock ticks only; a style brings its own colours.")
+            val grid = rememberLazyGridState()
+            LaunchedEffect(Unit) { grid.scrollToItem(gridStart(current)) }
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 96.dp),
+                state = grid,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(TickStyles.NAMES.size) { i ->
+                    TickCell(
+                        index = i,
+                        label = TickStyles.NAMES[i],
+                        selected = i == current,
+                        onPick = { snap.updateTickStyle(prefs, i) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** One grid cell: the style's delivered and read glyphs side by side, as the rows will show them. */
+@Composable
+private fun TickCell(index: Int, label: String, selected: Boolean, onPick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                if (selected) 1.5.dp else 1.dp,
+                if (selected) AppAccent else Palette.Rule,
+                RoundedCornerShape(12.dp),
+            )
+            .clickable(onClick = onPick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (index == 0) {
+                Text("Stock", color = Palette.FgMuted, fontSize = 13.sp)
+            } else {
+                TickThumb(style = index)
             }
         }
         Text(

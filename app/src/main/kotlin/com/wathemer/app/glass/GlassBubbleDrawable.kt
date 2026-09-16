@@ -10,7 +10,7 @@ import android.graphics.drawable.Drawable
 import android.util.Log
 import android.view.View
 
-/** WhatsApp's bubble background, replaced: reports (row, bounds) to feed the pane and paints only when no pane exists, because anything drawn from a row freezes the moment the list scrolls. */
+/** WhatsApp's bubble background, replaced: reports (row, bounds) to feed the list's bubble layer and paints only where no such layer exists, because anything drawn from a row freezes the moment the list scrolls. */
 class GlassBubbleDrawable(
     private val params: GlassParams,
     /** Pulled, not pushed: the tint resolves after WhatsApp asks for this drawable. */
@@ -22,21 +22,23 @@ class GlassBubbleDrawable(
     private val source: (View) -> WallpaperRecord?,
     /** The row being drawn: the only live route to a screen position; callback and canvas matrix are dead. */
     private val rowProvider: () -> View?,
-    /** Hands the row, its bubble's raw bounds and the grouping flag to `GlassHook`, which is what feeds the pane. */
+    /** Hands the row, its bubble's raw bounds and the flags to the hook that feeds the list's bubble layer. */
     private val report: (View, Rect, Int) -> Unit,
-    /** True once a pane is drawing the bubbles, in which case this draws nothing. */
-    private val paneActive: () -> Boolean,
-    /** GlassBubblePane.FLAG_* bits; fresh per factory call, so it is per-message state the pane cannot hold. */
+    /** True once the list's own layer is drawing the bubbles, in which case this draws nothing. */
+    private val listDraws: () -> Boolean,
+    /** GlassBubblePane.FLAG_* bits; fresh per factory call, so it is per-message state the layer cannot hold. */
     private val flag: Int = 0,
     /** Flattened-corner radius px for a grouped continuation; 0 turns merging off. */
     private val flatRadiusPx: Float = 0f,
+    /** The pack silhouette for this bubble's flag and size, when its side is a mask pack; null keeps the rounded rect. */
+    private val maskFor: ((flag: Int, w: Int, h: Int) -> MaskRef?)? = null,
 ) : Drawable() {
 
     companion object {
         /** Process-wide latch: the factory builds a fresh drawable per bind, so a per-instance latch logs per message. */
         private var loggedThrow = false
 
-        /** Main thread only, like every draw; the pane already proves one painter serves every bubble. */
+        /** Main thread only, like every draw; the list's layer already proves one painter serves every bubble. */
         private val painters = HashMap<Float, BubbleGlassPainter>()
 
         fun sharedPainter(density: Float): BubbleGlassPainter =
@@ -63,6 +65,7 @@ class GlassBubbleDrawable(
 
     private val insetX = rimWidth
     private val insetY = 2f * density
+    private var ownMask: MaskRef? = null
 
     override fun draw(canvas: Canvas) {
         // Guarded whole: this runs inside WhatsApp's draw pass, and anything that escapes takes the traversal down.
@@ -86,11 +89,12 @@ class GlassBubbleDrawable(
             reported.set(b)
             report(row, reported, flag)
         }
-        // A live pane already draws these bubbles; painting here too would double the material.
-        // Gate on row != null as well: paneActive is process-wide, and Message info rows lost their glass.
-        if (row != null && paneActive()) return
+        // The list's own layer already draws these bubbles; painting here too would double the material.
+        // Gate on row != null as well: listDraws is process-wide, and Message info rows lost their glass.
+        if (row != null && listDraws()) return
 
-        clamp(b, row?.height ?: 0, insetX, insetY, clip)
+        // A shaped bubble keeps its whole box: WhatsApp draws a pack's overhang past the row, so this must too.
+        if (maskFor != null) clip.set(b) else clamp(b, row?.height ?: 0, insetX, insetY, clip)
         if (clip.width() <= 0f || clip.height() <= 0f) return
 
         // Resolve the backdrop only beside a row's true screen position, or it is built and never drawn.
@@ -122,7 +126,20 @@ class GlassBubbleDrawable(
             radii = radii,
             sharp = rec?.src, sharpPlace = rec?.srcPlacement,
             sharpDim = if (rec != null && rec.bubbleDimFolded) rec.dimAlpha / 255f else 0f,
+            mask = maskAt(b),
         )
+    }
+
+    /** The field for these bounds, rebuilt only when the size changes. */
+    private fun maskAt(b: Rect): MaskRef? {
+        val provider = maskFor ?: return null
+        val w = b.width()
+        val h = b.height()
+        val cur = ownMask
+        if (cur != null && cur.w == w && cur.h == h) return cur
+        val next = provider(flag, w, h)
+        ownMask = next
+        return next
     }
 
     /** Deliberate no-op: BubbleColors' SRC_IN filter would flatten the glass into a solid colour. */

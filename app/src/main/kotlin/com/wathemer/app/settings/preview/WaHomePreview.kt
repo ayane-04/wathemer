@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wathemer.app.R
 import com.wathemer.app.settings.components.BitmapIcon
+import com.wathemer.app.settings.prefs.TickStyles
 
 @Composable
 fun WaHomePreview(
@@ -249,7 +250,8 @@ private fun ChatListRow(tokens: Tokens, name: String, preview: String, time: Str
             Text(name, color = Color(tokens.rowName), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (ticks > 0) {
-                    DoubleTick(Color(tokens.rowPreview).copy(alpha = 0.7f))
+                    val art = rememberTickArt(tokens.tickStyle, TickStyles.State.DELIVERED)
+                    if (art != null) TickArt(art, scale = PREVIEW_TICK_SCALE) else DoubleTick(Color(tokens.rowPreview).copy(alpha = 0.7f))
                     Spacer(Modifier.size(4.dp))
                 }
                 Text(preview, color = Color(tokens.rowPreview).copy(alpha = 0.85f), fontSize = 10.5.sp, maxLines = 1)

@@ -34,6 +34,12 @@ object BubbleShapes {
     private var incomingTint = 0
     private var outgoingTint = 0
 
+    /** What the glass hook does with a side: nothing, fill the pack's silhouette with glass, or hand back its colour art. */
+    enum class GlassKind { NONE, MASK, ART }
+
+    private var underGlass = false
+    private val glassKinds = arrayOf(GlassKind.NONE, GlassKind.NONE)
+
     private var moduleRes: Resources? = null
     private val pkg = BuildConfig.APPLICATION_ID
 
@@ -92,10 +98,10 @@ object BubbleShapes {
 
     fun install(app: Application, classLoader: ClassLoader) {
         xprefs.reload()
-        // Stand down under glass: nothing arbitrates factory vs leaf hooks, and insets would pad a shape never drawn.
+        // The leaf hooks stand down under glass: nothing arbitrates factory vs leaf hooks, so the glass factory hook owns the drawable and installUnderGlass handles packs and insets.
         if (xprefs.getBoolean(Prefs.KEY_GLASS_ENABLED, false)) {
-            XposedBridge.log("$TAG: Liquid Glass owns the bubbles; shapes standing down")
-            HookLog.skip("install/BubbleShapes", "Liquid Glass owns the bubbles")
+            XposedBridge.log("$TAG: Liquid Glass draws the bubbles; only the packs load, through installUnderGlass")
+            HookLog.skip("install/BubbleShapes", "Liquid Glass draws the bubbles; packs load through installUnderGlass")
             return
         }
         incomingStyle = xprefs.getInt(Prefs.BUBBLE_STYLE_INCOMING, 0)
@@ -110,14 +116,7 @@ object BubbleShapes {
         incomingTint = if (leftBg != 0) leftBg else STOCK_DARK_INCOMING
         outgoingTint = if (rightBg != 0) rightBg else STOCK_DARK_OUTGOING
 
-        // Load our own module resources inside WhatsApp's process.
-        moduleRes = runCatching {
-            app.createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY).resources
-        }.getOrElse {
-            XposedBridge.log("$TAG: createPackageContext($pkg) failed: $it")
-            null
-        }
-        if (moduleRes == null) return
+        if (!loadModuleResources(app)) return
 
         if (!Deobfuscator.ensureBridge(app)) {
             XposedBridge.log("$TAG: DexKit init failed; shapes off")
@@ -144,6 +143,65 @@ object BubbleShapes {
 
         installInsetOverride(classLoader)
         Deobfuscator.saveCache()
+    }
+
+    /** Under glass this hook draws nothing; it loads the packs, pads the text and answers [glassKind]. */
+    fun installUnderGlass(app: Application, classLoader: ClassLoader, masks: Boolean): Boolean {
+        xprefs.reload()
+        incomingStyle = xprefs.getInt(Prefs.BUBBLE_STYLE_INCOMING, 0)
+        outgoingStyle = xprefs.getInt(Prefs.BUBBLE_STYLE_OUTGOING, 0)
+        if (incomingStyle == 0 && outgoingStyle == 0) return false
+        if (!loadModuleResources(app)) return false
+        if (!Deobfuscator.ensureBridge(app)) {
+            XposedBridge.log("$TAG: DexKit init failed; packs off under glass")
+            return false
+        }
+        if (incomingStyle != 0) prewarm(incomingStyle, dir = 2)
+        if (outgoingStyle != 0) prewarm(outgoingStyle, dir = 3)
+        glassKinds[0] = classify(incomingStyle, dir = 2, masks)
+        glassKinds[1] = classify(outgoingStyle, dir = 3, masks)
+        if (glassKinds[0] == GlassKind.NONE && glassKinds[1] == GlassKind.NONE) return false
+        underGlass = true
+        installInsetOverride(classLoader)
+        Deobfuscator.saveCache()
+        return true
+    }
+
+    /** Our own resources inside WhatsApp's process. */
+    private fun loadModuleResources(app: Application): Boolean {
+        moduleRes = runCatching {
+            app.createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY).resources
+        }.getOrElse {
+            XposedBridge.log("$TAG: createPackageContext($pkg) failed: $it")
+            null
+        }
+        return moduleRes != null
+    }
+
+    /** A side with a pack is colour art or a mask; a mask counts only while the glass switch wants it. */
+    private fun classify(styleValue: Int, dir: Int, masks: Boolean): GlassKind {
+        if (styleValue == 0) return GlassKind.NONE
+        val name = assetName(styleValue, dir, ext = false) ?: return GlassKind.NONE
+        if (loadBase(styleValue, dir, ext = false) == null) return GlassKind.NONE
+        return when {
+            isColourArtwork(name) -> GlassKind.ART
+            masks -> GlassKind.MASK
+            else -> GlassKind.NONE
+        }
+    }
+
+    /** The side's kind under glass; centred rows belong to neither party. */
+    fun glassKind(dir: Int): GlassKind = when (BubbleSide.of(dir)) {
+        BubbleSide.OUTGOING -> glassKinds[1]
+        BubbleSide.INCOMING -> glassKinds[0]
+        BubbleSide.CENTERED -> GlassKind.NONE
+    }
+
+    /** A fresh untinted copy of the side's nine-patch: colour art draws as itself, a mask copy is only rasterised. */
+    fun packCopy(dir: Int, ext: Boolean): Drawable? {
+        val style = styleFor(dir)
+        if (style == 0) return null
+        return loadBase(style, dir, ext)?.constantState?.newDrawable()?.mutate()
     }
 
     /** Populate both caches for one side's tailed and tail-less variants. See the call site. */
@@ -203,7 +261,12 @@ object BubbleShapes {
         XposedBridge.hookMethod(inset, object : XC_MethodHook() {
             override fun afterHookedMethod(p: MethodHookParam) {
                 val dir = p.args.getOrNull(0) as? Int ?: return
-                if (styleFor(dir) == 0) return
+                // Under glass a side pads only when the glass hook actually draws its pack.
+                if (underGlass) {
+                    if (glassKind(dir) == GlassKind.NONE) return
+                } else if (styleFor(dir) == 0) {
+                    return
+                }
                 val pad = if (dir == 3) padOutgoing else padIncoming
                 if (pad.left == 0 && pad.top == 0 && pad.right == 0 && pad.bottom == 0) return
                 logInsetOnce(p, dir)

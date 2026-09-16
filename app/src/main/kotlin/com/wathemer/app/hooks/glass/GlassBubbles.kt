@@ -1,21 +1,25 @@
-// Chat bubbles. Rows carry no id and host no child, so the bubble drawable is replaced and one pane
-// behind the list draws them all; nothing recorded inside a row may depend on its screen position.
+// Chat bubbles. Rows carry no id and host no child, so the bubble drawable is replaced and the list's own
+// background draws them all; nothing recorded inside a row may depend on its screen position.
 package com.wathemer.app.hooks.glass
 
 import android.app.Application
 import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.drawable.Drawable
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewTreeObserver
 import android.widget.AbsListView
-import android.widget.FrameLayout
 import android.widget.ListView
+import com.wathemer.app.glass.BubbleMaskFields
+import com.wathemer.app.glass.GlassBubbleBackground
 import com.wathemer.app.glass.GlassBubbleDrawable
 import com.wathemer.app.glass.GlassBubblePane
 import com.wathemer.app.glass.GlassParams
+import com.wathemer.app.glass.GlassShader
+import com.wathemer.app.glass.MaskRef
 import com.wathemer.app.glass.RectList
+import com.wathemer.app.hooks.BubbleShapes
 import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.dexkit.Deobfuscator
 import com.wathemer.app.settings.prefs.GlassDefaults
@@ -33,6 +37,9 @@ private const val BUBBLE_RADIUS_DP = 16f
 private const val BUBBLE_FLAT_RADIUS_DP = 4f
 
 private var bubbleMergeOn = false
+
+/** One rasterising copy per side and variant, indexed side times two plus continuation; a shared base must not have its bounds moved. */
+private val maskCopies = arrayOfNulls<Drawable>(4)
 
 /** Follows the slider so the user's control still works; 5 heavier because a bubble transmits only wallpaper. */
 private const val BUBBLE_TINT_BOOST = 5
@@ -74,13 +81,23 @@ internal fun installBubbleGlass(app: Application) {
     runCatching { dex.saveCache() }
     var left = 0
     var right = 0
+    // The switch: a mask pack shapes the glass. Colour art is handed back as itself either way.
+    var shapedOn = GlassDefaults.SHAPED_BUBBLES
     runCatching {
         val p = ModulePrefs.open()
         p.reload()
         left = p.getInt(Prefs.BUBBLE_LEFT_BG, 0)
         right = p.getInt(Prefs.BUBBLE_RIGHT_BG, 0)
         bubbleMergeOn = p.getBoolean(Prefs.KEY_GLASS_BUBBLE_MERGE, GlassDefaults.BUBBLE_MERGE)
+        shapedOn = p.getBoolean(Prefs.KEY_GLASS_SHAPED_BUBBLES, GlassDefaults.SHAPED_BUBBLES)
     }
+    // The packs load under glass too: colour art is drawn as itself and, where the fused program runs, a mask side lends the glass its outline.
+    val packs = BubbleShapes.installUnderGlass(app, cl, shapedOn && GlassShader.supported)
+    XposedBridge.log(
+        "[$TAG] bubble packs under glass: " +
+            (if (packs) "in=${BubbleShapes.glassKind(2)} out=${BubbleShapes.glassKind(3)}" else "none") +
+            " (shaped switch=$shapedOn)",
+    )
     // Logged, not used: both sides share one tint, and this line answers "the bubbles are not my colour".
     XposedBridge.log(
         "[$TAG] bubble glass arming on ${method.name} " +
@@ -96,11 +113,25 @@ internal fun installBubbleGlass(app: Application) {
                 val density = app.resources.displayMetrics.density
                 // Arg 1 is WA's own collapse state, named by its error string; 2 and 3 are the tail-less continuations.
                 val collapse = param.args.getOrNull(1) as? Int ?: -1
-                val flag = if (bubbleMergeOn && (position == 2 || position == 3) && (collapse == 2 || collapse == 3)) {
+                val continuation = collapse == 2 || collapse == 3
+                // A colour art side keeps the pack's own drawable with no glass over it; BubbleColors leaves shaped sides untinted.
+                if (BubbleShapes.glassKind(position) == BubbleShapes.GlassKind.ART) {
+                    val art = BubbleShapes.packCopy(position, continuation)
+                    if (art != null) {
+                        param.result = art
+                        logOnce("bubble art kept under glass (position=$position)")
+                        return
+                    }
+                }
+                val shaped = BubbleShapes.glassKind(position) == BubbleShapes.GlassKind.MASK
+                var flag = if (bubbleMergeOn && (position == 2 || position == 3) && continuation) {
                     GlassBubblePane.FLAG_EXT or (if (position == 3) GlassBubblePane.FLAG_OUTGOING else 0)
                 } else {
                     0
                 }
+                if (position == 3) flag = flag or GlassBubblePane.FLAG_SIDE_OUT
+                if (continuation) flag = flag or GlassBubblePane.FLAG_CONT
+                if (shaped) flag = flag or GlassBubblePane.FLAG_SHAPED
                 // One tint for both sides; sender is carried by alignment, per-side colour belongs behind an explicit opt-in.
                 val bp = bubbleParams(density)
                 param.result = GlassBubbleDrawable(
@@ -136,11 +167,12 @@ internal fun installBubbleGlass(app: Application) {
                             cur.flag = f
                         }
                     },
-                    paneActive = { bubblePaneActive() },
+                    listDraws = { bubbleBackgroundActive() },
                     flag = flag,
                     flatRadiusPx = if (bubbleMergeOn) BUBBLE_FLAT_RADIUS_DP * density else 0f,
+                    maskFor = if (shaped) ::bubbleMaskFor else null,
                 )
-                logOnce("bubble glass applied (position=$position)")
+                logOnce("bubble glass applied (position=$position${if (shaped) ", shaped" else ""})")
             }
         },
     )
@@ -169,7 +201,11 @@ internal fun roundInnerSurface(v: View, what: String) {
 internal val bubbleBoundsByRow = WeakHashMap<View, BubbleMark>()
 
 /** rowH is a staleness check: a re-bound row re-reports, so a height mismatch means do not trust the rect. */
-internal class BubbleMark(val rect: Rect, var rowH: Int, var flag: Int)
+internal class BubbleMark(val rect: Rect, var rowH: Int, var flag: Int) {
+    /** The pack silhouette for the current size and variant, and the stamp it was built for; a match returns it, null included. */
+    var mask: MaskRef? = null
+    var maskStamp = -1L
+}
 
 /** Roots whose rows carry no bubble: a sticker draws bare, a video note draws a circle. */
 internal var bubblelessRootIds = IntArray(0)
@@ -185,48 +221,40 @@ private fun isBubblelessRow(row: View): Boolean {
     return found
 }
 
-internal var convBubblePaneRef: WeakReference<GlassBubblePane>? = null
+/** The conversation list's bubble background. */
+internal var convBubbleBgRef: WeakReference<GlassBubbleBackground>? = null
 
 private val bubbleRowAt = IntArray(2)
 
 private val bubbleRectScratch = RectF()
 
-private fun bubblePaneActive(): Boolean =
-    convBubblePaneRef?.get()?.let { it.parent != null } == true
+private fun bubbleBackgroundActive(): Boolean = convBubbleBgRef?.get()?.active == true
 
-/** One pane behind the list draws every bubble's glass; in-row glass freezes on scroll, see GlassBubblePane. */
-internal fun ensureBubblePane(listHost: ViewGroup, list: AbsListView) {
-    val existing = convBubblePaneRef?.get()
-    if (existing != null && existing.parent === listHost) return
-    if (listHost !is FrameLayout) {
-        logOnce("bubble pane skipped: ${listHost.javaClass.simpleName} does not stack children")
-        return
-    }
-    val density = listHost.resources.displayMetrics.density
-    val pane = GlassBubblePane(listHost.context)
-    pane.params = bubbleParams(density)
-    pane.tint = { bubbleTintColor }
-    // The pane is its own backdrop host; convFooterRef can be null and depends on discovery order.
-    pane.backdrop = { bubbleBackdrop(pane) }
-    pane.placement = { bubblePlacement(pane) }
-    pane.dim = { bubbleDimOf(pane) }
-    pane.rimColor = glassTint(BUBBLE_RIM_ALPHA)
-    pane.rimWidth = density
-    pane.collect = { out -> collectBubbleRects(out) }
-    pane.flatRadiusPx = if (bubbleMergeOn) BUBBLE_FLAT_RADIUS_DP * density else 0f
-    // Rotation, split screen and folds resize this pane; the bitmap survives, the mapping does not.
-    pane.onGeometryChanged = { markWallpaperGeometryDirty() }
-    listHost.addView(
-        pane, 0,
-        FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT,
-        ),
-    )
-    convBubblePaneRef = WeakReference(pane)
-    // One forced re-record: pre-hook rows never reported, and pre-pane rows painted their own glass.
+/** The list's own background draws every bubble's glass: in-row glass freezes on scroll, and a pane beside the list misses the overscroll stretch. */
+internal fun ensureBubbleBackground(list: AbsListView) {
+    val existing = convBubbleBgRef?.get()
+    if (existing != null && existing.serves(list) && existing.active) return
+    // Whatever came before is superseded: released, or its pre-draw would keep collecting this list's rows into the old chat.
+    existing?.release()
+    val density = list.resources.displayMetrics.density
+    val bg = GlassBubbleBackground(list)
+    bg.params = bubbleParams(density)
+    bg.tint = { bubbleTintColor }
+    // The list is its own backdrop host; convFooterRef can be null and depends on discovery order.
+    bg.backdrop = { bubbleBackdrop(list) }
+    bg.placement = { bubblePlacement(list) }
+    bg.dim = { bubbleDimOf(list) }
+    bg.rimColor = glassTint(BUBBLE_RIM_ALPHA)
+    bg.rimWidth = density
+    bg.collect = { out -> collectBubbleRects(out) }
+    bg.flatRadiusPx = if (bubbleMergeOn) BUBBLE_FLAT_RADIUS_DP * density else 0f
+    // Rotation, split screen and folds resize the list; the bitmap survives, the mapping does not.
+    bg.onGeometryChanged = { markWallpaperGeometryDirty() }
+    bg.install()
+    convBubbleBgRef = WeakReference(bg)
+    // One forced re-record: pre-hook rows never reported, and rows before this painted their own glass.
     for (i in 0 until list.childCount) list.getChildAt(i)?.invalidate()
-    XposedBridge.log("[$TAG] bubble pane inserted behind the conversation list")
+    XposedBridge.log("[$TAG] bubble glass installed as the conversation list's background")
 }
 
 /** The row never moves during a swipe; a descendant carries the translation, first non-zero wins. */
@@ -254,8 +282,15 @@ private fun collectBubbleRects(out: RectList) {
         // See BubbleMark: a height mismatch means re-bound and not yet re-reported, so the rect is not trusted.
         if (mark.rowH != row.height) continue
         if (isBubblelessRow(row)) continue
-        GlassBubbleDrawable.clamp(mark.rect, row.height, insetX, insetY, bubbleRectScratch)
+        // A shaped bubble keeps its whole box: WhatsApp draws a pack's overhang past the row, so this must too.
+        val shaped = (mark.flag and GlassBubblePane.FLAG_SHAPED) != 0
+        if (shaped) {
+            bubbleRectScratch.set(mark.rect)
+        } else {
+            GlassBubbleDrawable.clamp(mark.rect, row.height, insetX, insetY, bubbleRectScratch)
+        }
         if (bubbleRectScratch.width() <= 0f || bubbleRectScratch.height() <= 0f) continue
+        val ref = if (shaped) maskOf(mark) else null
         row.getLocationOnScreen(bubbleRowAt)
         // The mark is at rest; adding the live descendant translation back gives the exact screen position.
         val swipeDx = rowDisplacement(row)
@@ -265,40 +300,32 @@ private fun collectBubbleRects(out: RectList) {
             bubbleRowAt[0] + bubbleRectScratch.right + swipeDx,
             bubbleRowAt[1] + bubbleRectScratch.bottom,
             mark.flag,
+            ref,
         )
     }
     // Deliberately no frame driver: report stores rest, swipeDx re-adds the offset; do not re-add a per-frame invalidate.
 }
 
-/** From onPreDraw, returning false so the bad position is never presented; post() starves behind startup. */
-internal fun repinToBottom(list: AbsListView) {
-    // Remove through the observer captured at registration; a detached list hands back a floating observer.
-    // No registration guard, deliberately: the listener self-removes and the repin is idempotent.
-    val observer = list.viewTreeObserver
-    val listener = object : ViewTreeObserver.OnPreDrawListener {
-        private var frames = 0
-        private fun drop() {
-            runCatching {
-                if (observer.isAlive) observer.removeOnPreDrawListener(this)
-                else list.viewTreeObserver.removeOnPreDrawListener(this)
-            }
-        }
-        override fun onPreDraw(): Boolean {
-            frames++
-            // Pinned already, or the list went away: nothing to correct.
-            if (!list.isAttachedToWindow || list.count == 0 || !list.canScrollVertically(1)) {
-                drop()
-                return true
-            }
-            list.setSelection(list.count - 1)
-            if (frames >= 6) {
-                drop()
-                return true
-            }
-            return false
-        }
-    }
-    observer.addOnPreDrawListener(listener)
+/** The mark's field for its size and variant; a recycled row changes variant at the same size, so the stamp carries both. */
+private fun maskOf(mark: BubbleMark): MaskRef? {
+    val w = mark.rect.width()
+    val h = mark.rect.height()
+    val variant = mark.flag and (GlassBubblePane.FLAG_SIDE_OUT or GlassBubblePane.FLAG_CONT)
+    val stamp = (w.toLong() shl 40) or (h.toLong() shl 20) or variant.toLong()
+    if (mark.maskStamp == stamp) return mark.mask
+    mark.maskStamp = stamp
+    mark.mask = bubbleMaskFor(mark.flag, w, h)
+    return mark.mask
+}
+
+/** The pack silhouette for one bubble: side and variant pick the nine-patch, the size picks the texture. */
+private fun bubbleMaskFor(flag: Int, w: Int, h: Int): MaskRef? {
+    val dir = if ((flag and GlassBubblePane.FLAG_SIDE_OUT) != 0) 3 else 2
+    val cont = (flag and GlassBubblePane.FLAG_CONT) != 0
+    val idx = (if (dir == 3) 2 else 0) + (if (cont) 1 else 0)
+    val nine = maskCopies[idx] ?: BubbleShapes.packCopy(dir, cont)?.also { maskCopies[idx] = it } ?: return null
+    val field = BubbleMaskFields.fieldFor(idx, nine, w, h) ?: return null
+    return MaskRef(field, w, h)
 }
 
 /** The row being drawn; plain field, written and read on the UI thread inside one draw pass. */

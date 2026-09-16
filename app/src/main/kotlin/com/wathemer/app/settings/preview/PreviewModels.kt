@@ -87,4 +87,6 @@ data class Tokens(
     val systemBarsEnabled: Boolean,
     /** True when a wallpaper is set; SystemBars.shouldTheme then draws no strip whatever the toggle says. */
     val wallpaperOwnsBars: Boolean,
+    /** Receipt style for the chat list rows. */
+    val tickStyle: Int,
 )

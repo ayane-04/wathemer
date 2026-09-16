@@ -6,7 +6,7 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 
-/** Three programs from shared fragments: the panes split refraction and light around their blur, and a bubble's blur is baked into its bitmap, so it runs both in one pass. */
+/** Four programs from shared fragments: the panes split refraction and light around their blur, a bubble's blur is baked into its bitmap so it runs both in one pass, and a rim program gives a wallpaper-only pane its edge. */
 object GlassShader {
 
     private const val TAG = "WaThemer.Shader"
@@ -481,12 +481,35 @@ object GlassShader {
 
         $COMMON
 
+        uniform shader field;            // the pack at the bubble's size: red its own coverage, green the distance inward from its outline
+        uniform float  useField;         // above half, the field is the shape instead of the rounded rect
+        uniform float  fieldRange;       // px of inward distance a full green stands for
+
+        float fieldInward(float2 p) { return float(field.eval(p).g) * fieldRange; }
+
+        /** surfaceAt for a pack: the same bevel and normal, read off the inward distance instead of the rounded box. */
+        float4 surfaceAtField(float2 fragCoord) {
+            float din = fieldInward(fragCoord);
+            // The inward distance grows away from the edge, so the outward gradient is its negative.
+            float2 g = -float2(
+                fieldInward(fragCoord + float2(1.0, 0.0)) - fieldInward(fragCoord - float2(1.0, 0.0)),
+                fieldInward(fragCoord + float2(0.0, 1.0)) - fieldInward(fragCoord - float2(0.0, 1.0))
+            );
+            float gl = length(g);
+            float2 n2 = gl > 0.0001 ? g / gl : float2(0.0, -1.0);
+            float t = clamp(din / max(bevel, 1.0), 0.0, 1.0);
+            float2 hp = lensProfile(t);
+            float s = (depth / max(bevel, 1.0)) * hp.y;
+            float3 n = normalize(float3(n2 * s, 1.0));
+            return float4(n.xy, t, -din);
+        }
+
         $NOISE_FNS
         half4 main(float2 fragCoord) {
-            float4 sf = surfaceAt(fragCoord);
+            float4 sf = useField > 0.5 ? surfaceAtField(fragCoord) : surfaceAt(fragCoord);
             float  d = sf.w;
-            // Coverage from the distance field shapes the whole pass, so the painter needs no clip.
-            float cov = clamp(0.5 - d, 0.0, 1.0) * fadeAt(fragCoord);
+            // Coverage shapes the whole pass, so the painter needs no clip: a pack's own edge, or the rounded box's distance.
+            float cov = (useField > 0.5 ? float(field.eval(fragCoord).r) : clamp(0.5 - d, 0.0, 1.0)) * fadeAt(fragCoord);
             if (cov <= 0.002) return half4(0.0);
             float3 n = float3(sf.xy, normalZ(sf.xy));
             float  t = sf.z;
@@ -723,11 +746,15 @@ object GlassShader {
         dim: Float,
         sharpDim: Float,
         detail: Float,
+        useField: Float,
+        fieldRange: Float,
     ) {
         applyRefractUniforms(rs, params, w, h, 1f, dim)
         applyLightUniforms(rs, params, w, h, density = density)
         // Per draw, not from params: a bubble with no sharp source pushes zero, or the aliased child would darken its rim.
         rs.setFloatUniform("detail", detail.coerceIn(0f, 1f))
         rs.setFloatUniform("sharpDim", sharpDim.coerceIn(0f, 1f))
+        rs.setFloatUniform("useField", useField)
+        rs.setFloatUniform("fieldRange", fieldRange)
     }
 }

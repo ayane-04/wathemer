@@ -15,12 +15,15 @@ import com.wathemer.app.hooks.EffectsOverlays
 import com.wathemer.app.hooks.FontSwap
 import com.wathemer.app.hooks.HomeActivityHook
 import com.wathemer.app.hooks.HostAppInit
+import com.wathemer.app.hooks.MessageAvatars
 import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.QuoteAndLabelColors
 import com.wathemer.app.hooks.SystemBars
 import com.wathemer.app.hooks.ThemeHook
 import com.wathemer.app.hooks.WaeCompat
 import com.wathemer.app.hooks.TickAndLinkColors
+import com.wathemer.app.hooks.TickShapes
+import com.wathemer.app.hooks.TrayColors
 import com.wathemer.app.hooks.WaIds
 import com.wathemer.app.hooks.dexkit.Deobfuscator
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
@@ -92,12 +95,18 @@ class ModernEntry : XposedModule() {
             catch (t: Throwable) { HookLog.fail("install/BubbleAlbumClipping", t) }
             try { ComposeBarColors.install(app); HookLog.arm("install/ComposeBarColors") }
             catch (t: Throwable) { HookLog.fail("install/ComposeBarColors", t) }
+            try { TrayColors.install(app); HookLog.arm("install/TrayColors") }
+            catch (t: Throwable) { HookLog.fail("install/TrayColors", t) }
+            try { MessageAvatars.install(app); HookLog.arm("install/MessageAvatars") }
+            catch (t: Throwable) { HookLog.fail("install/MessageAvatars", t) }
             try { ChatHeaderColors.install(app); HookLog.arm("install/ChatHeaderColors") }
             catch (t: Throwable) { HookLog.fail("install/ChatHeaderColors", t) }
             try { ActionModeColors.install(app); HookLog.arm("install/ActionModeColors") }
             catch (t: Throwable) { HookLog.fail("install/ActionModeColors", t) }
             try { QuoteAndLabelColors.install(app, classLoader); HookLog.arm("install/QuoteAndLabelColors") }
             catch (t: Throwable) { HookLog.fail("install/QuoteAndLabelColors", t) }
+            try { TickShapes.install(app, classLoader); HookLog.arm("install/TickShapes") }
+            catch (t: Throwable) { HookLog.fail("install/TickShapes", t) }
             try { TickAndLinkColors.install(app, classLoader); HookLog.arm("install/TickAndLinkColors") }
             catch (t: Throwable) { HookLog.fail("install/TickAndLinkColors", t) }
             // Liquid Glass. Gated on its own pref inside install(); off by default.

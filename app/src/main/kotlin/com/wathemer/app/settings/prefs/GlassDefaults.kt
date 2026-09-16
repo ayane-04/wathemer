@@ -71,4 +71,7 @@ object GlassDefaults {
 
     /** The selected chat row carries the bubbles' rim light and lens instead of a flat film. */
     const val ROW_OPTICS = true
+
+    /** A mask bubble pack shapes the glass; colour artwork packs draw as themselves either way. */
+    const val SHAPED_BUBBLES = true
 }

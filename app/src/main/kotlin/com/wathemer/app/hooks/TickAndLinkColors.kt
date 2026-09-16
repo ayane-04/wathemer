@@ -26,6 +26,9 @@ private fun isBlueish(color: Int): Boolean {
     return b > 150 && b > r * 1.3 && b > g
 }
 
+/** Whether a tint WhatsApp hands a tick means read; TickShapes keys its read art on the same test. */
+internal fun isTickReadColour(color: Int): Boolean = KNOWN_BLUES.contains(color) || isBlueish(color)
+
 object TickAndLinkColors {
 
     private val xprefs: ModulePrefs.WtPrefs by lazy { ModulePrefs.open() }
@@ -46,7 +49,11 @@ object TickAndLinkColors {
         }
 
         // ── Tick hooks ──
-        if (tickSeen != 0 || tickUnseen != 0) {
+        // A tick style is colour art and a tint would ruin it, so the colour tokens stand down while one is set.
+        if (xprefs.getInt(Prefs.TICK_STYLE, 0) != 0) {
+            XposedBridge.log("$TAG: a tick style is set; tick colour hooks stand down")
+            HookLog.skip("TickAndLinkColors/ticks", "a tick style owns the ticks")
+        } else if (tickSeen != 0 || tickUnseen != 0) {
             val statusId = res.waId("status", pkg)
             val statusIndicatorId = res.waId("status_indicator", pkg)
             if (statusId == 0 && statusIndicatorId == 0) {
@@ -68,7 +75,7 @@ object TickAndLinkColors {
             (statusId != 0 && id == statusId) || (statusIndicatorId != 0 && id == statusIndicatorId)
 
         fun classify(incoming: Int): Int? = when {
-            KNOWN_BLUES.contains(incoming) || isBlueish(incoming) ->
+            isTickReadColour(incoming) ->
                 if (tickSeen != 0) tickSeen else null
             else ->
                 if (tickUnseen != 0) tickUnseen else null

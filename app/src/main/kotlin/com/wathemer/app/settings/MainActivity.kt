@@ -45,6 +45,7 @@ import com.wathemer.app.settings.prefs.ServiceBridge
 import com.wathemer.app.settings.preview.ThemeSnapshotHost
 import com.wathemer.app.settings.screens.CategoryListScreen
 import com.wathemer.app.settings.screens.ChatBubbleShapesScreen
+import com.wathemer.app.settings.screens.ChatTickStylesScreen
 import com.wathemer.app.settings.screens.ChatRequest
 import com.wathemer.app.settings.screens.ChatScreen
 import com.wathemer.app.settings.screens.ChatWallpapersScreen
@@ -271,6 +272,7 @@ private fun ScreenSwitch(nav: NavController, prefs: Prefs, onMessage: (String) -
         Screen.Homescreen          -> HomescreenScreen(nav, prefs)
         Screen.Chat                -> ChatScreen(nav, prefs)
         Screen.ChatBubbleShapes   -> ChatBubbleShapesScreen(nav, prefs)
+        Screen.ChatTickStyles     -> ChatTickStylesScreen(nav, prefs)
 
         Screen.Extras              -> ExtrasScreen(nav, prefs, onMessage)
         Screen.Themes              -> ThemesScreen(nav, prefs, onMessage)

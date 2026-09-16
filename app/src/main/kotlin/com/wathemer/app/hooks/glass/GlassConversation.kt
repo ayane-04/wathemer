@@ -6,6 +6,7 @@ import android.graphics.Rect
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.AbsListView
 import android.widget.FrameLayout
 import com.wathemer.app.glass.GlassView
@@ -156,7 +157,11 @@ internal fun floatConvFooter(footer: ViewGroup) {
             if (lp.bottomMargin < 0) return                    // already floated
             v.removeOnLayoutChangeListener(this)
             v.setTag(convFloatTag, true)
-            val wasAtBottom = !listHost.canScrollVertically(1)
+            // The list itself, before anything moves: its host never scrolls and would always read as at rest.
+            val list = (0 until listHost.childCount)
+                .mapNotNull { listHost.getChildAt(it) as? AbsListView }
+                .firstOrNull()
+            val before = list?.let { restOf(it) }
             lp.bottomMargin = -h
             listHost.layoutParams = lp
             val lift = liftConvFooter(v)
@@ -165,13 +170,8 @@ internal fun floatConvFooter(footer: ViewGroup) {
             )
             // The list keeps its clearance above the pill, which now sits higher.
             runCatching { padConvList(listHost, h + lift) }
-            // Only correct an offset we caused, and only when the list was pinned; from onPreDraw, see repinToBottom.
-            if (wasAtBottom) {
-                (0 until listHost.childCount)
-                    .mapNotNull { listHost.getChildAt(it) as? AbsListView }
-                    .firstOrNull()
-                    ?.let { repinToBottom(it) }
-            }
+            // Our margin and padding moved the content edge; a list resting on its last row is pinned there again, once.
+            if (list != null && before != null) keepAtEnd(list, before)
             runCatching { syncConvFooter() }
         }
     })
@@ -286,7 +286,7 @@ internal fun syncConvBand(holder: ViewGroup) {
     syncRowFade()
 }
 
-/** The framework's own fading edge; the ramp is also handed to GlassBubblePane so bubble glass fades with the text. */
+/** The framework's own fading edge; the ramp is also handed to the bubble background so bubble glass fades with the text. */
 private fun syncRowFade() {
     val list = convListRef?.get() ?: return
     val len = convRowFadeLen
@@ -298,9 +298,9 @@ private fun syncRowFade() {
     if (list.verticalFadingEdgeLength != len.toInt()) list.setFadingEdgeLength(len.toInt())
     val at = IntArray(2)
     list.getLocationOnScreen(at)
-    convBubblePaneRef?.get()?.let { pane ->
-        pane.fadeLineScreenY = at[1].toFloat()
-        pane.fadeLen = len
+    convBubbleBgRef?.get()?.let { bg ->
+        bg.fadeLineScreenY = at[1].toFloat()
+        bg.fadeLen = len
     }
 }
 
@@ -469,8 +469,8 @@ private fun padConvList(listHost: ViewGroup, footerHeight: Int) {
     convListRef = WeakReference(list)
     convListHostRef = WeakReference(listHost)
     ensureRowHook()
-    ensureBubblePane(listHost, list)
-    // After the bubble pane, deliberately: both insert at index 0, so this one ends up beneath it.
+    ensureBubbleBackground(list)
+    // Beneath the list, whose own background carries the bubbles.
     ensureMsgSelectPane(listHost, list)
     val d = list.resources.displayMetrics.density
     val gap = (CONV_CHROME_GAP_DP * d).toInt()
@@ -479,11 +479,44 @@ private fun padConvList(listHost: ViewGroup, footerHeight: Int) {
     val top = (holder?.height ?: 0) + gap
     val bottom = footerHeight + gap
     if (list.paddingTop == top && list.paddingBottom == bottom) return
-    val wasAtBottom = !list.canScrollVertically(1)
     list.clipToPadding = false
     list.setPadding(list.paddingLeft, top, list.paddingRight, bottom)
     XposedBridge.log("[$TAG] conversation list padded (top=$top bottom=$bottom)")
-    if (wasAtBottom) repinToBottom(list)
+}
+
+/** Where the list stood before a chrome change; the correction tells its own shift from a scroll made meanwhile. */
+private class ListRest(val atEnd: Boolean, val first: Int, val count: Int)
+
+/** Resting on the end means the last row is on screen and ends inside the content edge; an empty list never rests. */
+private fun restOf(list: AbsListView): ListRest {
+    val count = list.count
+    val last = if (list.childCount > 0) list.getChildAt(list.childCount - 1) else null
+    val atEnd = count > 0 && last != null && list.lastVisiblePosition == count - 1 &&
+        last.bottom <= list.height - list.paddingBottom + 1
+    return ListRest(atEnd, list.firstVisiblePosition, count)
+}
+
+/** One pre-draw after the change: pin the end again only if the list rested there and nothing else has moved it since. */
+private fun keepAtEnd(list: AbsListView, before: ListRest) {
+    if (!before.atEnd) return
+    // Removed through the observer captured here; a detached view hands back a floating one.
+    val observer = list.viewTreeObserver
+    observer.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+        override fun onPreDraw(): Boolean {
+            runCatching {
+                if (observer.isAlive) observer.removeOnPreDrawListener(this)
+                else list.viewTreeObserver.removeOnPreDrawListener(this)
+            }
+            // A different first row or count means WhatsApp placed the list itself; that placement stands.
+            val untouched = list.isAttachedToWindow && list.count == before.count &&
+                list.firstVisiblePosition == before.first
+            if (!untouched || !list.canScrollVertically(1)) return true
+            list.setSelection(list.count - 1)
+            HookLog.hit("glass/conv/endPin")
+            // The frame with the last row under the pill is never shown.
+            return false
+        }
+    })
 }
 
 /** True when [v] sits in the conversation header, whose capsule already covers it; other paths stand down. */

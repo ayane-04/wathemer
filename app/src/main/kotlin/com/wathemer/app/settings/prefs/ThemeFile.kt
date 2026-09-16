@@ -27,6 +27,8 @@ data class ThemeDoc(
     val flags: Map<String, Boolean>,
     val font: ThemeFont?,
     val glass: ThemeGlass?,
+    // Defaulted: the harness builds documents by hand without it.
+    val ticks: ThemeTicks? = null,
 )
 
 /** [hasImage] says whether wallpaper.png is in the archive; without it there is nothing to point the store at. */
@@ -58,10 +60,14 @@ data class ThemeGlass(
     val smallOptics: Boolean = GlassDefaults.SMALL_OPTICS,
     val popupMorph: Boolean = GlassDefaults.POPUP_MORPH,
     val rowOptics: Boolean = GlassDefaults.ROW_OPTICS,
+    val shapedBubbles: Boolean = GlassDefaults.SHAPED_BUBBLES,
 )
 
 /** Shapes travel as asset names, never as the stored index: the registry is ordered and a removal renumbers it. */
 data class ThemeBubbles(val incoming: String?, val outgoing: String?)
+
+/** The tick style travels as its asset prefix, never the index, for the same reason. */
+data class ThemeTicks(val style: String?)
 
 /** [id] is a bundled font id, [name] the display name of an imported one; both blank for stock. */
 data class ThemeFont(val kind: ThemeFontKind, val id: String, val name: String)
@@ -256,6 +262,9 @@ object ThemeFile {
                     .put("outgoing", b.outgoing ?: JSONObject.NULL),
             )
         }
+        doc.ticks?.let { t ->
+            root.put("ticks", JSONObject().put("style", t.style ?: JSONObject.NULL))
+        }
         if (doc.flags.isNotEmpty()) {
             val o = JSONObject()
             for ((k, v) in doc.flags) o.put(k, v)
@@ -297,7 +306,8 @@ object ThemeFile {
                     .put("oneBlur", g.oneBlur)
                     .put("smallOptics", g.smallOptics)
                     .put("popupMorph", g.popupMorph)
-                    .put("rowOptics", g.rowOptics),
+                    .put("rowOptics", g.rowOptics)
+                    .put("shapedBubbles", g.shapedBubbles),
             )
         }
         return root.toString(2)
@@ -334,6 +344,10 @@ object ThemeFile {
                 incoming = o.optString("incoming").trim().take(64).takeIf { it.isNotBlank() },
                 outgoing = o.optString("outgoing").trim().take(64).takeIf { it.isNotBlank() },
             )
+        }
+
+        val ticks = root.optJSONObject("ticks")?.let { o ->
+            ThemeTicks(style = o.optString("style").trim().take(64).takeIf { it.isNotBlank() })
         }
 
         val flags = LinkedHashMap<String, Boolean>()
@@ -382,6 +396,7 @@ object ThemeFile {
                 smallOptics = o.optBoolean("smallOptics", GlassDefaults.SMALL_OPTICS),
                 popupMorph = o.optBoolean("popupMorph", GlassDefaults.POPUP_MORPH),
                 rowOptics = o.optBoolean("rowOptics", GlassDefaults.ROW_OPTICS),
+                shapedBubbles = o.optBoolean("shapedBubbles", GlassDefaults.SHAPED_BUBBLES),
             )
         }
 
@@ -395,6 +410,7 @@ object ThemeFile {
             flags = flags,
             font = font,
             glass = glass,
+            ticks = ticks,
         )
     }
 

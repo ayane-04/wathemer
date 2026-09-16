@@ -57,6 +57,7 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
     var smallOptics by remember { mutableStateOf(prefs.glassSmallOptics) }
     var popupMorph by remember { mutableStateOf(prefs.glassPopupMorph) }
     var rowOptics by remember { mutableStateOf(prefs.glassRowOptics) }
+    var shapedBubbles by remember { mutableStateOf(prefs.glassShapedBubbles) }
     var rim by remember { mutableIntStateOf(prefs.glassRim) }
     var rimWidth by remember { mutableIntStateOf(prefs.glassRimWidth) }
     var rimAngle by remember { mutableIntStateOf(prefs.glassRimAngle) }
@@ -86,6 +87,7 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
         smallOptics = GlassDefaults.SMALL_OPTICS; prefs.glassSmallOptics = smallOptics
         popupMorph = GlassDefaults.POPUP_MORPH; prefs.glassPopupMorph = popupMorph
         rowOptics = GlassDefaults.ROW_OPTICS; prefs.glassRowOptics = rowOptics
+        shapedBubbles = GlassDefaults.SHAPED_BUBBLES; prefs.glassShapedBubbles = shapedBubbles
     }
 
     fun offOr(v: Float, unit: String) = if (v.toInt() == 0) "Off" else "${v.toInt()}$unit"
@@ -179,7 +181,7 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                     )
                 }
 
-                ExpandGroup("Advanced", trailingText = "16") {
+                ExpandGroup("Advanced", trailingText = "17") {
                     SliderItem(
                         title = "Bevel width",
                         value = bevel.toFloat(),
@@ -256,6 +258,12 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                         title = "Merge grouped messages",
                         checked = merge,
                         onCheckedChange = { merge = it; prefs.glassBubbleMerge = it },
+                    )
+                    ToggleItem(
+                        title = "Glass fills shaped bubbles",
+                        subtitle = "Off, a mask shape gets the plain rounded glass",
+                        checked = shapedBubbles,
+                        onCheckedChange = { shapedBubbles = it; prefs.glassShapedBubbles = it },
                     )
                     SectionHeader("Experiments")
                     ToggleItem(

@@ -41,6 +41,7 @@ import com.wathemer.app.R
 import com.wathemer.app.settings.components.BitmapIcon
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.prefs.BubbleStyles
+import com.wathemer.app.settings.prefs.TickStyles
 
 // ── Bubble primitives with real text ────────────────────────
 
@@ -255,4 +256,100 @@ fun BubbleThumb(style: Int, isOutgoing: Boolean, tint: Color, modifier: Modifier
             .height(46.dp)
             .bubbleBg(shape, tint, RoundedCornerShape(8.dp), tintable),
     )
+}
+
+// ── Receipt tick artwork ─────────────────────────────────────
+
+/** The mock's text runs at about seven tenths of WhatsApp's, so its ticks do too. */
+internal const val PREVIEW_TICK_SCALE = 0.7f
+
+/** A style's glyph for one state from the module's own resources, or null for stock or a state the pack lacks. */
+@Composable
+internal fun rememberTickArt(style: Int, state: TickStyles.State): Drawable? {
+    val ctx = LocalContext.current
+    return remember(style, state) {
+        val name = TickStyles.assetName(style, state, media = false) ?: return@remember null
+        val id = ctx.resources.getIdentifier(name, "drawable", ctx.packageName)
+        if (id == 0) null else ctx.getDrawable(id)
+    }
+}
+
+/** Draws [art] the way the hook sizes it: capped in height, smaller art at its own size, then [scale] for the mock. */
+@Composable
+internal fun TickArt(art: Drawable, scale: Float = 1f, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    val (w, h) = with(density) {
+        val cap = TickStyles.MAX_HEIGHT_DP.dp.toPx()
+        val ih = art.intrinsicHeight.toFloat().coerceAtLeast(1f)
+        val iw = art.intrinsicWidth.toFloat().coerceAtLeast(1f)
+        val s = (if (ih > cap) cap / ih else 1f) * scale
+        (iw * s).toDp() to (ih * s).toDp()
+    }
+    Canvas(modifier = modifier.size(w, h)) {
+        art.setBounds(0, 0, size.width.toInt(), size.height.toInt())
+        drawIntoCanvas { c -> art.draw(c.nativeCanvas) }
+    }
+}
+
+/** Picker-grid thumb: delivered beside read, at row size. */
+@Composable
+fun TickThumb(style: Int, modifier: Modifier = Modifier) {
+    val delivered = rememberTickArt(style, TickStyles.State.DELIVERED)
+    val read = rememberTickArt(style, TickStyles.State.READ)
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        delivered?.let { TickArt(it) }
+        read?.let { TickArt(it) }
+    }
+}
+
+/** Three outgoing bubbles, sent, delivered and read, in the chosen style; stock draws the mock's own glyphs. */
+@Composable
+fun TickStylePreview(style: Int, modifier: Modifier = Modifier) {
+    val snap = LocalThemeSnapshot.current.value
+    val tint = Color(snap.bubbleRightBg.let { if (it != 0) it else snap.primary })
+    val onTint = onColorFor(tint.compositeOver(Palette.Bg).toArgb())
+    val dateColor = onTint.copy(alpha = 0.6f)
+    val seen = if (snap.tickSeenColor != 0) Color(snap.tickSeenColor) else Color(0xFF53BDEB)
+    val unseen = if (snap.tickUnseenColor != 0) Color(snap.tickUnseenColor) else dateColor
+    Column(
+        modifier = modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.End,
+    ) {
+        TickBubble(tint, onTint, dateColor, "Sent", style, TickStyles.State.SENT, unseen)
+        TickBubble(tint, onTint, dateColor, "Delivered", style, TickStyles.State.DELIVERED, unseen)
+        TickBubble(tint, onTint, dateColor, "Read", style, TickStyles.State.READ, seen)
+    }
+}
+
+@Composable
+private fun TickBubble(bg: Color, textColor: Color, dateColor: Color, text: String, style: Int, state: TickStyles.State, stockTint: Color) {
+    val art = rememberTickArt(style, state)
+    Row(
+        modifier = Modifier
+            .widthIn(min = 60.dp)
+            .background(bg, RoundedCornerShape(topStart = 10.dp, topEnd = 3.dp, bottomEnd = 10.dp, bottomStart = 10.dp))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Text(text, color = textColor, fontSize = 11.sp, lineHeight = 14.sp)
+        Spacer(Modifier.size(8.dp))
+        Text("10:14", color = dateColor, fontSize = 8.sp)
+        Spacer(Modifier.size(4.dp))
+        when {
+            art != null -> TickArt(art, scale = PREVIEW_TICK_SCALE)
+            state == TickStyles.State.SENT -> SingleTick(stockTint)
+            else -> DoubleTick(stockTint)
+        }
+    }
+}
+
+@Composable
+private fun SingleTick(tint: Color) {
+    Canvas(modifier = Modifier.size(width = 8.dp, height = 7.dp)) {
+        val w = size.width; val h = size.height
+        val s = 1.1.dp.toPx()
+        drawLine(tint, Offset(0f, h * 0.5f), Offset(w * 0.4f, h * 0.95f), s)
+        drawLine(tint, Offset(w * 0.4f, h * 0.95f), Offset(w, h * 0.05f), s)
+    }
 }

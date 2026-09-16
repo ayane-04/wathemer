@@ -105,6 +105,26 @@ class Prefs(
         get() = sp.getBoolean(KEY_EFFECT_SNOW, false)
         set(value) { commitBoolean(KEY_EFFECT_SNOW, value) }
 
+    var msgAvatarChats: Boolean
+        get() = sp.getBoolean(KEY_MSG_AVATAR_CHATS, false)
+        set(value) { commitBoolean(KEY_MSG_AVATAR_CHATS, value) }
+
+    var msgAvatarGroups: Boolean
+        get() = sp.getBoolean(KEY_MSG_AVATAR_GROUPS, false)
+        set(value) { commitBoolean(KEY_MSG_AVATAR_GROUPS, value) }
+
+    var msgAvatarMine: Boolean
+        get() = sp.getBoolean(KEY_MSG_AVATAR_MINE, false)
+        set(value) { commitBoolean(KEY_MSG_AVATAR_MINE, value) }
+
+    var msgAvatarFirstOnly: Boolean
+        get() = sp.getBoolean(KEY_MSG_AVATAR_FIRST_ONLY, false)
+        set(value) { commitBoolean(KEY_MSG_AVATAR_FIRST_ONLY, value) }
+
+    var msgAvatarSize: Int
+        get() = sp.getInt(KEY_MSG_AVATAR_SIZE, MSG_AVATAR_SIZE_DEFAULT)
+        set(value) { commitInt(KEY_MSG_AVATAR_SIZE, value.coerceIn(MSG_AVATAR_SIZE_MIN, MSG_AVATAR_SIZE_MAX)) }
+
     /** Styles the surfaces WaEnhancer adds or reveals; read once at hook install, so it takes effect on the next WhatsApp start. */
     var waeCompat: Boolean
         get() = sp.getBoolean(KEY_WAE_COMPAT, true)
@@ -239,6 +259,11 @@ class Prefs(
     var glassBubbleMerge: Boolean
         get() = sp.getBoolean(KEY_GLASS_BUBBLE_MERGE, GlassDefaults.BUBBLE_MERGE)
         set(value) { commitBoolean(KEY_GLASS_BUBBLE_MERGE, value) }
+
+    /** Under glass a mask bubble pack becomes the glass silhouette; colour artwork packs are always drawn as themselves. */
+    var glassShapedBubbles: Boolean
+        get() = sp.getBoolean(KEY_GLASS_SHAPED_BUBBLES, GlassDefaults.SHAPED_BUBBLES)
+        set(value) { commitBoolean(KEY_GLASS_SHAPED_BUBBLES, value) }
 
     /** The glass tint carries a whisper of the wallpaper's dominant hue; off is the neutral grey. */
     var glassHuedTint: Boolean
@@ -588,6 +613,16 @@ class Prefs(
         const val KEY_EFFECT_SNOW = "effect_snow"
         const val KEY_WAE_COMPAT = "waenhancer_compat"
 
+        // Pictures beside messages: whose, how big, and whether only the first of a run.
+        const val KEY_MSG_AVATAR_CHATS = "msg_avatar_chats"
+        const val KEY_MSG_AVATAR_GROUPS = "msg_avatar_groups"
+        const val KEY_MSG_AVATAR_MINE = "msg_avatar_mine"
+        const val KEY_MSG_AVATAR_FIRST_ONLY = "msg_avatar_first_only"
+        const val KEY_MSG_AVATAR_SIZE = "msg_avatar_size"
+        const val MSG_AVATAR_SIZE_DEFAULT = 32
+        const val MSG_AVATAR_SIZE_MIN = 24
+        const val MSG_AVATAR_SIZE_MAX = 48
+
         const val KEY_PRIMARY = "primary_color"
         const val KEY_BACKGROUND = "background_color"
         const val KEY_TEXT = "text_color"
@@ -659,6 +694,9 @@ class Prefs(
         const val BUBBLE_STYLE_INCOMING = "bubble_style_incoming"
         const val BUBBLE_STYLE_OUTGOING = "bubble_style_outgoing"
 
+        // Receipt ticks: 0 = stock, else a 1-based index into TickStyles. Colour art, so the tick colour tokens stand down.
+        const val TICK_STYLE = "tick_style"
+
         /** The 1-based index mbwa_4 occupied before it was removed. See [migrateRemovedBubbleStyle4]. */
         private const val REMOVED_BUBBLE_STYLE_INDEX = 4
         private const val KEY_MIGRATED_BUBBLE_STYLE_4 = "migrated_bubble_style_4"
@@ -669,6 +707,11 @@ class Prefs(
         const val COMPOSE_SEND_BG     = "compose_send_bg"   // send/mic FAB background
         const val COMPOSE_SEND_ICON   = "compose_send_icon" // mic->send icon swap (voice_note_btn + send)
         const val COMPOSE_ICON_TINT   = "compose_icon_tint" // emoji/attach/camera/payment (side icons only)
+
+        // Emoji and sticker tray, non-glass only: the panel, its tab bar, its icons.
+        const val TRAY_BG         = "tray_bg"
+        const val TRAY_HEADER_BG  = "tray_header_bg"
+        const val TRAY_ICON_TINT  = "tray_icon_tint"
 
         // Quote/reply tokens. QUOTE_BG_COLOR != 0 also arms the quoted_message_frame NinePatch leak kill.
         const val QUOTE_BAR_COLOR       = "quote_bar_color"
@@ -727,6 +770,7 @@ class Prefs(
         const val KEY_GLASS_SMALL_OPTICS = "glass_small_optics"
         const val KEY_GLASS_POPUP_MORPH = "glass_popup_morph"
         const val KEY_GLASS_ROW_OPTICS = "glass_row_optics"
+        const val KEY_GLASS_SHAPED_BUBBLES = "glass_shaped_bubbles"
 
         // ── Updates ───────────────────────────────────
         // Settings-app only; the hook never reads these and a theme file can never write them.
@@ -761,6 +805,7 @@ class Prefs(
             // Compose / input bar
             COMPOSE_BAR_BG, COMPOSE_ENTRY_TEXT,
             COMPOSE_SEND_BG, COMPOSE_SEND_ICON, COMPOSE_ICON_TINT,
+            TRAY_BG, TRAY_HEADER_BG, TRAY_ICON_TINT,
             // Chat header + chat toolbar
             CHAT_HEADER_TITLE, CHAT_HEADER_SUBTITLE, CHAT_TOOLBAR_BG, CHAT_TOOLBAR_ICONS,
             // Selection / action mode
@@ -784,6 +829,7 @@ class Prefs(
         val THEME_FLAG_KEYS: List<String> = listOf(
             KEY_IOS_ICON_PACK, KEY_CHATLIST_DIVIDER, KEY_EFFECT_SNOW,
             KEY_SYSTEM_BARS_ENABLED, KEY_SYSTEM_BAR_AUTO_ICONS, KEY_FONT_MAP_MONOSPACE,
+            KEY_MSG_AVATAR_CHATS, KEY_MSG_AVATAR_GROUPS, KEY_MSG_AVATAR_MINE, KEY_MSG_AVATAR_FIRST_ONLY,
         )
 
         /** The glass sliders as one list, so the writable set and the exporter cannot drift apart. */
@@ -794,12 +840,13 @@ class Prefs(
             KEY_GLASS_HUED_TINT, KEY_GLASS_LINEAR_COPY, KEY_GLASS_EDGE_SHADOW, KEY_GLASS_GLOW, KEY_GLASS_EDGE_CLARITY,
             KEY_GLASS_LIVE_CLARITY, KEY_GLASS_NAV_DROPLET, KEY_GLASS_ASSEMBLE,
             KEY_GLASS_ONE_BLUR, KEY_GLASS_SMALL_OPTICS, KEY_GLASS_POPUP_MORPH, KEY_GLASS_ROW_OPTICS,
+            KEY_GLASS_SHAPED_BUBBLES,
         )
 
         /** Every key an imported theme may touch. A key missing here is unreachable from a theme file, which is the whole guarantee. */
         val THEME_WRITABLE_KEYS: Set<String> = (
             THEME_COLOR_KEYS + THEME_FLAG_KEYS + listOf(
-                BUBBLE_STYLE_INCOMING, BUBBLE_STYLE_OUTGOING,
+                BUBBLE_STYLE_INCOMING, BUBBLE_STYLE_OUTGOING, TICK_STYLE,
                 KEY_WALLPAPER_ENABLED, KEY_WALLPAPER_PATH, KEY_WALLPAPER_DIM, KEY_WALLPAPER_BLUR,
                 KEY_CUSTOM_FONT, KEY_FONT_USER_FILE, KEY_FONT_USER_NAME, KEY_FONT_USER_STAMP,
                 // Here only so a theme with no wallpaper can switch glass off; no theme file ever names it.

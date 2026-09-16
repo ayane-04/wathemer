@@ -187,6 +187,11 @@ object ThemeLibrary {
             values[Prefs.BUBBLE_STYLE_INCOMING] = resolveShape(b.incoming, problems)
             values[Prefs.BUBBLE_STYLE_OUTGOING] = resolveShape(b.outgoing, problems)
         }
+        // Stock is the absent key, so a theme without a style leaves the store as a fresh install has it.
+        doc.ticks?.let { t ->
+            val v = resolveTick(t.style, problems)
+            if (v == 0) clear += Prefs.TICK_STYLE else values[Prefs.TICK_STYLE] = v
+        }
 
         doc.wallpaper?.let { w ->
             val on = wallpaperPath != null && w.enabled
@@ -226,6 +231,7 @@ object ThemeLibrary {
             values[Prefs.KEY_GLASS_SMALL_OPTICS] = g.smallOptics
             values[Prefs.KEY_GLASS_POPUP_MORPH] = g.popupMorph
             values[Prefs.KEY_GLASS_ROW_OPTICS] = g.rowOptics
+            values[Prefs.KEY_GLASS_SHAPED_BUBBLES] = g.shapedBubbles
         }
 
         doc.font?.let { f -> applyFont(context, prefs, f, clear, values, problems) }
@@ -289,6 +295,10 @@ object ThemeLibrary {
                 Prefs.KEY_SYSTEM_BARS_ENABLED -> prefs.systemBarsEnabled
                 Prefs.KEY_SYSTEM_BAR_AUTO_ICONS -> prefs.systemBarAutoIcons
                 Prefs.KEY_FONT_MAP_MONOSPACE -> prefs.fontMapMonospace
+                Prefs.KEY_MSG_AVATAR_CHATS -> prefs.msgAvatarChats
+                Prefs.KEY_MSG_AVATAR_GROUPS -> prefs.msgAvatarGroups
+                Prefs.KEY_MSG_AVATAR_MINE -> prefs.msgAvatarMine
+                Prefs.KEY_MSG_AVATAR_FIRST_ONLY -> prefs.msgAvatarFirstOnly
                 else -> { Log.w(TAG, "capture: no reader for flag $key"); false }
             }
         }
@@ -313,6 +323,7 @@ object ThemeLibrary {
                 incoming = BubbleStyles.assetPrefix(prefs.getOverride(Prefs.BUBBLE_STYLE_INCOMING)),
                 outgoing = BubbleStyles.assetPrefix(prefs.getOverride(Prefs.BUBBLE_STYLE_OUTGOING)),
             ),
+            ticks = ThemeTicks(style = TickStyles.assetPrefix(prefs.getOverride(Prefs.TICK_STYLE))),
             flags = flags,
             font = font,
             // Only once a slider has actually been moved, or every theme would stamp defaults on its importer.
@@ -340,6 +351,7 @@ object ThemeLibrary {
                 smallOptics = prefs.glassSmallOptics,
                 popupMorph = prefs.glassPopupMorph,
                 rowOptics = prefs.glassRowOptics,
+                shapedBubbles = prefs.glassShapedBubbles,
             ),
         )
     }
@@ -362,6 +374,14 @@ object ThemeLibrary {
             return 0
         }
         return i + 1
+    }
+
+    /** Asset prefix back to the stored value; a prefix this version lacks falls back to stock and says so. */
+    private fun resolveTick(prefix: String?, problems: MutableList<String>): Int {
+        if (prefix.isNullOrBlank()) return 0
+        val v = TickStyles.styleOf(prefix)
+        if (v == 0) problems += "This version has no tick style from that theme, so the ticks stay stock."
+        return v
     }
 
     /** The same test FontSwap makes inside WhatsApp, so a theme cannot name a face the hook would fail to find. */

@@ -13,15 +13,21 @@ import android.view.ViewTreeObserver
 class RectList {
     private val items = ArrayList<RectF>()
     private var flags = IntArray(8)
+    /** Per rect, the pack silhouette it takes as its edge, or null for the rounded rect. */
+    private var refs = arrayOfNulls<Any>(8)
     var size = 0
         private set
 
     fun clear() { size = 0 }
 
-    fun add(l: Float, t: Float, r: Float, b: Float, flag: Int = 0) {
+    fun add(l: Float, t: Float, r: Float, b: Float, flag: Int = 0, ref: Any? = null) {
         if (size == items.size) items.add(RectF())
-        if (size >= flags.size) flags = flags.copyOf(flags.size * 2)
+        if (size >= flags.size) {
+            flags = flags.copyOf(flags.size * 2)
+            refs = refs.copyOf(refs.size * 2)
+        }
         flags[size] = flag
+        refs[size] = ref
         items[size++].set(l, t, r, b)
     }
 
@@ -29,10 +35,12 @@ class RectList {
 
     fun flagAt(i: Int): Int = flags[i]
 
+    fun refAt(i: Int): Any? = refs[i]
+
     fun contentEquals(other: RectList): Boolean {
         if (size != other.size) return false
         for (i in 0 until size) {
-            if (items[i] != other.items[i] || flags[i] != other.flags[i]) return false
+            if (items[i] != other.items[i] || flags[i] != other.flags[i] || refs[i] !== other.refs[i]) return false
         }
         return true
     }
@@ -41,18 +49,23 @@ class RectList {
         clear()
         for (i in 0 until other.size) {
             val r = other[i]
-            add(r.left, r.top, r.right, r.bottom, other.flags[i])
+            add(r.left, r.top, r.right, r.bottom, other.flags[i], other.refs[i])
         }
     }
 }
 
-/** All the chat bubbles' glass, one view behind the message list: a ListView repositions row RenderNodes without re-recording, so nothing inside a row may depend on its screen position. */
+/** Every rect a surface stamps, drawn from one view behind it, because a ListView repositions row RenderNodes without re-recording and nothing inside a row may depend on its screen position. */
 class GlassBubblePane(context: Context) : View(context) {
 
     companion object {
         /** Rect flags: a grouped continuation flattens its top corner on the sender's side. */
         const val FLAG_EXT = 1
         const val FLAG_OUTGOING = 2
+        /** The side and the tail-less state as such, set whether or not merging is on; they pick a pack's variant. */
+        const val FLAG_SIDE_OUT = 4
+        const val FLAG_CONT = 8
+        /** The bubble takes its pack's silhouette: no clamp to its row, and its rect carries a field. */
+        const val FLAG_SHAPED = 16
     }
 
     var params: GlassParams = GlassParams(context.resources.displayMetrics.density)
@@ -209,6 +222,7 @@ class GlassBubblePane(context: Context) : View(context) {
                     // The copy folded its dim, so the sharp tap takes the same; an unfolded copy dims both later in the program.
                     sharpDim = if (rec != null && rec.bubbleDimFolded) rec.dimAlpha / 255f else 0f,
                     forceRim = forceRim,
+                    mask = shown.refAt(i) as? MaskRef,
                 )
             }.onFailure {
                 if (!loggedThrow) {

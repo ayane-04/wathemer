@@ -44,6 +44,7 @@ data class ThemeSnapshot(
     val bubbleRightDate: Int,
     val bubbleStyleIncoming: Int,   // 0 = stock shape; else 1-based index into BubbleStyles.ALL
     val bubbleStyleOutgoing: Int,
+    val tickStyle: Int,             // 0 = stock ticks; else 1-based index into TickStyles
 
     // ── Compose / input bar ──
     val composeBarBg: Int,
@@ -51,6 +52,9 @@ data class ThemeSnapshot(
     val composeSendBg: Int,
     val composeSendIcon: Int,
     val composeIconTint: Int,
+    val trayBg: Int,
+    val trayHeaderBg: Int,
+    val trayIconTint: Int,
 
     // ── Chat header (Conversation activity) ──
     val chatToolbarBg: Int,
@@ -125,6 +129,13 @@ data class ThemeSnapshot(
     // ── System bars (raw overrides, 0 = cascade; the cascade itself lives in toTokens) ──
     val systemBarsEnabled: Boolean,
     val statusBarBg: Int,
+
+    // ── Pictures beside messages ──
+    val msgAvatarChats: Boolean,
+    val msgAvatarGroups: Boolean,
+    val msgAvatarMine: Boolean,
+    val msgAvatarFirstOnly: Boolean,
+    val msgAvatarSize: Int,
 )
 
 /** Read every token from prefs once. Cheap: ~50 int reads from a memory-resident SharedPreferences. */
@@ -142,12 +153,16 @@ fun snapshotFromPrefs(prefs: Prefs): ThemeSnapshot = ThemeSnapshot(
     bubbleRightDate = prefs.getOverride(Prefs.BUBBLE_RIGHT_DATE),
     bubbleStyleIncoming = prefs.getOverride(Prefs.BUBBLE_STYLE_INCOMING),
     bubbleStyleOutgoing = prefs.getOverride(Prefs.BUBBLE_STYLE_OUTGOING),
+    tickStyle = prefs.getOverride(Prefs.TICK_STYLE),
 
     composeBarBg = prefs.getOverride(Prefs.COMPOSE_BAR_BG),
     composeEntryText = prefs.getOverride(Prefs.COMPOSE_ENTRY_TEXT),
     composeSendBg = prefs.getOverride(Prefs.COMPOSE_SEND_BG),
     composeSendIcon = prefs.getOverride(Prefs.COMPOSE_SEND_ICON),
     composeIconTint = prefs.getOverride(Prefs.COMPOSE_ICON_TINT),
+    trayBg = prefs.getOverride(Prefs.TRAY_BG),
+    trayHeaderBg = prefs.getOverride(Prefs.TRAY_HEADER_BG),
+    trayIconTint = prefs.getOverride(Prefs.TRAY_ICON_TINT),
 
     chatToolbarBg = prefs.getOverride(Prefs.CHAT_TOOLBAR_BG),
     chatToolbarIcons = prefs.getOverride(Prefs.CHAT_TOOLBAR_ICONS),
@@ -204,6 +219,11 @@ fun snapshotFromPrefs(prefs: Prefs): ThemeSnapshot = ThemeSnapshot(
     wallpaperPath = prefs.wallpaperPath,
     wallpaperDim = prefs.wallpaperDim,
     wallpaperBlur = prefs.wallpaperBlur,
+    msgAvatarChats = prefs.msgAvatarChats,
+    msgAvatarGroups = prefs.msgAvatarGroups,
+    msgAvatarMine = prefs.msgAvatarMine,
+    msgAvatarFirstOnly = prefs.msgAvatarFirstOnly,
+    msgAvatarSize = prefs.msgAvatarSize,
 )
 
 // ── Wallpaper updaters ───────────────────────────────────────────────────────
@@ -235,6 +255,35 @@ fun MutableState<ThemeSnapshot>.updateBubbleStyleIncoming(prefs: Prefs, v: Int) 
 fun MutableState<ThemeSnapshot>.updateBubbleStyleOutgoing(prefs: Prefs, v: Int) {
     value = value.copy(bubbleStyleOutgoing = v)
     prefs.setOverride(Prefs.BUBBLE_STYLE_OUTGOING, v)
+}
+
+// ── Receipt ticks: 1-based index into TickStyles (0 = off) ──────────────────
+fun MutableState<ThemeSnapshot>.updateTickStyle(prefs: Prefs, v: Int) {
+    value = value.copy(tickStyle = v)
+    prefs.setOverride(Prefs.TICK_STYLE, v)
+}
+
+// ── Pictures beside messages ─────────────────────────────────────────────────
+fun MutableState<ThemeSnapshot>.updateMsgAvatarChats(prefs: Prefs, v: Boolean) {
+    value = value.copy(msgAvatarChats = v)
+    prefs.msgAvatarChats = v
+}
+fun MutableState<ThemeSnapshot>.updateMsgAvatarGroups(prefs: Prefs, v: Boolean) {
+    value = value.copy(msgAvatarGroups = v)
+    prefs.msgAvatarGroups = v
+}
+fun MutableState<ThemeSnapshot>.updateMsgAvatarMine(prefs: Prefs, v: Boolean) {
+    value = value.copy(msgAvatarMine = v)
+    prefs.msgAvatarMine = v
+}
+fun MutableState<ThemeSnapshot>.updateMsgAvatarFirstOnly(prefs: Prefs, v: Boolean) {
+    value = value.copy(msgAvatarFirstOnly = v)
+    prefs.msgAvatarFirstOnly = v
+}
+fun MutableState<ThemeSnapshot>.updateMsgAvatarSize(prefs: Prefs, v: Int) {
+    val c = v.coerceIn(Prefs.MSG_AVATAR_SIZE_MIN, Prefs.MSG_AVATAR_SIZE_MAX)
+    value = value.copy(msgAvatarSize = c)
+    prefs.msgAvatarSize = c
 }
 
 // ── Snapshot-aware row helper ───────────────────────────────────────────────

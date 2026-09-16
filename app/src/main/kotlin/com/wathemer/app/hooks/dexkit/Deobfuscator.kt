@@ -3,6 +3,7 @@
 package com.wathemer.app.hooks.dexkit
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
@@ -453,4 +454,105 @@ object Deobfuscator {
                 .getDeclaredMethod(UPDATE_DRAW_STATE, TextPaint::class.java)
                 .apply { isAccessible = true }
         }.getOrNull()
+
+    // ── Chat list receipt drawables ───────────────────────────────────────
+
+    private const val TICK_TINTED_CACHE_KEY = "tick_tinted_method"
+    private const val TICK_CACHED_CACHE_KEY = "tick_cached_method"
+
+    @Volatile private var chatListTickResolved = false
+    private var tickTintedMethod: Method? = null
+    private var tickCachedMethod: Method? = null
+
+    /** The chat list's tinted-icon helper and cached double-tick builder, both called by the one Drawable method naming the single tick's id. Idempotent. */
+    @Synchronized
+    fun loadChatListTickMethods(
+        application: Application,
+        classLoader: ClassLoader,
+        serverReceiveId: Int,
+        clientId: Int,
+    ): Pair<Method?, Method?> {
+        if (chatListTickResolved) return tickTintedMethod to tickCachedMethod
+        chatListTickResolved = true
+
+        ensureCache(application)
+        tickTintedMethod = cachedStaticMethod(TICK_TINTED_CACHE_KEY, classLoader)
+        tickCachedMethod = cachedStaticMethod(TICK_CACHED_CACHE_KEY, classLoader)
+        if (tickTintedMethod != null && tickCachedMethod != null) {
+            dlog("chat list tick builders via cache")
+            return tickTintedMethod to tickCachedMethod
+        }
+
+        val bridge = (if (ensureBridge(application)) bridgeOrNull() else null) ?: run {
+            dlog("chat list tick builders UNRESOLVED; DexKit bridge not open")
+            return tickTintedMethod to tickCachedMethod
+        }
+        val choosers = runCatching {
+            bridge.findMethod(
+                FindMethod.create().matcher(
+                    MethodMatcher.create().addUsingNumber(serverReceiveId).returnType(Drawable::class.java),
+                ),
+            )
+        }.getOrElse {
+            dlog("chat list tick query threw: ${it.stackTraceToString()}")
+            null
+        }.orEmpty()
+        if (choosers.size != 1) {
+            dlog(
+                "chat list tick chooser " +
+                    if (choosers.isEmpty()) "UNRESOLVED; nothing returns a Drawable using the single tick's id"
+                    else "AMBIGUOUS: ${choosers.map { it.declaredClassName + "." + it.name }}",
+            )
+            return tickTintedMethod to tickCachedMethod
+        }
+        val invokes = runCatching { choosers[0].invokes }.getOrElse {
+            dlog("chat list tick invokes threw: $it")
+            null
+        }.orEmpty()
+        val contextName = Context::class.java.name
+        for (m in invokes) {
+            if (!Modifier.isStatic(m.modifiers) || m.returnTypeName != Drawable::class.java.name) continue
+            val params = m.paramTypeNames
+            if (params.size != 3 || params[0] != contextName || params[2] != "int") continue
+            val inst = runCatching { m.getMethodInstance(classLoader).apply { isAccessible = true } }.getOrNull() ?: continue
+            val spec = "${inst.declaringClass.name}#${inst.name}"
+            if (params[1] == "int") {
+                if (tickTintedMethod == null) { tickTintedMethod = inst; cache.putString(TICK_TINTED_CACHE_KEY, spec) }
+            } else if (tickCachedMethod == null) {
+                tickCachedMethod = inst; cache.putString(TICK_CACHED_CACHE_KEY, spec)
+            }
+        }
+        // The cached builder also names the double tick's id itself, so it can be found alone if the walk missed it.
+        if (tickCachedMethod == null) {
+            val direct = runCatching {
+                bridge.findMethod(
+                    FindMethod.create().matcher(
+                        MethodMatcher.create().addUsingNumber(clientId).returnType(Drawable::class.java).paramCount(3),
+                    ),
+                )
+            }.getOrNull().orEmpty()
+            if (direct.size == 1) {
+                tickCachedMethod = runCatching { direct[0].getMethodInstance(classLoader).apply { isAccessible = true } }.getOrNull()
+                tickCachedMethod?.let { cache.putString(TICK_CACHED_CACHE_KEY, "${it.declaringClass.name}#${it.name}") }
+            }
+        }
+        dlog(
+            "chat list tick builders via DexKit -> tinted=${tickTintedMethod?.let { it.declaringClass.name + "." + it.name }} " +
+                "cached=${tickCachedMethod?.let { it.declaringClass.name + "." + it.name }}",
+        )
+        return tickTintedMethod to tickCachedMethod
+    }
+
+    /** `class#name` from the cache back to that class's one static three-parameter method of the name, else the key is dropped. */
+    private fun cachedStaticMethod(key: String, classLoader: ClassLoader): Method? {
+        val spec = cache.getString(key) ?: return null
+        val parts = spec.split('#')
+        val m = if (parts.size != 2) null else runCatching {
+            Class.forName(parts[0], false, classLoader).declaredMethods.singleOrNull {
+                it.name == parts[1] && it.parameterCount == 3 && Modifier.isStatic(it.modifiers)
+            }
+        }.getOrNull()
+        if (m == null) cache.remove(key) else m.isAccessible = true
+        return m
+    }
 }

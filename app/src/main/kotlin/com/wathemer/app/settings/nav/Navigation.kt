@@ -25,6 +25,7 @@ enum class Screen {
     Homescreen,
     Chat,
     ChatBubbleShapes,          // combined per-side bubble-shape picker (tap-to-enter)
+    ChatTickStyles,            // receipt tick style picker (tap-to-enter)
 
     Extras,
     Themes,
