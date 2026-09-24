@@ -1,4 +1,4 @@
-// Whether WhatsApp still has to restart to see a change; the store reports every write and the restart clears it.
+// Whether WhatsApp still has to restart to see a change; Prefs.onWrite marks it and a successful restart clears it.
 package com.wathemer.app.settings
 
 import android.content.Context

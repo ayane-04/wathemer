@@ -1,5 +1,5 @@
-// A static image behind every WhatsApp Activity, injected at index 0 of content's parent at the first resume; a
-// chat with its own entry gets that image, everything else the global one. Package check stays equality: com.whatsapp.w4b would match startsWith.
+// A static image behind WhatsApp's Activities, injected at index 0 of content's parent at the first resume; a
+// chat with its own entry gets that image, everything else the global one.
 package com.wathemer.app.hooks.wallpaper
 
 import android.app.Activity
@@ -23,6 +23,7 @@ import com.wathemer.app.hooks.glass.wallpaperImageTag
 import com.wathemer.app.hooks.glass.wallpaperLookTag
 import com.wathemer.app.hooks.waId
 import com.wathemer.app.settings.prefs.Prefs
+import com.wathemer.app.util.HostPackages
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -45,8 +46,7 @@ class WallpaperImage private constructor(
         // Never hook Activity.onPostCreate: it is reached only by invoke-super, which ART can inline away.
         // Enabled check lives in the callback so a toggle applies on the next Activity create.
         ActivityLifecycle.onCreated("wallpaper") { activity ->
-            // Equality, not startsWith: WhatsApp Business is com.whatsapp.w4b and would match startsWith.
-            if (activity.packageName == WHATSAPP_PKG) {
+            if (HostPackages.isHost(activity.packageName)) {
                 runCatching { injectFor(activity) }
                     .onFailure {
                         XposedBridge.log(
@@ -55,9 +55,8 @@ class WallpaperImage private constructor(
                     }
             }
         }
-        // A chat's entry can change while the chat stays open, in the settings app; re-checked per resume, before the frame.
         ActivityLifecycle.onResumed("wallpaperChat") { activity ->
-            if (activity.packageName == WHATSAPP_PKG && activity.javaClass.name == ChatWallpapers.CONVERSATION) {
+            if (HostPackages.isHost(activity.packageName) && activity.javaClass.name == ChatWallpapers.CONVERSATION) {
                 runCatching { recheck(activity) }
                     .onFailure { XposedBridge.log("$TAG: recheck(${activity.javaClass.simpleName}) failed: ${it.message}") }
             }
@@ -132,7 +131,7 @@ class WallpaperImage private constructor(
                 WallpaperCache.put(file.absolutePath, blur, it, pinned = true)
             }
             ?: run {
-                // Readable but undecodable file: wallpaperActive stays false, so log it or the fallback is silent.
+                // Readable but undecodable file: nothing is injected or swapped, so log it or the fallback is silent.
                 XposedBridge.log(
                     "$TAG: could not decode ${file.absolutePath} (${file.length()} bytes); " +
                         "wallpaper NOT injected for this Activity"
@@ -152,7 +151,7 @@ class WallpaperImage private constructor(
             )
             content
         }
-        // Idempotent: a second create from a config-change replay is a no-op.
+        // Idempotent: a parent that already carries the wallpaper gets no second one.
         if (parent.findViewWithTag<View?>(WALLPAPER_TAG) != null) {
             wallpaperActive = true
             return
@@ -176,7 +175,7 @@ class WallpaperImage private constructor(
         parent.addView(imageView, 0)
         val dimView = applyLook(activity, parent, imageView, bitmap, look)
 
-        // Glass samples the wallpaper's brightness; resolving here beats the first pane's construction.
+        // Writes the tags recheck and the glass read, and for the global look resolves the tint before the first pane.
         runCatching { GlassHook.noteWallpaperInjected(activity.window.decorView, imageView, dimView, look) }
 
         // No full-bleed helper on purpose: the padding is already zero and the top strip is AppCompat's status guard (GlassToolbars clears it).
@@ -191,7 +190,6 @@ class WallpaperImage private constructor(
         // Posted so it runs after WA's own onPostCreate attaches its background view.
         content.post { hideNativeWallpaper(activity) }
 
-        // Keep wallpaper and dim at indices 0/1 when WA inserts decor children later; tag-guarded against double registration.
         installParentReenforcement(parent, imageView)
 
         wallpaperActive = true
@@ -216,7 +214,6 @@ class WallpaperImage private constructor(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT,
                     )
-                    // Keep DIM_COLOR exactly 0xFF010101; the 1/255 offset off pure black may matter to the blend.
                     setBackgroundColor(DIM_COLOR)
                 }
                 parent.addView(dimView, 1)
@@ -252,6 +249,7 @@ class WallpaperImage private constructor(
         // A chat entry appearing, changing or going is the case; a changed global dim or blur still waits for a restart.
         if (want.stamp == look.stamp && (want.stamp == 0 || want == look)) return
         val bitmap = if (entry != null) ChatWallpapers.prepareNow(activity, entry)?.bitmap else globalBitmap(activity)
+        // Null while the prefetch is still running: this resume keeps the global look and a later one swaps.
         if (bitmap == null) return
         val parent = imageView.parent as? ViewGroup ?: return
         val dimView = applyLook(activity, parent, imageView, bitmap, want)
@@ -365,7 +363,6 @@ class WallpaperImage private constructor(
 
     companion object {
         private const val TAG = "WaThemer.Wallpaper"
-        private const val WHATSAPP_PKG = "com.whatsapp"
         private const val REENFORCEMENT_TAG_KEY = -1167196166
 
         /** Tag prefix on every injected view; paint features and findAndHideWallpaperView skip anything carrying it. */
@@ -373,10 +370,10 @@ class WallpaperImage private constructor(
         const val WALLPAPER_TAG = "wt_wallpaper"
         const val DIM_TAG = "wt_wallpaper_dim"
 
-        /** 0xFF010101. Near-black, one step off pure black on every channel, so it stays neutral. */
+        /** 0xFF010101, one step off pure black on every channel; keep it exact, the offset may matter to the blend. */
         const val DIM_COLOR: Int = -16711423
 
-        /** Set during [install]; siblings read wallpaper state through it. Null when install was skipped or threw. */
+        /** Set first thing in [install], so a later step that throws still leaves it set; null only if install never got that far. */
         @JvmStatic
         @Volatile
         var INSTANCE: WallpaperImage? = null

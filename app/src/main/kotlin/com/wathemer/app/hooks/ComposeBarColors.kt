@@ -215,12 +215,12 @@ object ComposeBarColors {
     private val SIDE_ICON_IDS = arrayOf(
         "emoji_picker_btn",
         "input_attach_button",
-        "input_attach_button_start",     // WDS-variant sibling
+        "input_attach_button_start",     // the attach button in its start-side position
         "camera_btn",
         "payment_button",
     )
 
-    /** Mic, send and dictation icons: the swap inside conversation_entry_action_button. */
+    /** Mic, send and dictation icons inside conversation_entry_action_button, plus the footer's slide-to-cancel mic handle. */
     private val SEND_ICON_IDS = arrayOf(
         "voice_note_btn",        // mic icon (when entry is empty)
         "send",                  // send arrow (inflates when typing)

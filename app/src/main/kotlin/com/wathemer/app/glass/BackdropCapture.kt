@@ -56,7 +56,7 @@ class BackdropCapture(
 
     }
 
-    /** The subtree to blur; null disables capture. Not checked here: wiring runs before the host has a parent. */
+    /** The subtree to blur, or null for an underlay-only pane; not checked here, since wiring runs before the host has a parent. */
     var source: View? = null
 
     /** Views painted beneath [source] at their own screen positions; no legal backdrop contains the wallpaper. */
@@ -89,17 +89,17 @@ class BackdropCapture(
     private val hostLocation = IntArray(2)
     private val sourceLocation = IntArray(2)
 
-    // Rebuilt only on input change (per-frame effects allocate); effectDirty stands in for ten uniforms.
     /** Transmission divisor: coarse enough that the blur's sigma stays under Skia's cap, so no rescale passes; large surfaces never below 2. */
     private fun effectScaleFor(): Float {
         val large = if (host.width.toLong() * host.height > 600_000L) 2f else 1f
         return maxOf(large, sigmaOf(params.blurRadius) / NODE_SIGMA_CAP).coerceAtMost(MAX_EFFECT_SCALE)
     }
 
-    // The node's size, kept from the capture for the draw: the divisor is derived once, never twice.
+    // glassNode's size, kept from the capture for the draw: the divisor is derived once, never twice.
     private var nodeW = 0
     private var nodeH = 0
 
+    // The chain is rebuilt only on input change (per-frame effects allocate); effectDirty stands in for comparing the params.
     private var effectRadius = -1f
     private var effectScaleUsed = -1f
     private var effectDownsample = -1f
@@ -108,11 +108,11 @@ class BackdropCapture(
     private var effectRefracting = false
     private var effectLens = 1f
 
-    /** Thins the glass while a pane assembles; this rebuilds the chain, so only an animation may move it. */
+    /** Thins the glass while a pane assembles; 1 is the settled slab. */
     private var lensScale = 1f
     var effectDirty: Boolean = true
 
-    /** This surface's own transmission shader. Never shared; see GlassShader's kdoc. */
+    /** This surface's own transmission shader, never shared; see [GlassShader.newRefractShader]. */
     private val refractShader: RuntimeShader? by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             GlassShader.newRefractShader()
@@ -129,7 +129,7 @@ class BackdropCapture(
         if (src != null && !src.isLaidOut) return false
         if (host.width <= 0 || host.height <= 0) return false
 
-        // A live pane with a rim captures finer, so the band has something to bend; the frost path is unchanged by it.
+        // The frost path is unchanged by the finer capture: glassNode redraws it at its own divisor.
         val rimLive = liveRim && src != null && params.detail > 0f && params.refractionEnabled &&
             minOf(host.width, host.height) >= RIM_MIN_SIDE_DP * params.density && rimShader != null
         val scale = if (rimLive) minOf(params.downsample, RIM_DOWNSAMPLE) else params.downsample
@@ -380,16 +380,13 @@ class BackdropCapture(
         effectDirty = false
 
         // Divide the sigma, not the radius: HWUI's mapping has a constant term, and only this keeps the on-screen blur exact at any es.
-        // CLAMP, not DECAL: decal fades to transparent and leaves a dark halo at the glass edge.
         val nodeRadius = if (radius <= 0f) 0f else radiusOf(sigmaOf(radius) / es).coerceAtLeast(1f)
+        // CLAMP, not DECAL: decal fades to transparent and leaves a dark halo at the glass edge.
         val blur = if (nodeRadius <= 0f) {
             null
         } else {
             RenderEffect.createBlurEffect(nodeRadius, nodeRadius, Shader.TileMode.CLAMP)
         }
-
-        // The capture node stays sharp; see the kdoc on node.
-        node.setRenderEffect(null)
 
         val rs = refractShader
         val refractEffect =
@@ -401,7 +398,7 @@ class BackdropCapture(
                 null
             }
 
-        // createChainEffect(outer, inner) runs inner first: refract, then blur, never the reverse.
+        // createChainEffect(outer, inner) runs inner first.
         glassNode.setRenderEffect(
             when {
                 refractEffect != null && blur != null ->

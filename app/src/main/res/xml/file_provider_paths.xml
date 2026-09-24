@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only what the share sheet hands out: the copy made under a readable filename, because a slot
-     in the library is filed under a number. The library dir itself is deliberately not here. -->
+<!-- Only what is handed out; the library dir itself is deliberately not here. -->
 <paths>
+    <!-- The share copy under a readable name, since a library slot is filed under a number. -->
     <cache-path name="theme_share" path="share/" />
     <!-- The downloaded update, handed to the system installer. Emptied before each download. -->
     <cache-path name="updates" path="updates/" />

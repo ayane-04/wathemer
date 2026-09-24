@@ -9,13 +9,13 @@ import com.wathemer.app.hooks.BubbleColors
 import com.wathemer.app.hooks.BubbleShapes
 import com.wathemer.app.hooks.ChatHeaderColors
 import com.wathemer.app.hooks.ChatWallpaperMenu
+import com.wathemer.app.hooks.Diag
 import com.wathemer.app.hooks.HookLog
 import com.wathemer.app.hooks.ComposeBarColors
 import com.wathemer.app.hooks.EffectsOverlays
 import com.wathemer.app.hooks.FontSwap
 import com.wathemer.app.hooks.HomeActivityHook
 import com.wathemer.app.hooks.HostAppInit
-import com.wathemer.app.hooks.MessageAvatars
 import com.wathemer.app.hooks.ModulePrefs
 import com.wathemer.app.hooks.QuoteAndLabelColors
 import com.wathemer.app.hooks.SystemBars
@@ -30,6 +30,7 @@ import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
 import com.wathemer.app.hooks.glass.GlassHook
 import com.wathemer.app.hooks.wallpaper.ChatWallpapers
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
+import com.wathemer.app.util.HostPackages
 import de.robv.android.xposed.XposedBridge
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
@@ -39,11 +40,10 @@ class ModernEntry : XposedModule() {
 
     companion object {
         const val TAG = "WaThemer"
-        const val WHATSAPP_PKG = "com.whatsapp"
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
-        if (param.packageName != WHATSAPP_PKG) return
+        if (!HostPackages.isHost(param.packageName)) return
         val classLoader = param.defaultClassLoader
         // No version here: nothing has a Context yet; the app-create block below logs the real one.
         XposedBridge.log("[$TAG] Attached to ${param.packageName} (api ${runCatching { frameworkName }.getOrDefault("?")})")
@@ -54,7 +54,6 @@ class ModernEntry : XposedModule() {
         catch (t: Throwable) { HookLog.fail("anchor/appCreate", t) }
 
         // Deliberately no master gate: every feature is opt-in on its own prefs and no-ops when unset.
-        // FontSwap installs first so its font registers before WA inflates any text.
         try { FontSwap.install(); HookLog.arm("install/FontSwap") }
         catch (t: Throwable) { HookLog.fail("install/FontSwap", t) }
         // System bars: gated internally, no-op until enabled; mutually exclusive with the wallpaper feature.
@@ -65,7 +64,7 @@ class ModernEntry : XposedModule() {
         try { HomeActivityHook.install(classLoader); HookLog.arm("install/HomeActivityHook") }
         catch (t: Throwable) { HookLog.fail("install/HomeActivityHook", t) }
 
-        // Bubble theming needs an Application context (APK path for DexKit, Resources for ids); defer to app create.
+        // Most installers need the Application (the APK path for DexKit, Resources for ids); defer to app create.
         HostAppInit.onCreate(HostAppInit.ORDER_MAIN, "main") { app ->
             // Log the host build once; every diagnosis starts with it. A diagnostic must never crash the module.
             runCatching {
@@ -75,6 +74,9 @@ class ModernEntry : XposedModule() {
             // Registers the one Activity callback set; every lifecycle client rides it, whenever it registered.
             try { ActivityLifecycle.attach(app) }
             catch (t: Throwable) { HookLog.fail("lifecycle/activity", t) }
+            // Debug builds only; its dumps are posted after each resume, so they see what the installers below paint.
+            try { Diag.attach(app) }
+            catch (t: Throwable) { HookLog.fail("diag/attach", t) }
             // Read before the installers below; the ones covering WaEnhancer's surfaces consult it as they register.
             try { WaeCompat.load() }
             catch (t: Throwable) { HookLog.fail("compat/waenhancer", t) }
@@ -97,8 +99,6 @@ class ModernEntry : XposedModule() {
             catch (t: Throwable) { HookLog.fail("install/ComposeBarColors", t) }
             try { TrayColors.install(app); HookLog.arm("install/TrayColors") }
             catch (t: Throwable) { HookLog.fail("install/TrayColors", t) }
-            try { MessageAvatars.install(app); HookLog.arm("install/MessageAvatars") }
-            catch (t: Throwable) { HookLog.fail("install/MessageAvatars", t) }
             try { ChatHeaderColors.install(app); HookLog.arm("install/ChatHeaderColors") }
             catch (t: Throwable) { HookLog.fail("install/ChatHeaderColors", t) }
             try { ActionModeColors.install(app); HookLog.arm("install/ActionModeColors") }
@@ -112,8 +112,7 @@ class ModernEntry : XposedModule() {
             // Liquid Glass. Gated on its own pref inside install(); off by default.
             try { GlassHook.install(app); HookLog.arm("install/GlassHook") }
             catch (t: Throwable) { HookLog.fail("install/GlassHook", t) }
-            // WaIds anchor summary, first thing to check after a WhatsApp update.
-            // Must stay posted: inline it runs before HomeActivityHook and misses its ~40 ids.
+            // Must stay posted: inline, the anchor summary runs before HomeActivityHook's client and misses its ids.
             Handler(Looper.getMainLooper()).post {
                 runCatching { WaIds.logSummary() }
                 // DexKit's native index would otherwise sit in memory for the process life; ensureBridge re-opens it.
@@ -122,8 +121,7 @@ class ModernEntry : XposedModule() {
             }
         }
 
-        // Surfaces attach long after install, so the ledger is dumped again once the first screens
-        // have had time to build. Scheduled here so a dead anchor cannot also silence the ledger.
+        // Dumped again once the first screens have built; scheduled here so a dead anchor cannot also silence the ledger.
         runCatching {
             val main = Handler(Looper.getMainLooper())
             for (delay in longArrayOf(10_000L, 45_000L)) {

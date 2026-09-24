@@ -18,7 +18,7 @@ import android.widget.TextView
 import com.wathemer.app.glass.FrostDrawable
 import com.wathemer.app.glass.GlassParams
 
-/** Frost one view from the wallpaper; idempotent, recycled chips come back bound to a different chip. */
+/** Frost one view as tint and rim over the glass behind it; idempotent, recycled chips come back bound to a different chip. */
 internal fun frost(
     v: View,
     tintOverride: Int? = null,
@@ -52,7 +52,7 @@ internal fun frost(
     val existing = v.getTag(frostTag) as? FrostDrawable
     if (existing != null && v.background === existing) {
         existing.setRadius(radius)
-        existing.setTintColor(tint)   // recycled views arrive bound to a different chip
+        existing.setTintColor(tint)
         return
     }
     // No bitmap: the card behind supplies the blur; passing one samples behind the card, not the chip.
@@ -83,7 +83,7 @@ internal fun frostOnLayoutWith(v: View, tint: Int, radius: Float?, ignorePadding
 
 private val frostMoveTag = tagKey("wathemer-frost-move")
 
-/** A pill's band as a fraction of its smaller side; the plan's figure, not the slider's, which is for the cards. */
+/** A pill's band as a fraction of its smaller side; fixed, as the Bevel width slider does not reach the pills. */
 private const val PILL_BEVEL_FRACTION = 0.15f
 
 /** The pane recipe for a small pill, fresh per drawable: the painter writes the band and the tint into it. */
@@ -154,7 +154,7 @@ internal fun frostCircleOnLayout(v: View) {
     }
 }
 
-/** Chip treatment kept on layout: guard the registration, never the paint; recycled rows re-bind without a fresh attach. */
+/** The chip treatment, kept on layout. */
 internal fun frostOnLayout(v: View, forceLabel: String? = null) {
     runCatching { frost(v, forceLabel = forceLabel) }
     if (v.getTag(frostListenerTag) == null) {
@@ -257,7 +257,7 @@ private val stockPadById = HashMap<Int, Rect>()
 /** WhatsApp's own band padding, restated on the label because the band it came from is cleared. */
 private const val UNREAD_PILL_PAD_DP = 6f
 
-/** The unread label ships unbacked and unpadded, its pill and air being the band's, which glass clears; the font padding goes too, or the text sits low in its own pill. */
+/** The label takes the cleared band's padding and drops its font padding, or the text sits low in its own pill. */
 internal fun padUnreadPill(v: View) {
     val tv = v as? TextView ?: return
     if (tv.includeFontPadding) tv.includeFontPadding = false

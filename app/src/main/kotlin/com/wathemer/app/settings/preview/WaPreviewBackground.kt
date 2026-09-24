@@ -38,7 +38,7 @@ internal fun previewBlurDp(blurPx: Int, previewHeightPx: Float): Dp {
     return with(density) { scaled.toDp() }
 }
 
-/** Chat backdrop: real wallpaper when usable, else the doodle, so every path has a backdrop. */
+/** Pass the live snap for the real wallpaper; a null snap, or a wallpaper off, unset, unreadable or undecodable, draws the doodle. */
 @Composable
 fun ChatWallpaper(
     baseColor: Color,
@@ -108,15 +108,12 @@ private fun DoodleWallpaper(
                 when ((rowIndex + (x / gridX).toInt()) % 4) {
                     0 -> drawCircle(faintBright, radius = 1.4.dp.toPx(), center = Offset(x, y))
                     1 -> {
-                        // tiny tick mark
                         drawLine(faint, Offset(x - 3.dp.toPx(), y), Offset(x + 3.dp.toPx(), y), stroke)
                     }
                     2 -> {
-                        // diagonal stroke
                         drawLine(faint, Offset(x - 4.dp.toPx(), y - 3.dp.toPx()), Offset(x + 4.dp.toPx(), y + 3.dp.toPx()), stroke)
                     }
                     else -> {
-                        // small donut
                         drawCircle(faint, radius = 2.dp.toPx(), center = Offset(x, y), style = Stroke(stroke))
                     }
                 }

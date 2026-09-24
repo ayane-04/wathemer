@@ -9,7 +9,6 @@ import java.lang.ref.WeakReference
 
 // ── Pane lifetime: a pane must not outlive the thing it decorates ──────────────────────
 // Any pane that is not a child of the view it decorates must be bindPane'd to it, or it orphans on fragment swaps.
-// One decider: every writer of a bound pane's visibility (this sweep, GlassFab's per-layout syncs) asks paneShouldShow.
 internal class PaneBinding(
     val pane: WeakReference<View>,
     val anchor: WeakReference<View>,
@@ -36,7 +35,7 @@ internal fun bindPane(pane: View, anchor: View, what: String, onHidden: (() -> U
     syncPaneVisibility()
 }
 
-/** Hide bound panes whose anchor left, restore returners, in the layout phase so a stale pane is never drawn. */
+/** Hide bound panes whose anchor left and restore returners, before draw, so a stale pane is never presented. */
 internal fun syncPaneVisibility() {
     val bindings = paneBindings.iterator()
     while (bindings.hasNext()) {

@@ -26,7 +26,7 @@ object WallpaperShellClearer {
         0xff0b1014.toInt(),
     )
 
-    /** Containers cleared at inject. An id can occur at several depths (two id/content), so the walk covers the whole tree. */
+    /** Containers cleared at inject. */
     private val WA_SHELL_IDS = listOf(
         // Homescreen.
         "root_view", "main_container", "call_notification_holder_vr",
@@ -95,7 +95,7 @@ object WallpaperShellClearer {
                 v.setBackgroundColor(0)
                 return@onView false
             }
-            // A pager page root is a shell whatever colour it wears, and the Updates page's root carries no id.
+            // A pager page root is a shell whatever opaque colour it wears, and the Updates page's root carries no id.
             if (!pagerIdTried) {
                 pagerIdTried = true
                 pagerId = v.resources.waId("pager", v.context.packageName)

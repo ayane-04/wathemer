@@ -24,10 +24,10 @@ class MaskField(val bitmap: Bitmap, private val rangeTexels: Float) {
 /** A field placed on one bubble, at the bubble's full size. */
 class MaskRef(val field: MaskField, val w: Int, val h: Int)
 
-/** Rasterises a pack's nine-patch per size bucket: the edge is the art's own alpha, the bevel reads a Euclidean distance inward from the flood-filled outline. */
+/** Rasterises a pack's nine-patch per size bucket; the distance is Euclidean, measured from the flood-filled outline. */
 object BubbleMaskFields {
 
-    /** Sizes round up to this, so a paragraph one line taller shares its neighbour's texture. */
+    /** Sizes round up to this, so bubbles a few px apart share one texture. */
     private const val BUCKET = 8
 
     /** Inward distance a full green stands for, in texture px; past it the surface is flat anyway. */

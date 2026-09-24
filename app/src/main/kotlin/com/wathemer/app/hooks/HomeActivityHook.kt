@@ -66,7 +66,7 @@ object HomeActivityHook {
     }
 
     private fun installInternal(app: Application, classLoader: ClassLoader) {
-        // Resolves ~40 WA ids, the most anywhere; startup ordering matters, see WaIds.logSummary in ModernEntry.
+        // Resolves its ids at install; startup ordering matters, see WaIds.logSummary in ModernEntry.
         XposedBridge.log("[$TAG] installing")
         xprefs.reload()
         val pkg = app.packageName
@@ -93,7 +93,6 @@ object HomeActivityHook {
         val toolbarBg       = xprefs.getInt(Prefs.OVR_TOOLBAR_BG, 0)
         val toolbarIcons    = xprefs.getInt(Prefs.OVR_TOOLBAR_ICONS, 0)
         val whatsappLogo    = xprefs.getInt(Prefs.OVR_WHATSAPP_LOGO, 0)
-        // The toolbar id fires for both HomeActivity and Conversation, so the lambda branches on the activity.
         val chatToolbarBg    = xprefs.getInt(Prefs.CHAT_TOOLBAR_BG, 0)
         val chatToolbarIcons = xprefs.getInt(Prefs.CHAT_TOOLBAR_ICONS, 0)
 
@@ -113,7 +112,7 @@ object HomeActivityHook {
         if (chatlistBg != 0) installChatRowBgHook(pkg, res, chatlistBg)
 
         // ─── Search bar (separate from chatlist) ───────────────────────
-        // search_bar_bg outer pill, search_inner_bg inner pill, search_icon WDSIcon magnifier, search_text text and hint.
+        // my_search_bar the outer pill, search_bar_inner_layout the inner, search_icon the WDSIcon magnifier, search_text the text and hint.
         hookBg("my_search_bar", searchBarBg, pkg, res)
         hookBg("search_bar_inner_layout", searchInnerBg, pkg, res)
         if (searchIcon != 0) installWdsIconHook(classLoader, pkg, res, "search_icon", searchIcon)
@@ -151,7 +150,7 @@ object HomeActivityHook {
         hookBgWallpaperAware("community_fragment", 0, wallpaperEnabled, pkg, res)
         hookBgWallpaperAware("calls_recyclerView", 0, wallpaperEnabled, pkg, res)
 
-        // MB's chat top-divider port: a hairline foreground per row, home window only; a foreground survives recycling.
+        // Home window only; a foreground, because it survives row recycling.
         if (xprefs.getBoolean(Prefs.KEY_CHATLIST_DIVIDER, false)) {
             val dividerRowId = res.waId("contact_row_container", pkg)
             val dividerHeaderId = res.waId("header", pkg)
@@ -167,7 +166,7 @@ object HomeActivityHook {
         }
 
         // ─── Toolbar (header): activity-scoped bg + parent walk + icon walker ──
-        // One id covers Home, Conversation and ContactInfo; wallpaperEnabled is in the gate so the watcher arms without overrides.
+        // One id covers every toolbar screen, branched per activity below; wallpaperEnabled is in the gate so the watcher arms without overrides.
         if (toolbarBg != 0 || toolbarIcons != 0 || chatToolbarBg != 0 || chatToolbarIcons != 0 || wallpaperEnabled) {
             val overflowId = res.waId("menuitem_overflow", pkg)
             val toolbarId = res.waId("toolbar", pkg)
@@ -185,7 +184,7 @@ object HomeActivityHook {
                             -> 0 to toolbarIcons                       // folder and settings pages, icons only
                         else -> return@onId                            // unknown activity, leave alone
                     }
-                    // Path A: user bg/icons set, so the original treatment wins.
+                    // Path A: a user token is painted as set, wallpaper or not.
                     if (bg != 0 || icons != 0) {
                         applyToolbarTreatment(v, bg, icons, overflowId)
                     }
@@ -203,9 +202,7 @@ object HomeActivityHook {
         // ─── FAB + Meta AI mini-fab ────────────────────────────────────
         if (fabBg != 0 || fabIcon != 0) {
             // FAB glyph uses the same brand green as the bg substitution; with only fabBg set it would vanish, so force white.
-            val effectiveIcon = if (fabIcon != 0) fabIcon
-                                else if (fabBg != 0) 0xFFFFFFFF.toInt()
-                                else 0
+            val effectiveIcon = if (fabIcon != 0) fabIcon else 0xFFFFFFFF.toInt()
             installWdsFabHook(classLoader, pkg, res, fabBg, effectiveIcon)
         }
         // iOS icon pack: FAB glyph, toolbar and action icons; existing tints still colour them.
@@ -358,7 +355,7 @@ object HomeActivityHook {
 
     // ── Toolbar treatment: paint re-runs each attach, tag-guard listeners. ───────────────────
 
-    /** Keeps the toolbar wallpaper-transparent; it attaches before the one-shot shell-clear, so a layout listener re-applies. */
+    /** Keeps the toolbar wallpaper-transparent against WhatsApp's repaints; the one-shot shell-clear never covers it. */
     private fun installWallpaperToolbarWatcher(view: View, iconColor: Int, overflowId: Int) {
         val backBtnId = view.resources.waId("whatsapp_toolbar_home", view.context.packageName)
         val apply: () -> Unit = {
@@ -513,7 +510,7 @@ object HomeActivityHook {
 
     private var loggedFabTintIgnored = false
 
-    /** Logs once if WDSFab's server-delivered A0D flag made our tint a no-op; the identity compare is deliberate. */
+    /** Logs once if WDSFab's server-delivered flag made our tint a no-op; the identity compare is deliberate. */
     private fun verifyFabTint(actual: ColorStateList?, wanted: ColorStateList, what: String) {
         if (loggedFabTintIgnored || actual === wanted) return
         loggedFabTintIgnored = true
@@ -636,7 +633,7 @@ object HomeActivityHook {
                 v.invalidate()
             }
         }
-        // The navbar badge may be a Material BadgeDrawable, not a WDSBadge; if a WDSBadge attaches there, the same tag applies.
+        // The navbar badge may be a Material BadgeDrawable, which this hook never reaches.
 
         // Hoisted: the untagged fallback runs on every badge draw and the tokens are fixed at install.
         val defaultBadgeTag = intArrayOf(unreadBg, unreadText)
@@ -751,7 +748,7 @@ object HomeActivityHook {
         "comm"   to ("mb_nav_comm_ios"    to "mb_nav_comm_ios_fill"),
         "calls"  to ("mb_nav_calls_ios"   to "mb_nav_calls_ios_fill"),
     )
-    // Fallback ordering when a menu item's resource-entry name can't be read.
+    // Fallback ordering when a menu item's entry name is unreadable or names no known tab.
     private val NAV_INDEX_FALLBACK = listOf("chats", "status", "comm", "calls")
 
     private fun installNavbarCustomIcons(app: Application) {
@@ -790,7 +787,7 @@ object HomeActivityHook {
     }
 
     private fun navTabKey(itemId: Int, entryName: String?, index: Int): String? {
-        // WhatsApp's tab ids are plain ints, not resources (200 chats, 300 updates, 400 calls, 600 communities); a tab another module adds keeps its own glyph.
+        // WhatsApp's tab ids are plain ints, not resource ids; any tab not mapped here keeps its own glyph.
         when (itemId) {
             200 -> return "chats"
             300 -> return "status"
@@ -816,7 +813,7 @@ object HomeActivityHook {
             else runCatching { res.getDrawable(id, null) }.getOrNull()
         }
 
-    // Custom home-FAB glyph picked by content-description; the FAB icon tint composes.
+    // Custom home-FAB glyph; the FAB icon tint composes.
     private const val FAB_ICON_TAG = -1167196170
 
     private fun installFabCustomIcon(app: Application) {
@@ -845,7 +842,7 @@ object HomeActivityHook {
         }
     }
 
-    // Toolbar icon swaps: overflow, back and camera; template glyphs, so the toolbar icon tint composes.
+    // Toolbar icon swaps; template glyphs, so the toolbar icon tint composes.
     private fun installToolbarCustomIcons(app: Application) {
         val modRes = navModuleRes ?: runCatching {
             app.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY).resources
@@ -862,7 +859,7 @@ object HomeActivityHook {
         swapToolbarIconById(waRes, pkg, "menuitem_payment_rupee_icon", navDrawable(modRes, "mb_rupee"))
         swapToolbarIconById(waRes, pkg, "whatsapp_toolbar_home", navDrawable(modRes, "mb_ic_back"))
 
-        // Toolbar: overflow (setOverflowIcon) + chat call buttons (no id -> match by content-description).
+        // Toolbar: the overflow via setOverflowIcon, and the chat call buttons.
         val toolbarId = waRes.waId("toolbar", pkg)
         if (toolbarId != 0) {
             ViewThemeDispatcher.onId(toolbarId) { tb ->
@@ -913,7 +910,7 @@ object HomeActivityHook {
         walk(root)
     }
 
-    // Action icon swaps by id, from the WA decompile inventory; ids that resolve to 0 skip silently.
+    // Action icon swaps by id; an id that resolves to 0 is skipped.
     private val ACTION_ICON_GLYPHS = mapOf(
         "search_view_clear_button" to "mb_ic_clear",
         "search_close_btn" to "mb_ic_clear",

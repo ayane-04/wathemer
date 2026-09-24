@@ -40,7 +40,7 @@ import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.settings.prefs.TickStyles
 
 // ── Mock icons ──────────────────────────────────────────────────────────
-// Generated bitmaps tinted at draw time; the dots and ticks stay drawn.
+// Generated bitmaps tinted at draw time; the dots and stock ticks are drawn on a Canvas.
 @Composable
 private fun SendArrow(tint: Color) = BitmapIcon(R.drawable.ic_wa_send, tint, 15.dp)
 
@@ -122,22 +122,17 @@ private fun BubblesScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
             Box(modifier = Modifier.align(Alignment.CenterHorizontally)) {
                 DatePill(pal.surface, pal.subtle)
             }
-            val avatar = snap.msgAvatarSize * PREVIEW_TICK_SCALE
             ChatRow(end = false) {
-                if (snap.msgAvatarChats) PreviewAvatar(pal, avatar, "M")
                 IncomingBubble(pal, "Hey, are you home?", "10:14")
             }
             ChatRow(end = true) {
                 OutgoingBubble(pal, "Yes! Just got back.", "10:14", TickKind.Read)
-                if (snap.msgAvatarMine) PreviewAvatar(pal, avatar, "Y", end = true)
             }
             ChatRow(end = false) {
-                if (snap.msgAvatarChats) PreviewAvatar(pal, avatar, "M")
                 IncomingBubble(pal, "Want me to bring dinner?", "10:15")
             }
             ChatRow(end = true) {
                 OutgoingBubble(pal, "Yes please. Pasta?", "10:15", TickKind.Delivered)
-                if (snap.msgAvatarMine) PreviewAvatar(pal, avatar, "Y", end = true)
             }
         }
     }
@@ -251,7 +246,7 @@ private fun SelectionScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
     )
     val amIcons  = snap.actionModeIcons.toColorOr(pal.text)
     val amTitle  = snap.actionModeTitle.toColorOr(pal.text)
-    // Ripple is its own token; cascade to amIcons when unset, matching ActionModeColors, or its row edits with no feedback.
+    // Ripple is its own token; unset, the disc borrows amIcons, though the hook keeps WhatsApp's ripple.
     val amRipple = snap.actionModeCloseRipple.toColorOr(amIcons)
 
     Column(modifier = modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))) {
@@ -259,7 +254,7 @@ private fun SelectionScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth().background(amBg).padding(horizontal = 10.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // The back glyph sits on a disc of its ripple colour, so the token is actually visible.
+            // The back glyph sits on a disc of the ripple colour, the only place that token shows.
             Box(
                 modifier = Modifier
                     .background(amRipple.copy(alpha = 0.22f), CircleShape)
@@ -311,9 +306,7 @@ private fun MiscScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
             ChatRow(end = true) { OutgoingBubble(pal, "Sounds good, see you there.", "10:14", TickKind.Read) }
             // Delivered message: tick uses pal.tickUnseen
             ChatRow(end = true) { OutgoingBubble(pal, "On my way.", "10:18", TickKind.Delivered) }
-            // Forwarded incoming
             ChatRow(end = false) { ForwardedIncomingBubble(pal, "Check this out 🚀", "10:20") }
-            // Outgoing image bubble with media caption
             ChatRow(end = true) { CaptionedMediaBubble(pal, "Sunset from the office 🌇", "10:22") }
             // Incoming with a link: the link substring is rendered in pal.linkColor
             ChatRow(end = false) { LinkBubble(pal, "Recipe: ", "wa.me/recipes/pasta", "10:25") }
@@ -380,7 +373,6 @@ private fun LinkBubble(pal: ChatPalette, prefix: String, url: String, time: Stri
             .padding(horizontal = 9.dp, vertical = 5.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            // Render the link substring in pal.linkColor with underline (matches WA's link styling)
             Text(
                 linkStyledText(prefix, url, pal.leftText, pal.linkColor),
                 fontSize = 11.sp, lineHeight = 14.sp,
@@ -450,7 +442,7 @@ private fun chatPalette(snap: ThemeSnapshot): ChatPalette {
         tickUnseen= snap.tickUnseenColor.toColorOr(onAccentSubtle),
         forwardedLabel = snap.forwardedLabelColor.toColorOr(subtle),
         mediaCaption   = snap.mediaCaptionColor.toColorOr(text),
-        linkColor      = snap.linkColor.toColorOr(Color(0xFF027EB5)),  // WA's actual default link blue
+        linkColor      = snap.linkColor.toColorOr(Color(0xFF027EB5)),  // WhatsApp's default link blue
         tickStyle      = snap.tickStyle,
     )
 }
@@ -462,7 +454,6 @@ private fun ChatRow(end: Boolean, content: @Composable () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (end) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom,
     ) {
         content()
     }
@@ -525,7 +516,6 @@ internal fun OutgoingBubble(pal: ChatPalette, text: String, time: String, tickKi
         Spacer(Modifier.size(8.dp))
         Text(time, color = pal.rightDate, fontSize = 8.sp)
         Spacer(Modifier.size(4.dp))
-        // Read = tickSeen, Delivered and Sent = tickUnseen
         TickGlyph(tickKind, defaultColor = pal.tickUnseen, accent = pal.tickSeen, style = pal.tickStyle)
     }
 }
@@ -539,7 +529,7 @@ private fun IncomingQuotedBubble(pal: ChatPalette, quoteAuthor: String, quoteTex
             .padding(4.dp),
     ) {
         Column {
-            // Quote header: quoteBg wraps the strip, quoteBar is the vertical accent, quoteText colours author and body.
+            // Quote header: quoteBg wraps the strip, quoteBar draws the stripe and the author, quoteText the quoted line.
             Row(
                 modifier = Modifier
                     .background(pal.quoteBg, RoundedCornerShape(6.dp))
@@ -634,7 +624,6 @@ private fun HeaderRow(pal: ChatPalette, bg: Color, icons: Color, title: Color, s
 
 internal fun ThemeSnapshot.toTokens(): Tokens = Tokens(
     background = background,
-    primary = primary,
     text = text,
     chatlistBg = if (chatlistBg != 0) chatlistBg else background,
     rowName = if (rowName != 0) rowName else text,
@@ -660,12 +649,12 @@ internal fun ThemeSnapshot.toTokens(): Tokens = Tokens(
     miniFabLabel = if (miniFabLabel != 0) miniFabLabel else text,
     unreadAccent = if (unreadAccent != 0) unreadAccent else primary,
     unreadCountText = if (unreadCountText != 0) unreadCountText else text,
-    // Cascade matches SystemBars.resolveStatusColor's code, not its comment: explicit, home toolbar bg, primary.
+    // Cascade mirrors SystemBars.resolveStatusColor: explicit, home toolbar bg, primary.
     statusBarBg = if (statusBarBg != 0) statusBarBg
         else if (homeToolbarBg != 0) homeToolbarBg
         else primary,
     systemBarsEnabled = systemBarsEnabled,
-    // Same test the hook makes, in the same order: enabled, and an actual image.
+    // Same pref test the hook makes, in the same order: enabled, then a path set.
     wallpaperOwnsBars = wallpaperEnabled && !wallpaperPath.isNullOrBlank(),
     tickStyle = tickStyle,
 )
@@ -709,17 +698,4 @@ private fun TrayScope(snap: ThemeSnapshot, modifier: Modifier = Modifier) {
             }
         }
     }
-}
-
-/** The picture beside a message as the rows draw it: a circle at the pref's size, scaled like the rest of the mock. */
-@Composable
-private fun PreviewAvatar(pal: ChatPalette, sizeDp: Float, letter: String, end: Boolean = false) {
-    if (end) Spacer(Modifier.size(4.dp))
-    Box(
-        modifier = Modifier.size(sizeDp.dp).background(pal.accent.copy(alpha = 0.55f), CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(letter, color = pal.onAccent, fontSize = (sizeDp * 0.45f).sp, fontWeight = FontWeight.Bold)
-    }
-    if (!end) Spacer(Modifier.size(4.dp))
 }

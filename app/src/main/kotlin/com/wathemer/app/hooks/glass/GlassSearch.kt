@@ -71,10 +71,9 @@ private const val SEARCH_FIELD_TOP_FRACTION = 0.29f
 /** Breathing room between the status bar and the raised search field; see [setSearchRaised]. */
 private const val SEARCH_RAISED_GAP_DP = 6f
 
-/** Corner radius of a single search result's glass. */
 private const val SEARCH_ROW_RADIUS_DP = 14f
 
-/** Runs on every attach of search_fragment; everything is idempotent except the two tag-guarded registrations. */
+/** Runs on every attach of search_fragment; everything is idempotent except the listener registrations, which are tag-guarded. */
 internal fun layoutSearchScreen(fragment: View) {
     val root = fragment as? ViewGroup ?: return
     val input = root.findViewById<View>(searchInputId) ?: run {
@@ -101,7 +100,7 @@ internal fun layoutSearchScreen(fragment: View) {
 
     // Read the field rather than assume empty: a relaunch can restore straight into a queried search.
     val hasQuery = searchQueryLength(input) > 0
-    searchRaised = !hasQuery          // force the first setSearchRaised to actually apply
+    searchRaised = !hasQuery          // force the first setSearchRaised past its no-change return
     setSearchRaised(hasQuery, animate = false)
     // Only the empty-query entry gets the hand-off; a restored search had no home bar to travel from.
     searchEntryPending = !hasQuery
@@ -211,7 +210,7 @@ private fun ensureChipWrapHook(group: View) {
     XposedBridge.log("[$TAG] chip wrap FAILED: no onMeasure declared above ${group.javaClass.name}")
 }
 
-/** Last ChipGroup [searchChipGroup] found, so the scan runs once per search screen. */
+/** Last ChipGroup [searchChipGroup] found; while it stays attached the scan is skipped. */
 private var searchChipGroupRef: WeakReference<ViewGroup>? = null
 
 /** Found by scan, not index (RecyclerView reorders children); re-scanned when the cached ref goes stale, and a miss is normal. */
@@ -226,11 +225,11 @@ private fun searchChipGroup(list: ViewGroup): ViewGroup? {
     return null
 }
 
-/** Wrap the filters onto as many rows as they need; a single line shows five of eleven, and a mode that never toggles cannot stick. */
+/** Wrap the filters onto as many rows as they need, query or not: one line hides most of them, and a mode that never toggles cannot get stuck in the wrong one. */
 private fun syncSearchFilters(root: ViewGroup) {
     val list = root.findViewById<ViewGroup>(searchResultListId) ?: return
     if (list.childCount == 0) return
-    // A miss here is silent and permanent: a renamed ChipGroup or a deeper row stops frost and wrap with nothing in the log.
+    // A miss here is silent and permanent: a renamed ChipGroup or a deeper row stops the chip styling and the wrap.
     val group = searchChipGroup(list) ?: return
 
     if (synchronized(wrapChipGroups) { wrapChipGroups[group] } != true) {
@@ -239,7 +238,7 @@ private fun syncSearchFilters(root: ViewGroup) {
         // FlowLayout tests singleLine before wrapping, so the spec rewrite alone changes nothing; reflective, no Material dependency.
         runCatching { XposedHelpers.callMethod(group, "setSingleLine", false) }
             .onFailure { XposedBridge.log("[$TAG] setSingleLine failed: $it") }
-        // The scrolling parent must be free to grow, or the extra rows are simply clipped.
+        // The scrolling parent must be free to grow, or the extra rows are clipped.
         (group.parent as? View)?.let { p ->
             val lp = p.layoutParams
             if (lp != null && lp.height != ViewGroup.LayoutParams.WRAP_CONTENT) {
@@ -256,7 +255,7 @@ private fun syncSearchFilters(root: ViewGroup) {
     }
 }
 
-/** Built once and reused: the chip setters compare by reference, and a fresh equal list would invalidate every chip each layout. */
+/** The tint the two chip lists were built for; the setters compare by reference, so a fresh equal list would invalidate every chip each layout. */
 private var chipCslFor = Int.MIN_VALUE
 
 private var chipFillCsl: ColorStateList? = null
@@ -311,7 +310,6 @@ private fun searchQueryLength(input: View): Int {
     return visibleLength(t)
 }
 
-/** The direct child of [parent] that has [descendant] somewhere beneath it, or null. */
 private fun directChildContaining(parent: ViewGroup, descendant: View): View? {
     var v: View? = descendant
     while (v != null) {
@@ -338,7 +336,7 @@ private fun setSearchRaised(raised: Boolean, animate: Boolean = true) {
         lp.topMargin = want
         toolbar.layoutParams = lp
     }
-    // Only when already on screen and actually moving; the first placement of a session is [animateSearchEntry]'s job.
+    // Only when already on screen and the margin changed; the first placement of a session is [animateSearchEntry]'s job.
     if (animate && toolbar.height > 0 && from != want) {
         glideSearchBy((from - want).toFloat(), SEARCH_MOVE_MS)
     }
@@ -442,7 +440,7 @@ private fun injectSearchPanel(toolbar: View) {
     // bindPane on every attach, outside the creation branch: each search open brings a new toolbar, and a pane that outlives its anchor must re-bind.
     bindPane(glass, toolbar, "search panel") { animateHomeBarReturn() }
 
-    // Reused across searches, so shed the last session's transform or a cancelled hand-off strands it at 0.6 scale.
+    // Reused across searches, so shed the last session's transform or a cancelled hand-off strands it part-scaled.
     glass.animate().cancel()
     glass.translationY = 0f
     glass.scaleY = 1f
@@ -534,7 +532,7 @@ internal fun searchRowGlass(list: View) {
 }
 
 private fun insertSearchRowPane(list: View) {
-    // The list and its fragment holder are LinearLayouts, so neither hosts the pane; the same walk as panelGlass.
+    // The fragment and its holder are LinearLayouts, so neither hosts the pane; the same walk as panelGlass.
     var host = list.parent as? ViewGroup
     while (host != null && !canStack(host)) host = host.parent as? ViewGroup
     if (host == null) {
@@ -705,5 +703,5 @@ private fun cancelHideFade(v: View) {
 internal fun registerFadeOnHide(v: View?) {
     if (v == null) return
     synchronized(fadeOnHide) { fadeOnHide[v] = true }
-    // No forceHasOverlappingRendering(false): measured, it changed nothing; the cost is drawing two screens, not the buffer.
+    // No forceHasOverlappingRendering(false): the cost is drawing two screens, not the buffer.
 }

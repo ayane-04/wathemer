@@ -24,7 +24,7 @@ internal object GlassPopupMorph {
     /** A little quicker than the opening, and inside the window's own exit fade. */
     private const val CLOSE_MS = 200L
 
-    /** The screen snapshot lands a frame or two after the show; past this the glass starts on the wallpaper copy. */
+    /** The screen snapshot lands a frame or two after the show; past this the glass starts without it, on the last snapshot or the wallpaper copy. */
     private const val SNAP_WAIT_MS = 100L
 
     private const val IDLE = 0

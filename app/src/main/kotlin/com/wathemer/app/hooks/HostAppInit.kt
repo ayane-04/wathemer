@@ -1,8 +1,9 @@
 // One anchor for work that needs the host Application.
-// android.app.Application.onCreate is empty, so ART inlines it away and a hook there can never fire.
+// android.app.Application.onCreate is empty, so ART can inline it into an override's super call, where a hook never fires.
 package com.wathemer.app.hooks
 
 import android.app.Application
+import com.wathemer.app.util.HostPackages
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -13,7 +14,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 object HostAppInit {
 
     private const val TAG = "WaThemer.AppInit"
-    private const val WHATSAPP_PKG = "com.whatsapp"
 
     // Runs low to high. Set here so the sequence never depends on Xposed's callback ordering.
     const val ORDER_FONT = 0
@@ -44,7 +44,7 @@ object HostAppInit {
         }
     }
 
-    /** Runs [action] once with the host Application, in [order]; both anchors are hooked and the host override is entered first, so it wins wherever it resolves and the framework one idles. */
+    /** Runs [action] once with the host Application, in [order]; the host override wins wherever it resolves. */
     fun onCreate(order: Int, name: String, action: (Application) -> Unit) {
         clients.add(Client(order, name, action))
         ensureHooked()
@@ -66,10 +66,10 @@ object HostAppInit {
 
     private fun dispatch(param: XC_MethodHook.MethodHookParam) {
         val app = param.thisObject as? Application ?: return
-        if (app.packageName != WHATSAPP_PKG) return
+        // Downstream of the anchor: a host rejected here attaches, then every app-create client silently never runs.
+        if (!HostPackages.isHost(app.packageName)) return
         if (!fired.compareAndSet(false, true)) return
         logAnchor(param.method)
-        // Sorted here rather than left to Xposed's callback order, which is reversed for after-hooks.
         for (c in clients.sortedBy { it.order }) {
             // Isolated per client: one thrower must not cost the installers behind it.
             try {

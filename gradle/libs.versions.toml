@@ -38,7 +38,7 @@ compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 # Material (XML themes only; Compose UI uses Material3 above)
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 
-# UCrop: image crop activity used by the wallpaper picker. JitPack.
+# UCrop: the crop activity both wallpaper pickers open.
 ucrop = { module = "com.github.yalantis:ucrop", version.ref = "ucrop" }
 
 [plugins]

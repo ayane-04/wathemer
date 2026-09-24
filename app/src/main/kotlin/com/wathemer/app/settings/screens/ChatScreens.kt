@@ -1,4 +1,4 @@
-// The Chats page: every override of a conversation, in sections, under a preview that follows the section in hand.
+// The Chats page: a conversation's overrides, in groups, under a preview that follows the group in hand.
 package com.wathemer.app.settings.screens
 
 import android.os.Build
@@ -39,8 +39,6 @@ import com.wathemer.app.settings.components.NavTopBar
 import com.wathemer.app.settings.components.NoteText
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.PreviewPanel
-import com.wathemer.app.settings.components.SliderItem
-import com.wathemer.app.settings.components.ToggleItem
 import com.wathemer.app.settings.nav.NavController
 import com.wathemer.app.settings.nav.Screen
 import com.wathemer.app.settings.prefs.BubbleStyles
@@ -57,13 +55,7 @@ import com.wathemer.app.settings.preview.WaPreview
 import com.wathemer.app.settings.preview.WaPreviewKind
 import com.wathemer.app.settings.preview.updateBubbleStyleIncoming
 import com.wathemer.app.settings.preview.updateBubbleStyleOutgoing
-import com.wathemer.app.settings.preview.updateMsgAvatarChats
-import com.wathemer.app.settings.preview.updateMsgAvatarFirstOnly
-import com.wathemer.app.settings.preview.updateMsgAvatarGroups
-import com.wathemer.app.settings.preview.updateMsgAvatarMine
-import com.wathemer.app.settings.preview.updateMsgAvatarSize
 import com.wathemer.app.settings.preview.updateTickStyle
-import kotlin.math.roundToInt
 
 @Composable
 fun ChatScreen(nav: NavController, prefs: Prefs) {
@@ -92,7 +84,7 @@ fun ChatScreen(nav: NavController, prefs: Prefs) {
         .map { BubbleStyles.NAMES.getOrNull(it) ?: "Stock" }
         .let { (i, o) -> if (i == o) i else "$i · $o" }
 
-    // The group rows carry the bubble each side actually shows.
+    // A group row's swatch is that side's bubble colour, or the global its rows fall back to.
     val incomingSwatch = snap.bubbleLeftBg.let { if (it != 0) it else prefs.background }
     val outgoingSwatch = snap.bubbleRightBg.let { if (it != 0) it else prefs.primary }
 
@@ -151,21 +143,6 @@ fun ChatScreen(nav: NavController, prefs: Prefs) {
             row("Panel background", Prefs.TRAY_BG,        prefs.background, WaPreviewKind.ChatTray, getter = { trayBg },       copier = { copy(trayBg = it) })
             row("Tab bar",          Prefs.TRAY_HEADER_BG, prefs.background, WaPreviewKind.ChatTray, getter = { trayHeaderBg }, copier = { copy(trayHeaderBg = it) })
             row("Icons",            Prefs.TRAY_ICON_TINT, prefs.text,       WaPreviewKind.ChatTray, getter = { trayIconTint }, copier = { copy(trayIconTint = it) })
-        }
-        ExpandGroup("Pictures beside messages", onOpen = { kind = WaPreviewKind.ChatBubbles }) {
-            ToggleItem("In chats", subtitle = "The contact's picture beside their messages", checked = snap.msgAvatarChats, onCheckedChange = { snapshot.updateMsgAvatarChats(prefs, it) })
-            ToggleItem("In groups", subtitle = "Each sender's picture beside their messages", checked = snap.msgAvatarGroups, onCheckedChange = { snapshot.updateMsgAvatarGroups(prefs, it) })
-            ToggleItem("My picture", subtitle = "Beside your own messages", checked = snap.msgAvatarMine, onCheckedChange = { snapshot.updateMsgAvatarMine(prefs, it) })
-            ToggleItem("First message of a run only", subtitle = "Groups only", checked = snap.msgAvatarFirstOnly, onCheckedChange = { snapshot.updateMsgAvatarFirstOnly(prefs, it) })
-            SliderItem(
-                title = "Size",
-                value = snap.msgAvatarSize.toFloat(),
-                range = Prefs.MSG_AVATAR_SIZE_MIN.toFloat()..Prefs.MSG_AVATAR_SIZE_MAX.toFloat(),
-                steps = (Prefs.MSG_AVATAR_SIZE_MAX - Prefs.MSG_AVATAR_SIZE_MIN) / 4 - 1,
-                divider = false,
-                onValueChange = { snapshot.updateMsgAvatarSize(prefs, it.roundToInt()) },
-                valueLabel = { "${it.roundToInt()} dp" },
-            )
         }
     }
 }
@@ -239,7 +216,7 @@ fun ChatBubbleShapesScreen(nav: NavController, prefs: Prefs) {
     }
 }
 
-/** Open with the selection one row below the top, so it is in view with a row of context above it. */
+/** Open three cells before the selection: a row of context above it at the usual three columns. */
 private fun gridStart(selected: Int): Int = (selected - 3).coerceAtLeast(0)
 
 /** Two-state segmented control for which side the grid is editing. */

@@ -1,4 +1,4 @@
-// Small drawing and observation types the glass surfaces share; none of them touch glass state.
+// Small drawing and observation types the glass surfaces share; only SelectionPane runs the bubble program.
 // Each is a plain framework subclass: an outline provider, a drawable, or a pre-draw position watch.
 package com.wathemer.app.hooks.glass
 

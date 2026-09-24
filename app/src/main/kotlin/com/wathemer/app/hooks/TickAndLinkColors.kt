@@ -18,7 +18,7 @@ private const val TAG = "WaThemer.TickLink"
 // WhatsApp's stock seen-blue palette. An incoming color matching any of these exactly is "seen".
 private val KNOWN_BLUES = setOf(-11289109, -13322255, -10569232, -9910027)
 
-/** Luma heuristic: blue channel dominant + high. Catches custom-theme variants of WA's blue. */
+/** Blue dominant and bright: catches custom-theme variants of WA's blue. */
 private fun isBlueish(color: Int): Boolean {
     val r = (color shr 16) and 0xFF
     val g = (color shr 8) and 0xFF
@@ -81,7 +81,6 @@ object TickAndLinkColors {
                 if (tickUnseen != 0) tickUnseen else null
         }
 
-        // setImageTintList(ColorStateList)
         runCatching {
             XposedHelpers.findAndHookMethod(
                 ImageView::class.java, "setImageTintList", ColorStateList::class.java,

@@ -1,4 +1,4 @@
-// The Home screen page: every override of WhatsApp's home, in sections, under one pinned preview.
+// The Home screen page: the home's overrides, in groups, under one pinned preview.
 package com.wathemer.app.settings.screens
 
 import androidx.compose.runtime.Composable
@@ -87,7 +87,7 @@ fun HomescreenScreen(nav: NavController, prefs: Prefs) {
             PrefsOverrideRow("Inactive label", Prefs.OVR_TAB_INACTIVE_LABEL, prefs.text,       prefs)
         }
         ExpandGroup("Header") {
-            // Home-only rows plus the ContactInfoActivity legacy fallback; the Conversation toolbar lives under Chats.
+            // Not Home-only: home-named pages and ContactInfo take these, drilled-in pages the icons; the Conversation toolbar is under Chats.
             PrefsOverrideRow("Toolbar background", Prefs.OVR_TOOLBAR_BG,    prefs.background, prefs)
             PrefsOverrideRow("Toolbar icons", Prefs.OVR_TOOLBAR_ICONS, prefs.text,       prefs)
             PrefsOverrideRow("WhatsApp logo", Prefs.OVR_WHATSAPP_LOGO, prefs.text,       prefs)

@@ -86,7 +86,6 @@ fun ColorPickerSheet(
     val rule = Palette.RuleStrong
     val fgMuted = Palette.FgMuted
 
-    // HSV state
     val initHsv = remember(initialColor) { argbToHsv(initialColor) }
     var hue by remember { mutableFloatStateOf(initHsv[0]) }
     var sat by remember { mutableFloatStateOf(initHsv[1]) }
@@ -141,7 +140,6 @@ fun ColorPickerSheet(
                 }
             }
 
-            // SV area
             SvArea(
                 hueColor = pureHueColor,
                 sat = sat, value = value,
@@ -159,7 +157,6 @@ fun ColorPickerSheet(
                 AlphaTrack(alpha = alphaFraction, opaqueColor = Color(currentArgb or 0xFF000000.toInt()), onChange = { clearExact(); alphaFraction = it })
             }
 
-            // Recents
             if (recents.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Recent", color = fgMuted, fontSize = 13.sp)
@@ -187,7 +184,6 @@ fun ColorPickerSheet(
                 }
             }
 
-            // HEX + new/old preview
             HexPreviewRow(
                 currentColor = currentColor,
                 oldColor = Color(initialColor),
@@ -506,7 +502,7 @@ private fun HexEntryDialog(
                 Text("#", color = fgMuted, fontSize = 16.sp)
                 BasicTextField(
                     value = text,
-                    // Filter as you type: hex only, max eight, so the field never holds what Set would refuse.
+                    // Filter as you type: hex only, max eight, so a short code is the only thing Set can refuse.
                     onValueChange = { raw ->
                         text = raw.filter { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }
                             .take(8)
@@ -566,7 +562,7 @@ private fun argbToHsv(argb: Int): FloatArray {
 }
 
 private fun hsvToArgb(h: Float, s: Float, v: Float, alpha: Float): Int =
-    // roundToInt, not toInt: 138 becomes 137.99998 and truncation drops the alpha by one.
+    // roundToInt, not toInt: the product lands just under the integer and truncation drops the alpha by one.
     AndroidColor.HSVToColor(
         (alpha * 255).roundToInt().coerceIn(0, 255),
         floatArrayOf(h, s, v),

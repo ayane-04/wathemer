@@ -22,7 +22,7 @@ import java.util.WeakHashMap
 /** Bumped on every wallpaper geometry change; a record whose epoch lags re-derives its placements. */
 @Volatile internal var wallpaperGeometryEpoch = 0
 
-/** Every wallpaper-geometry change makes every placement stale, both consumers at once. */
+/** One epoch for every placement, so no consumer can refresh its own without the others. */
 internal fun markWallpaperGeometryDirty() {
     wallpaperGeometryEpoch++
 }
@@ -150,7 +150,7 @@ private fun buildRecord(src: Bitmap, dimAlpha: Int, cropScale: Float): Wallpaper
     return WallpaperRecord(src, dimAlpha, shared.bubble, shared.bubbleFolded, shared.selection)
 }
 
-/** Deep and light copies; the dim is folded so refraction matches the screen. Guarded: a scale to the same size hands back the source. */
+/** Deep and light copies; the dim is folded so refraction matches the screen. */
 private fun buildShrunk(src: Bitmap, dimAlpha: Int, cropScale: Float): Shrunk? {
     // One copy texel is FROST_SHRINK source px, and each source px is cropScale screen px; the sigma is the panes' in screen px.
     val radius = if (frostSigmaScreen > 0f) {
@@ -159,7 +159,6 @@ private fun buildShrunk(src: Bitmap, dimAlpha: Int, cropScale: Float): Shrunk? {
         FrostDrawable.FROST_RADIUS
     }
     val bubble = FrostDrawable.shrinkOf(src, LINEAR_COPY, radius)
-    // The selected row's copy stays legible: half size with one light pass, not the frost's three.
     val selection = runCatching {
         val small = BitmapBlur.halveTo(src, SELECT_SHRINK)
         val soft = BitmapBlur.boxBlur(small, SELECT_RADIUS, 1)
@@ -191,7 +190,7 @@ private fun buildShrunk(src: Bitmap, dimAlpha: Int, cropScale: Float): Shrunk? {
     return shrunk
 }
 
-/** Shrunk to original to imageMatrix to screen; one definition so the first derive and every re-derive cannot drift. */
+/** Shrunk to original to imageMatrix to screen; one definition for every bitmap the record carries, so their placements cannot drift. */
 private fun wallpaperPlacement(
     img: ImageView,
     src: Bitmap,
@@ -223,7 +222,7 @@ internal fun selectionPlacement(host: View): Matrix? = wallpaperRecordOf(host)?.
 private const val SELECT_SHRINK = 2
 private const val SELECT_RADIUS = 2
 
-/** Popups sample the composited screen. A View.draw copy would miss every RenderNode effect. */
+/** The PixelCopy at a quarter of the window: popups sample the composited screen, and a View.draw copy would miss every RenderNode effect. */
 private const val POPUP_SNAP_COPY = 4
 
 /** Halved once more to an eighth, then three box passes: the screen behind a menu, blurred deeper than the wallpaper copy. */

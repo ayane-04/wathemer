@@ -1,5 +1,5 @@
 // Saved themes: keep what you have, share it, or take someone else's.
-// Every file touch runs off the main thread; a theme carrying a wallpaper is megabytes, not bytes.
+// The heavy file work runs off the main thread; a theme carrying a wallpaper is megabytes, not bytes.
 package com.wathemer.app.settings.screens
 
 import android.content.Context
@@ -67,7 +67,7 @@ import kotlinx.coroutines.withContext
 
 private const val MAX_THEME_NAME = 48
 
-/** The themes list, and everything you can do to one. A theme carries the glass sliders, never whether glass is on. */
+/** The themes list, and everything you can do to one. A theme carries the glass tuning, never whether glass is on. */
 @Composable
 fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
     val context = LocalContext.current
@@ -128,7 +128,6 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
     }
 
     val importLauncher = rememberLauncherForActivityResult(
-        // Any type: most phones have no idea what a .wathemer file is, and a filter would hide it.
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -198,6 +197,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                     label = "Open a theme file",
                     divider = undo != null,
                     onClick = {
+                        // Any type: most phones have no idea what a .wathemer file is, and a filter would hide it.
                         runCatching { importLauncher.launch(arrayOf("*/*")) }
                             .onFailure { onMessage("No file picker on this phone.") }
                     },
@@ -460,7 +460,7 @@ private fun NameDialog(
         ) {
             BasicTextField(
                 value = value,
-                // Filtered at the source: one line, capped where the row can still show it whole.
+                // Filtered at the source: one line, capped at the length the theme format keeps.
                 onValueChange = { raw -> value = raw.filterNot { it == '\n' || it == '\r' }.take(MAX_THEME_NAME) },
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = TextStyle(color = Palette.Fg, fontSize = 16.sp),

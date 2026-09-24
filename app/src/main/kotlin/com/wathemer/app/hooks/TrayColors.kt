@@ -22,6 +22,9 @@ object TrayColors {
     /** Unselected tabs sit at this alpha of the icon colour; the selected one is the colour itself. */
     private const val UNSELECTED_ALPHA = 0x99
 
+    /** The tray's own ids, resolved once, for the ancestry test below. */
+    private var trayIds = IntArray(0)
+
     fun install(app: Application) {
         xprefs.reload()
         if (xprefs.getBoolean(Prefs.KEY_GLASS_ENABLED, false)) {
@@ -38,10 +41,14 @@ object TrayColors {
         }
         val res = app.resources
         val pkg = app.packageName
+        trayIds = listOf(
+            "expressions_view_root", "expressions_tray_view_id",
+            "dynamic_expressions_tray_view_id", "expression_tray_container",
+        ).map { res.waId(it, pkg) }.filter { it != 0 }.toIntArray()
 
         if (body != 0) {
-            // The tray view, the container WhatsApp parks it in, and the pager behind the pages.
-            for (name in listOf("expressions_tray_view_id", "dynamic_expressions_tray_view_id", "expression_tray_container", "browser_content")) {
+            // expressions_view_root is the one that shows: it fills the tray and carries the opaque themed fill.
+            for (name in listOf("expressions_view_root", "expressions_tray_view_id", "dynamic_expressions_tray_view_id", "expression_tray_container", "browser_content")) {
                 val id = res.waId(name, pkg)
                 if (id != 0) ViewThemeDispatcher.onId(id) { v -> keepColour(v, body, "TrayColors/body") }
             }
@@ -55,6 +62,7 @@ object TrayColors {
             for (name in listOf("search_entry_icon", "close_button", "delete_symbol_tb")) {
                 val id = res.waId(name, pkg)
                 if (id != 0) ViewThemeDispatcher.onId(id) { v ->
+                    if (!inTray(v)) return@onId
                     (v as? ImageView)?.imageTintList = csl
                     HookLog.hit("TrayColors/icons")
                 }
@@ -62,6 +70,7 @@ object TrayColors {
             // The search button is a frame around an unnamed icon.
             val searchId = res.waId("search_button", pkg)
             if (searchId != 0) ViewThemeDispatcher.onId(searchId) { v ->
+                if (!inTray(v)) return@onId
                 val g = v as? ViewGroup ?: return@onId
                 for (i in 0 until g.childCount) (g.getChildAt(i) as? ImageView)?.imageTintList = csl
                 HookLog.hit("TrayColors/icons")
@@ -72,13 +81,24 @@ object TrayColors {
             )
             for (name in listOf("emojis", "rewrite", "gifs", "stickers")) {
                 val id = res.waId(name, pkg)
-                if (id != 0) ViewThemeDispatcher.onId(id) { v -> tintTab(v, tabTint) }
+                if (id != 0) ViewThemeDispatcher.onId(id) { v -> if (inTray(v)) tintTab(v, tabTint) }
             }
         }
         XposedBridge.log("$TAG: armed body=%08x header=%08x icons=%08x".format(body, header, icons))
     }
 
-    /** Paint now and on every frame the view is attached, since WhatsApp repaints the fill as the tray shows. */
+    /** WhatsApp shares these icon ids with screens all over the app, so the id says nothing and the ancestry does. */
+    private fun inTray(v: View): Boolean {
+        var p: View? = v
+        var hops = 0
+        while (p != null && hops++ < 12) {
+            if (p.id != View.NO_ID && p.id in trayIds) return true
+            p = p.parent as? View
+        }
+        return false
+    }
+
+    /** Compares the colour, not the drawable: setBackgroundColor recolours an existing ColorDrawable in place. */
     private fun keepColour(v: View, color: Int, ledger: String) {
         val apply = {
             val bg = v.background
@@ -91,7 +111,7 @@ object TrayColors {
         val vto = v.viewTreeObserver
         val pre = ViewTreeObserver.OnPreDrawListener { apply(); true }
         vto.addOnPreDrawListener(pre)
-        // The observer dies with the detach, so the listener goes with it and the next attach registers afresh.
+        // Off on detach, since the window's observer can outlive this view; the next attach registers afresh.
         v.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view: View) = Unit
             override fun onViewDetachedFromWindow(view: View) {

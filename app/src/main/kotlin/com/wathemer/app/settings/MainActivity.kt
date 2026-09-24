@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
             if (it.imported > 0) Log.i("WaThemer.Prefs", "carried over ${it.imported} settings from ${it.source}")
         }
         importWarn = carried?.warn == true
-        // Settings survive an uninstall (framework store, not package data); reconcile before the UI reads anything.
+        // Reconcile before the UI reads anything: a store a prior install left behind must not leak into this one.
         prefs.reconcileFreshInstall()?.let { r ->
             if (r.deferred) {
                 Log.i(
@@ -155,7 +155,7 @@ class MainActivity : ComponentActivity() {
         takeChatRequest(intent)
     }
 
-    /** Reads and consumes the chat extras. Consumed, or a rotation replays them; aged out, or recents re-delivers a task root intent. */
+    /** Reads and consumes the chat extras; aged out, or recents re-delivers a task root intent. */
     private fun takeChatRequest(intent: Intent?) {
         val jid = intent?.getStringExtra(ChatWallpaperLibrary.EXTRA_JID) ?: return
         val name = intent.getStringExtra(ChatWallpaperLibrary.EXTRA_NAME)
@@ -202,7 +202,6 @@ private var importWarn = false
 
 @Composable
 private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
-    // Padded here, not on the banner: the screens' Scaffolds subtract an inset an ancestor took, so the banner clears the clock and the title follows it.
     val banner = !prefs.moduleStoreActive || importWarn
     // A hand-off from WhatsApp replaces the stack; landing on top of wherever the user last was leaves back walking through it.
     val pending by pendingChatRequest
@@ -212,12 +211,13 @@ private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Uni
             nav.replaceAll(listOf(Screen.CategoryList, Screen.Wallpaper, Screen.ChatWallpapers))
         }
     }
+    // Padded here, not on the banner: the screens' Scaffolds subtract an inset an ancestor took, so the banner clears the clock and the title follows it.
     Column(modifier = Modifier.fillMaxSize().then(if (banner) Modifier.statusBarsPadding() else Modifier)) {
         // Standing banner, never a toast: with the module inactive every control silently changes nothing.
         if (!prefs.moduleStoreActive) {
             Text(
                 text = "WaThemer is not active in your Xposed manager, so nothing here reaches WhatsApp. " +
-                    "Enable it, add WhatsApp to its scope, then reopen this app.",
+                    "Enable it, add WhatsApp or WhatsApp Business to its scope, then reopen this app.",
                 color = Color(0xFF1A1207),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
@@ -226,7 +226,7 @@ private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Uni
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
         }
-        // The one case the store starts over: updated past the export build, or the snapshot failed to read.
+        // The one case the store starts over: an update skipped the export build, or the snapshot could not be read or written.
         if (importWarn && prefs.moduleStoreActive) {
             Text(
                 text = "Your settings could not be carried over. If this replaced version 0.9.4 or " +

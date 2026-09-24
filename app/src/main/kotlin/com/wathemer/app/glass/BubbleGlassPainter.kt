@@ -22,6 +22,9 @@ class BubbleGlassPainter(private val density: Float) {
     private val fused: RuntimeShader? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) GlassShader.newBubbleShader() else null
 
+    /** The pack's outline is only the glass edge where that program runs; without it the bubble keeps the rounded rect. */
+    val shapesMasks: Boolean get() = fused != null
+
     // Compiled only when a bubble has no bitmap to transmit or the fused program failed.
     private val light: RuntimeShader? by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) GlassShader.newLightShader() else null
@@ -67,7 +70,7 @@ class BubbleGlassPainter(private val density: Float) {
     private var uniformFade = 0f
     private var uniformFadeLen = 0f
     private var uniformDim = -1f
-    /** The radii the shader last got, clamped to the half size exactly as the clip path always was. */
+    /** The radii the shader last got, clamped to half the size. */
     private val lastRadii = FloatArray(4)
     private val curRadii = FloatArray(4)
     private val pathRadii = FloatArray(8)
@@ -80,7 +83,7 @@ class BubbleGlassPainter(private val density: Float) {
     /** The per-draw geometry the uniforms derive from; the programs themselves are pushed on demand. */
     private fun prepareParams(params: GlassParams, w: Float, h: Float, tint: Int) {
         params.tintColor = tint
-        // A bubble's params are built by the hook, which has no view to ask; the painter does.
+        // Density is the surface's own, so the painter's wins over whatever the params were built with.
         params.density = density
         // Same rule as GlassView.deriveBevel: a fixed dp band is a rim on small surfaces, a hairline on large.
         val frac = params.bevelFraction
@@ -156,7 +159,7 @@ class BubbleGlassPainter(private val density: Float) {
         val fadeOffset = if (fadeLen > 0f) fadeLineScreenY - screenY else 0f
         val dimNow = dim.coerceIn(0f, 1f)
         val sharpDimNow = sharpDim.coerceIn(0f, 1f)
-        // No source means no rim for this draw; the copy stands in as the child and the detail is pushed as zero.
+        // No source means no rim for this draw, so the detail is pushed as zero.
         val hasSharp = sharp != null && sharpPlace != null && sharp.width > 0 && sharp.height > 0 && !sharp.isRecycled
         val detailNow = if (hasSharp) params.detail else 0f
         // The field is a fused-path input; the two-program path keeps the rounded rect whatever the pack says.
@@ -236,7 +239,7 @@ class BubbleGlassPainter(private val density: Float) {
             return
         }
 
-        // Two-program path: a bubble with nothing to transmit, or a device where the fused program failed.
+        // Two-program path: a bubble with nothing to transmit or no fused program; below Tiramisu neither program exists and the copy is drawn plain.
         val ls = light
         val rs = refract
         if (ls != null && !lightPushed) {
@@ -301,7 +304,7 @@ class BubbleGlassPainter(private val density: Float) {
             clip.inset(h, h)
             // Lit at both ends of the light axis and clear across the middle, as a pane's own stroke is.
             if (forceRim) aimRimHighlight(clip, params.rimStrokeAngle, rimColor)
-            // Uniform corners on purpose: this path runs below Tiramisu, where merging is not worth a path stroke.
+            // Uniform corners on purpose: merging is not worth a path stroke here.
             canvas.drawRoundRect(clip, r - h, r - h, tintPaint)
             clip.inset(-h, -h)
             tintPaint.shader = null

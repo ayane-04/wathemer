@@ -21,8 +21,7 @@ internal object GlassNavDroplet {
     /** Set at install; off leaves the indicator on its frost stamp. */
     var enabled = false
 
-    // One spring per edge, the leading one stiffer: the drop leaves at once and its tail catches up, which is
-    // the stretch itself rather than a width scaled by speed. Damping just under one keeps a hint of rebound.
+    // One spring per edge, the leading one stiffer, so the stretch is the tail catching up; damping under one leaves a hint of rebound.
     private const val LEAD_STIFFNESS = 1100f
 
     private const val TRAIL_STIFFNESS = 360f
@@ -56,7 +55,7 @@ internal object GlassNavDroplet {
     private var paneRef: WeakReference<GlassBubblePane>? = null
     private val at = IntArray(2)
 
-    // The two edges, each with its own velocity; NaN until the first frame places them.
+    // The two edges, each with its own velocity; edgeL is NaN until the first frame places them.
     private var edgeL = Float.NaN
     private var edgeR = 0f
     private var velL = 0f
@@ -235,7 +234,7 @@ internal object GlassNavDroplet {
             edgeR = tr
             velR = 0f
         }
-        // Never narrower than the tab it is on: the two edges crossing would invert the rect.
+        // Never under half its own width: the two edges crossing would invert the rect.
         if (edgeR - edgeL < w * 0.5f) {
             val mid = (edgeL + edgeR) * 0.5f
             edgeL = mid - w * 0.25f

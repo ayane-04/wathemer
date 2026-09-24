@@ -36,7 +36,7 @@ private var pickerListRef: WeakReference<ListView>? = null
 
 private val pickerAt = IntArray(2)
 
-/** Two cards from one pane over one ListView; the toolbar pill is its own pane, one corner radius per pane. */
+/** Up to three cards from one pane over one ListView, and the band behind the header; the pill is the search bar's own capsule. */
 internal fun pickerGlass(root: ViewGroup) {
     // A MATCH_PARENT pane may only go in a parent whose own size does not depend on its children; content is that parent.
     val host = root.rootView?.findViewById<View>(android.R.id.content) as? FrameLayout
@@ -62,7 +62,7 @@ internal fun pickerGlass(root: ViewGroup) {
         root.resources.waId("toolbar", root.context.packageName),
     )
 
-    // Two panes: a GlassBubblePane carries one corner radius for everything it stamps.
+    // A GlassBubblePane carries one corner radius for everything it stamps, so the radius is the parameter.
     fun pane(radiusDp: Float, collect: (GlassBubblePane, RectList) -> Unit, what: String) {
         val g = GlassBubblePane(host.context)
         g.params = GlassParams(d).apply {
@@ -119,7 +119,7 @@ private var pickerPhotoId = 0
 
 private var pickerNameId = 0
 
-/** Kind, height and the label it was classified at; two row types share a height, so height alone let a recycled view keep the wrong kind. The label is a String compared by content: a Spannable would hold its row. */
+/** Keyed by height and label, as two row types share a height; the label is a String, since a Spannable would hold its row. */
 private class PickerRowKind(val kind: Int, val height: Int, val name: String?)
 
 private val pickerRowKinds = WeakHashMap<View, PickerRowKind>()
@@ -222,7 +222,7 @@ private fun collectPickerCards(out: RectList) {
     list.getLocationOnScreen(pickerAt)
     val top = (pickerAt[1] + clipTop).toFloat()
     val bottom = (pickerAt[1] + list.height).toFloat()
-    // Unrolled: a listOf of pairs boxes four floats per pre-draw frame on this path.
+    // Unrolled: a listOf of pairs would box every bound per pre-draw frame on this path.
     fun emit(t0: Float, b0: Float) {
         if (b0 <= t0) return
         // Inset first, clamp second: the gap belongs between the groups.
@@ -237,7 +237,7 @@ private fun collectPickerCards(out: RectList) {
     emit(fT, fB)
 }
 
-/** The New rows' discs: WhatsApp bakes the accent circle and the white glyph into one bitmap, so there is no fill to clear; the glyph is lifted out and the circle behind it becomes glass. */
+/** The New rows' discs: the accent circle is the icon's background, baked into its bitmap, or absent, so the glyph is lifted out white and the icon's box becomes a glass disc. */
 private fun glassActionDisc(row: View) {
     if (row.getTag(pickerDiscTag) != null) return
     val icon = firstImageIn(row, 0) ?: return
@@ -262,7 +262,7 @@ private fun firstImageIn(v: View, depth: Int): ImageView? {
     return null
 }
 
-/** The glyph, white, whatever the icon is made of; the mask is read from the bitmap's own opacity, never assumed. */
+/** A bitmap icon's glyph as a white mask, chosen from the bitmap's own opacity, never assumed; any other drawable comes back unchanged. */
 private fun glyphOf(res: android.content.res.Resources, d: Drawable?): Drawable? {
     val src = (d as? BitmapDrawable)?.bitmap ?: return d
     return runCatching {
@@ -458,11 +458,9 @@ private fun collectMeTabCard(out: RectList) {
     val side = c.dp(CARD_INSET_DP)
     val gap = c.dp(CARD_GAP_DP)
     c.getLocationOnScreen(meTabAt)
-    // Clamped under the header. The header lives INSIDE this page's scroller and its motion scene
-    // pins it while the block collapses behind it, so an unclamped rect rides up over the capsule.
+    // Clamped under the header: its motion scene pins it while the block collapses, so an unclamped rect rides over the capsule.
     var top = meTabAt[1] + gap
-    // Re-resolved whenever the cache is dead or belongs to another window: this page is rebuilt on
-    // re-entry, and a detached header reads isShown false, so the clamp silently stops running.
+    // Re-resolved when the cache is dead or from another window: a detached header reads isShown false and the clamp stops silently.
     var header = meTabHeaderRef?.get()
     if (header == null || !header.isAttachedToWindow || header.rootView !== c.rootView) {
         header = c.rootView?.findViewById(
@@ -476,8 +474,8 @@ private fun collectMeTabCard(out: RectList) {
     }
     val bottom = (meTabAt[1] + c.height).toFloat()
 
-    // The clip FIRST, never behind an early return: a skipped frame leaves the last value
-    // standing. A later sibling than the header, so it paints over it once that fill is gone.
+    // The clip FIRST, never behind an early return: a skipped frame leaves the last value standing.
+    // A later sibling than the header, so it paints over it once that fill is gone.
     val cl = side.toInt()
     val ct = (top - meTabAt[1]).toInt().coerceIn(0, c.height)
     val cr = c.width - side.toInt()
@@ -557,7 +555,7 @@ internal fun syncSearchViewGlass(field: View) {
         wdsBarPanes[host] = WeakReference(glass)
         XposedBridge.log("[$TAG] search view capsule inserted")
     }
-    // Only now, with a pane behind it, is the fill safe to take; two unlike families share this id.
+    // Only now, with a pane behind it, is the fill safe to take.
     clearSearchViewFills(field)
     glass.params.tintColor =
         glassTint(if (headerBandBehind(host)) pickerPillAlpha() else TINT_ALPHA)
@@ -582,7 +580,7 @@ internal fun syncSearchViewGlass(field: View) {
     }
 }
 
-/** The field's own fill and the four its family paints inside it; taking them needs a pane behind the bar. */
+/** The field's own fill and the inner fills of either family; taking them needs a pane behind the bar. */
 private fun clearSearchViewFills(field: View) {
     val res = field.resources
     val pkg = field.context.packageName
@@ -618,8 +616,7 @@ internal fun syncWdsSearchBar(bar: FrameLayout) {
     // The field wins: while it is up the toolbar is still a child and still measures.
     val owner = field ?: toolbar ?: return
     if (owner.parent !== bar) return
-    // Clear both: the search field's fill is on backgroundHolder, a CHILD, so clearing the field
-    // itself clears nothing and its rounded rect stays over the glass.
+    // Clear both: the field's fill is on backgroundHolder, a child, so clearing the field alone leaves its rounded rect.
     clearBg(owner, "wds search bar")
     val holderId = res.waId("backgroundHolder", pkg)
     (if (holderId != 0) owner.findViewById<View>(holderId) else null)

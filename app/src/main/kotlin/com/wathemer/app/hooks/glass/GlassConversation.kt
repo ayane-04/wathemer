@@ -1,5 +1,5 @@
 // The conversation screen's chrome: the header capsule and band, the compose pill, and the list
-// padding that lets rows scroll behind both. Geometry is re-derived per layout, never stored.
+// padding that lets rows scroll behind both. Geometry is re-derived per layout, never snapshotted at attach.
 package com.wathemer.app.hooks.glass
 
 import android.graphics.Rect
@@ -44,7 +44,7 @@ private val convPanes = WeakHashMap<View, WeakReference<GlassView>>()
 
 private val convRect = Rect()
 
-/** WhatsApp packs the toolbar targets edge to edge; trimming the diameter is what puts air between the pills. */
+/** Trimmed off the Back button's band before the capsule is grown past it. */
 private const val CONV_PILL_TRIM_DP = 4f
 
 /** Deliberately more than fits: both clamps engage and the capsule fills the header band, no slivers peek around it. */
@@ -72,7 +72,7 @@ internal fun floatConvToolbar(holder: ViewGroup) {
             v.layoutParams = lp
             if (v.translationZ < 1f) v.translationZ = 1f
             XposedBridge.log("[$TAG] conversation toolbar floated (h=$h, bottomMargin=-$h)")
-            // The banner may have attached before the height existed, and it offsets by exactly this.
+            // The banner may have attached before the height existed; its offset derives from it.
             convBannerRef?.get()?.let { b -> runCatching { syncConvBanner(b) } }
             runCatching { syncConvToolbar() }
         }
@@ -92,13 +92,13 @@ internal fun clearConvBanner(banner: ViewGroup) {
     }
 }
 
-/** Offsets the strip by the toolbar's height, and takes it back when the strip empties. */
+/** Offsets the strip below the header capsule, and takes it back when the strip empties. */
 private fun syncConvBanner(banner: ViewGroup) {
     val lp = banner.layoutParams as? ViewGroup.MarginLayoutParams ?: return
-    // An empty strip must keep a zero margin or it opens a gap above the first message.
     val gap = (CONV_BANNER_GAP_DP * banner.resources.displayMetrics.density).toInt()
-    // Off the capsule's own bottom edge; the holder is taller than the capsule and would open a margin.
+    // Off the capsule's own bottom edge, not the holder's: the strip tracks the capsule even where the two differ.
     val below = if (convCapsuleBottom > 0) convCapsuleBottom + gap else (convHolderRef?.get()?.height ?: 0)
+    // An empty strip must keep a zero margin or it opens a gap above the first message.
     val want = if (banner.height <= 0) 0 else below
     syncConvBannerPill(banner)
     if (lp.topMargin == want) return
@@ -124,8 +124,7 @@ private fun syncConvBannerPill(banner: ViewGroup) {
     val inset = (CONV_PILL_INSET_DP * banner.resources.displayMetrics.density).toInt()
     val r = banner.width - inset
     if (r - inset <= 0) return
-    // The list, never the coordinator: the strip is the coordinator's own child and would capture itself.
-    // No fallback while the list is unknown: an underlay-only pill re-points once it resolves, a refused ancestor never does.
+    // The list host, never the coordinator (the strip is its child), and no fallback: a refused ancestor never re-points.
     pill(banner, strip, inset, 0, r, banner.height, source = convListHostRef?.get(), coordinatorFallback = false)
 }
 
@@ -141,7 +140,7 @@ private fun clearHairlines(root: ViewGroup, minW: Int, maxH: Int, depth: Int) {
     }
 }
 
-/** RelativeLayout here, so the negative margin goes on the list host; the footer draws later and needs no lift. */
+/** RelativeLayout here, so the negative margin goes on the list host; the footer draws later and needs no translationZ. */
 internal fun floatConvFooter(footer: ViewGroup) {
     if (footer.getTag(convFloatTag) != null) return
     val parent = footer.parent as? ViewGroup ?: return
@@ -185,7 +184,7 @@ private var convRowFadeLen = 0f
 
 private var convBandRef: WeakReference<GlassView>? = null
 
-/** The list's own parent: a plain FrameLayout, and the fade pane's host. */
+/** The list's own parent, a plain FrameLayout: the pinned strip's backdrop and the row fade's reference edge. */
 private var convListHostRef: WeakReference<ViewGroup>? = null
 
 private fun convPillAlpha(): Int =
@@ -195,7 +194,7 @@ private fun convPillAlpha(): Int =
         TINT_ALPHA
     }
 
-/** Full-width band fading below the toolbar pill. Wallpaper only: a backdrop would flicker as messages scroll under it. */
+/** Full-width band behind the toolbar pill, cut at its bottom. Wallpaper only: a backdrop would flicker as messages scroll under it. */
 internal fun syncConvBand(holder: ViewGroup) {
     if (holder.height <= 0) return
     val under = wallpaperUnderlay(holder)
@@ -206,7 +205,7 @@ internal fun syncConvBand(holder: ViewGroup) {
     if (abrId == 0) return
     val abr = holder.rootView?.findViewById<View>(abrId) as? FrameLayout ?: return
 
-    // Solid to the pill's bottom, not the holder's; only the capsule pane knows where the pill ends.
+    // Solid to the pill's bottom, not the holder's.
     val at = IntArray(2)
     val abrAt = IntArray(2)
     holder.getLocationOnScreen(at)
@@ -224,8 +223,7 @@ internal fun syncConvBand(holder: ViewGroup) {
     }
     val solid = (at[1] - abrAt[1]) + pillBottom
     if (solid <= 0) return
-    // One pane only: two abutting panes always show their join, each blur kernel being clipped to its own capture.
-    // Hard stop on the pill's bottom edge; the SDF is expanded past it so the cut has no rim of its own.
+    // One pane, cut hard at the pill's bottom: abutting panes show their join, and the expanded SDF gives the cut no rim.
     var band = convBandRef?.get()
     if (band == null || band.parent !== abr) {
         band = GlassView(abr.context).apply {
@@ -354,8 +352,7 @@ internal fun syncMentionPane(host: FrameLayout) {
 /** Zero every header pane but the one taking the capsule now, or two pills stack. */
 private fun collapseHeaderPanes(holder: ViewGroup, keep: View) {
     val keepPane = convPanes[keep]?.get()
-    // The holder's own children, never the map: the map is keyed weakly by owner, so an owner WhatsApp
-    // removes takes the only handle on its pane with it and the pane draws on at the size it had.
+    // The holder's own children, never the weak map: an owner WhatsApp removes takes its pane's only handle with it.
     for (i in 0 until holder.childCount) {
         val g = holder.getChildAt(i) as? GlassView ?: continue
         if (g === keepPane) continue
@@ -368,20 +365,18 @@ private fun collapseHeaderPanes(holder: ViewGroup, keep: View) {
     }
 }
 
-/** One capsule spanning the toolbar; every rect is re-derived, never stored, custom_view resizes when the menu inflates. */
+/** One capsule spanning the toolbar, re-derived on every layout. */
 internal fun syncConvToolbar() {
     val holder = convHolderRef?.get() ?: return
     if (holder.width <= 0 || holder.height <= 0) return
-    // In search the holder swaps in its own bar; the capsule and the band's bottom edge follow it.
-    // Looked up before the toolbar, which WhatsApp removes from this holder while search is open.
+    // WhatsApp takes the toolbar out of this holder in search, so the search bar is looked up first.
     val barId = holder.resources.waId("search_view_toolbar", holder.context.packageName)
     val searchBar = (if (barId != 0) holder.findViewById<View>(barId) else null)
         ?.takeIf { it.isShown && it.width > 0 && it.height > 0 }
     if (searchBar != null) {
         collapseHeaderPanes(holder, searchBar)
         clearBg(searchBar, "conversation search bar")
-        // The holder's own box, exactly as the toolbar branch takes it: search gets the header's treatment,
-        // one capsule spanning the chrome with the band ending on its bottom edge.
+        // The holder's own box, as the toolbar branch takes it, so search reads as the same header.
         val searchInset = (CONV_PILL_INSET_DP * holder.resources.displayMetrics.density).toInt()
         convCapsuleBottom = holder.height
         pill(holder, searchBar, searchInset, 0, holder.width - searchInset, holder.height)
@@ -397,9 +392,9 @@ internal fun syncConvToolbar() {
     if (!toolbar.isShown) return
     collapseHeaderPanes(holder, toolbar)
 
-    // WhatsApp's own bar fill has to go, or the pills sit on a slab instead of on the wallpaper.
+    // WhatsApp's own bar fill has to go, or it covers the capsule and the wallpaper behind it.
     clearBg(toolbar, "conversation toolbar")
-    // The divider line is WDSToolbar.onDraw's, handled by ensureToolbarDividerHook; cleared per-id, never blanket.
+    // The foreground goes too, never a blanket kill; the divider is WDSToolbar.onDraw's, taken by ensureToolbarDividerHook via forcedBg.
     if (toolbar.foreground != null) {
         logOnce("conversation toolbar foreground cleared: ${toolbar.foreground?.javaClass?.name}")
         toolbar.foreground = null
@@ -475,7 +470,7 @@ private fun padConvList(listHost: ViewGroup, footerHeight: Int) {
     val d = list.resources.displayMetrics.density
     val gap = (CONV_CHROME_GAP_DP * d).toInt()
     val holder = convHolderRef?.get()
-    // Unchanged by the banner: the list host already starts below its height, and its margin is this same toolbar.
+    // Unchanged by the banner: the list host already starts below its height, and its margin stays under this padding.
     val top = (holder?.height ?: 0) + gap
     val bottom = footerHeight + gap
     if (list.paddingTop == top && list.paddingBottom == bottom) return
@@ -549,7 +544,7 @@ private fun containsList(v: View, depth: Int): Boolean {
     return false
 }
 
-/** Keyed by the element, not by index: the ActionMenuView's children change when the menu inflates. */
+/** Keyed by the owner view: the toolbar, the search bar and the pinned strip each keep their own pane. */
 internal fun pill(
     holder: ViewGroup, owner: View, l: Int, t: Int, r: Int, b: Int,
     source: View? = null, coordinatorFallback: Boolean = true,
@@ -616,7 +611,7 @@ internal fun syncConvFooter() {
     val inputId = res.waId("input_layout", pkg)
     val sendId = res.waId("conversation_entry_action_button", pkg)
     // ── No compose row where you cannot compose ────────────────────────────────────
-    // These replace the compose row while input_layout stays VISIBLE; collapse by size, syncPaneVisibility owns visibility.
+    // These replace the compose row while input_layout stays VISIBLE; collapse by size, which the next sizing pass undoes.
     for (n in listOf(
         "read_only_chat_info_container",
         "composer_blocker",
@@ -652,8 +647,7 @@ internal fun syncConvFooter() {
         return
     }
 
-    // Only owners this pass will NOT re-size. Sweeping the live pair too collapsed a pane that
-    // composePane sized again below it, which is two layout passes per frame rather than a rebuild.
+    // Only owners this pass will not re-size: collapsing the live pair costs two layout passes per frame.
     if (convPanes.isNotEmpty()) {
         // parent === footer only: the header capsule shares this map and belongs to syncConvToolbar.
         val gone = ArrayList<View>()
@@ -730,7 +724,7 @@ private fun goneAbove(v: View?, stop: View): Boolean {
     return false
 }
 
-/** Zero-size, never hide: syncPaneVisibility is the only visibility writer. Scoped by parent, the map also holds the header capsule. */
+/** Zero-size, never hide: composePane re-sizes a zeroed pane and nothing restores a hidden one; the map also holds the header capsule. */
 private fun collapseConvPanes(footer: ViewGroup) {
     for (ref in convPanes.values) {
         val glass = ref.get() ?: continue

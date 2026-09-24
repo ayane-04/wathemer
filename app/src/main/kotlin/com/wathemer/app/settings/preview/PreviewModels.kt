@@ -12,11 +12,11 @@ enum class HomeFocus {
     Fab,
 }
 
-/** 1f for the focused element and when nothing is focused; 0.30f dims the rest. */
+/** Always 1f in practice, every caller passes None; the dimming is kept, never switched on. */
 fun HomeFocus.alphaFor(element: HomeFocus): Float =
     if (this == HomeFocus.None || this == element) 1f else 0.30f
 
-/** Return Black if the color is light, White if dark, for legible text/icons on accent. */
+/** Near-black on a light colour, white on a dark one, for legible text and icons. */
 internal fun onColorFor(argb: Int): Color =
     if (luminance(argb) > 0.55f) Color(0xFF101010) else Color.White
 
@@ -46,11 +46,10 @@ internal fun elevateInt(argb: Int, amount: Float = 0.06f): Int =
         )
     }
 
-/** Effective preview colours: each field is the user's override when non-zero, else the global token. */
+/** Resolved preview values, built by ThemeSnapshot.toTokens: each colour is its override when set, else the fallback there. */
 data class Tokens(
     // Globals
     val background: Int,
-    val primary: Int,
     val text: Int,
     // Chatlist
     val chatlistBg: Int,
@@ -81,9 +80,9 @@ data class Tokens(
     // Unread badges
     val unreadAccent: Int,
     val unreadCountText: Int,
-    // Status bar. Cascade mirrors SystemBars.resolveStatusColor: explicit, home toolbar bg, primary.
+    // Status bar
     val statusBarBg: Int,
-    /** False -> the strip is not drawn at all, matching a hook that installs nothing. */
+    /** False -> no strip, as the hook paints none while its toggle is off. */
     val systemBarsEnabled: Boolean,
     /** True when a wallpaper is set; SystemBars.shouldTheme then draws no strip whatever the toggle says. */
     val wallpaperOwnsBars: Boolean,

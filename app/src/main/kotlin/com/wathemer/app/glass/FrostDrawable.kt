@@ -71,8 +71,8 @@ class FrostDrawable(
         val rec = source?.invoke(view)
         val small = rec?.bubble
         // Matrix, not an integer src rect: the bitmap is not screen-sized and rounding jumped layouts.
-        // Screen, not window, position: in a dialog getLocationInWindow sampled well below itself.
         if (small != null) {
+            // Screen, not window, position: in a dialog getLocationInWindow sampled well below itself.
             view.getLocationOnScreen(loc)
             val place = rec.bubblePlacement
             if (place != null) {
@@ -156,7 +156,7 @@ class FrostDrawable(
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
     companion object {
-        /** The copy's size: a quarter of the wallpaper, so the screen stretches it four times at most. */
+        /** The copy's size: a quarter of the wallpaper, one copy texel to four wallpaper px. */
         const val FROST_SHRINK = 4
 
         /** Three box passes of this radius at a quarter size: the fixed frost, used when the copies do not follow the slider. */

@@ -26,7 +26,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** A pane of glass, a blurred and tinted copy of [backdrop] behind its own children: point it at a sibling drawn before it, an ancestor is refused at capture time, and on Tiramisu and up the refraction pass runs too. */
+/** A pane of glass, a blurred and tinted copy of [backdrop] behind its own children: point it at a sibling drawn before it; on Tiramisu and up the refraction pass runs too. */
 class GlassView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -91,7 +91,7 @@ class GlassView @JvmOverloads constructor(
 
     private var lastCaptureMs = 0L
 
-    /** Scratch buffer for getLocationOnScreen, so the move check allocates nothing per frame. */
+    /** This pane's screen position from the last pre-draw; the move check and drawClarity's placement both read it. */
     private val screenLoc = IntArray(2)
 
     /** Last screen position we captured at. See the move check in [preDrawListener]. */
@@ -103,7 +103,7 @@ class GlassView @JvmOverloads constructor(
 
     private var lastActivityMs = 0L
 
-    // Scroll only: a global-layout listener never lets the throttle engage; the heartbeat covers the rest.
+    // Scroll only: a global-layout listener never lets the throttle engage.
     private val activityListener = ViewTreeObserver.OnScrollChangedListener {
         val now = SystemClock.uptimeMillis()
         lastActivityMs = now
@@ -142,8 +142,7 @@ class GlassView @JvmOverloads constructor(
         viewTreeObserver.addOnScrollChangedListener(activityListener)
         // Attach counts as activity, so the first frames are live rather than a heartbeat late.
         lastActivityMs = SystemClock.uptimeMillis()
-        // Assemble on first appearance. Skipped for a pane handed a materialize before attach, which is a
-        // scroll-driven one, and for a pane attached hidden, which would spend its assemble unseen.
+        // Once per pane; a pane handed a materialize before attach has its own driver, and one attached hidden would assemble unseen.
         if (assembleOnAppear && !appeared && materialize >= 1f && isShown) {
             appeared = true
             materializeIn(APPEAR_MS)
@@ -188,7 +187,7 @@ class GlassView @JvmOverloads constructor(
             val lin = (1f - (now - lastScrollMs).toFloat() / decay.toFloat()).coerceIn(0f, 1f)
             lin * lin
         }
-        // A threshold; exact equality would re-push 13 uniforms every frame forever.
+        // A threshold; exact equality would re-push every light uniform on every frame of the decay.
         if (abs(target - motion) < 0.01f) return
         motion = target
         invalidateLight()
@@ -203,7 +202,7 @@ class GlassView @JvmOverloads constructor(
     /** Armed by [materializeIn]; the lighting rig swings home while the material assembles. */
     private var appearSweep = false
 
-    /** Exposed so the two halves of a fade handshake test the same variable. */
+    /** Exposed so a restore can test the material a hide fade dissolved. */
     val materialized: Float get() = materialize
 
     fun setMaterialize(p: Float) {
@@ -245,7 +244,7 @@ class GlassView @JvmOverloads constructor(
         lastActivityMs = SystemClock.uptimeMillis()
     }
 
-    /** Appear by assembling rather than fading: Apple names alpha-fade as the wrong answer. */
+    /** Appear by assembling rather than fading. */
     fun materializeIn(durationMs: Long) {
         appearSweep = true
         setMaterialize(0f)
@@ -430,16 +429,14 @@ class GlassView @JvmOverloads constructor(
     private fun drawLight(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        // Ceil plus a little slack: a fractional edge leaves an unshaded boundary row.
-        // The rects abut exactly; both are translucent, so any overlap double-tints its row.
+        // Ceiled, with slack, so the translucent rects abut exactly: a fractional edge leaves a row bare and an overlap tints one twice.
         val band = ceil(GlassShader.effectiveBevel(params, width, height) + 2f)
 
         // A fading or expanded surface cannot use the shortcut: a flat rect cannot ramp its alpha.
         val fading = params.fadeTopLenPx > 0f ||
             params.edgeExpandLeft > 0f || params.edgeExpandTop > 0f ||
             params.edgeExpandRight > 0f || params.edgeExpandBottom > 0f
-        // Skip the split only when the bands would leave almost no plateau, which only a pane a few pixels tall does.
-        // A pressed surface runs the program everywhere too: the pool crosses the plateau, which the flat rect cannot show.
+        // A pressed pane's pool crosses the plateau and a pane a few pixels tall has almost none, so both run the program everywhere.
         if (fading || pressAmp > 0f || band * 2f + 4f >= minOf(w, h)) {
             canvas.drawRect(0f, 0f, w, h, lightPaint)
             return
@@ -544,7 +541,7 @@ class GlassView @JvmOverloads constructor(
     companion object {
         /** Half a turn (pi): the arcs start opposite their homes and sweep in as the rim strikes. */
         private const val SWEEP_RADIANS = 3.1415927f
-        /** The light added at the touch point; chosen by eye. */
+        /** The light added at the pool's centre; chosen by eye. */
         private const val PRESS_AMP = 0.12f
         private const val PRESS_IN_MS = 80L
         private const val PRESS_OUT_MS = 240L
@@ -554,7 +551,6 @@ class GlassView @JvmOverloads constructor(
         /** Surfaces assemble their lens as they appear rather than arriving whole; set at install. */
         @JvmStatic var assembleOnAppear: Boolean = false
 
-        /** How long a surface takes to assemble. */
         const val APPEAR_MS = 220L
 
         /** A view's window wallpaper record, for the rim pass; the hook sets it once, so the engine never imports the hook. */

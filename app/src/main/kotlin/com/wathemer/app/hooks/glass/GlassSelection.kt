@@ -87,7 +87,7 @@ internal fun installQuoteMaskKill(frameId: Int) {
     logOnce("quote corner-mask kill armed")
 }
 
-/** MSG_SELECT_ALPHA survives only for the no-pane fallback, which reshapes WhatsApp's own fill in place. */
+/** Only the no-pane fallback uses this; it reshapes WhatsApp's own fill in place. */
 private const val MSG_SELECT_ALPHA = 62
 
 private const val MSG_SELECT_RIM_ALPHA = 70
@@ -156,7 +156,7 @@ internal fun installMessageSelectionShape() {
                     if (b - t < 1f) return
                     val canvas = p.thisObject as? Canvas ?: return
 
-                    // The fill is the whole signal: WhatsApp draws it from the row's own onDraw, nothing else carries the state.
+                    // The fill is the whole signal: WhatsApp paints it in an onDraw inside the row, nothing else carries the state.
                     msgSelDrewThisRecord = true
                     if (msgSelectPaneActive()) {
                         // Nothing position-dependent may be recorded into a row (see GlassBubblePane); just drop the fill.
@@ -254,7 +254,7 @@ internal fun ensureMsgSelectPane(listHost: ViewGroup, list: AbsListView) {
     XposedBridge.log("[$TAG] message selection pane inserted beneath the list")
 }
 
-/** The mark lives on the view that drew the fill; only that owner re-recording without one counts as deselection. */
+/** The mark lives on the view that drew the fill; only that owner re-recording without one clears it. */
 internal fun latchMsgSelection(v: View, row: View, drew: Boolean) {
     val owns = v.getTag(msgSelFillTag) != null
     if (drew == owns) return
@@ -265,7 +265,7 @@ internal fun latchMsgSelection(v: View, row: View, drew: Boolean) {
     convMsgSelectPaneRef?.get()?.postInvalidateOnAnimation()
 }
 
-/** The state lives on the owner, never the row; every check below matters. */
+/** Every check below is load-bearing: each rejects an owner that no longer holds this row's fill. */
 private fun msgSelectOwnerOf(row: View): View? {
     val owner = (row.getTag(msgSelOwnerTag) as? WeakReference<*>)?.get() as? View
         ?: return null
@@ -282,7 +282,7 @@ private fun msgSelectOwnerOf(row: View): View? {
     return if (a === row) owner else null
 }
 
-/** Rebuilt per frame; a row whose height changed since it recorded was re-bound, so its mark is skipped. */
+/** Rebuilt per frame: a panel for each row whose fill owner still passes msgSelectOwnerOf. */
 private fun collectMsgSelectRects(out: RectList) {
     val list = convListRef?.get() ?: return
     val insetX = list.dp(MSG_SELECT_INSET_X_DP)
@@ -344,7 +344,7 @@ internal var lockHostRef: WeakReference<ViewGroup>? = null
 
 private val lockAt = IntArray(2)
 
-/** Set only while the lock pill records; it paints its own fill in onDraw, so clearBg cannot reach it. */
+/** Set while the lock host's children record; the pill paints its own fill in onDraw, so clearBg cannot reach it. */
 internal var lockPillDrawing = false
 
 internal var lockPillW = 0
@@ -365,7 +365,6 @@ internal fun ensureLockPane(container: View) {
     val pane = GlassBubblePane(host.context)
     pane.params = GlassParams(d).apply {
         blurRadius = d * BLUR_DP
-        // The pane clamps to half the shorter side, so an oversize radius just means fully round.
         cornerRadius = d * LOCK_PILL_RADIUS_DP
         refractionEnabled = true
         bevelFraction = BEVEL_FRACTION
@@ -408,8 +407,7 @@ private fun collectLockRect(host: FrameLayout, out: RectList) {
     }
 }
 
-// ══ Home -> conversation ════════════════════════════════════════════════════════════════
-// A separate Activity, so no cross-window dissolve; a plain fade both ways.
+// ══ Selected rows and the background interceptor ════════════════════════════════════════
 internal var rowContainerId = 0
 
 /** The Calls tab's row. A different id from the chat list's; see the branch in [ensureBgHook]. */
@@ -430,8 +428,7 @@ internal fun ensureBgHook() {
                     val v = param.thisObject as? View ?: return
                     val incoming = param.args[0] as? Drawable
 
-                    // Selection rows must see null too (WhatsApp clears them with it) and stay in this hook; a second interceptor fights over the foreground.
-                    // Two ids: the Calls tab's rows are call_row_container, not the chat list's. Selected message rows are deliberately not handled.
+                    // Selection rows must see null too (WhatsApp clears them with it), so they stay in this hook: two interceptors on one setter fight.
                     if ((rowContainerId != 0 && v.id == rowContainerId) ||
                         (callRowContainerId != 0 && v.id == callRowContainerId)
                     ) {

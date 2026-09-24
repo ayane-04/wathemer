@@ -1,5 +1,5 @@
-// Panels, popup menus, sheets and the reactions tray: surfaces that arrive in their own window or
-// with no id to hang a pane on. Geometry comes from pre-draw, because layout positions are unsettled.
+// Panels, popup menus, sheets, the reactions tray and the floating message menu: surfaces in their own window or with
+// no id to hang a pane on, plus the divider bands that read as seams over glass.
 package com.wathemer.app.hooks.glass
 
 import android.content.Context
@@ -71,7 +71,7 @@ internal fun backdropFor(panel: View, host: ViewGroup, underlay: List<View>): Vi
     for (i in 0 until host.childCount) {
         val c = host.getChildAt(i) ?: continue
         if (c === panel || isAncestorOf(c, panel)) break   // our own branch; stop before it
-        // By name too: the conversation's own WDSWallpaper is in neither list, and identity alone picks it as source.
+        // By name too: WhatsApp's own WDSWallpaper is not in the underlay, and identity alone picks it as source.
         if (c.javaClass.simpleName.contains("Wallpaper", ignoreCase = true)) continue
         if (underlay.any { it === c || isAncestorOf(c, it) }) continue
         val area = c.width * c.height
@@ -101,7 +101,7 @@ internal fun panelGlass(panel: View, what: String) {
         val glass = GlassView(host.context).apply {
             // The live content, not just the wallpaper; without it the pane reads as a frosted sheet laid over the app.
             if (back != null) backdrop = back
-            // The underlay fills where WhatsApp draws nothing; dialogs need the global form, their window has no wallpaper.
+            // The underlay fills where WhatsApp draws nothing; a dialog's window has none, so it comes from the owning Activity.
             underlay = under
             params.apply {
                 downsample = DOWNSAMPLE
@@ -183,8 +183,7 @@ private fun syncPanelGlass(panel: View) {
         lp.topMargin = r.top
         glass.layoutParams = lp
     }
-    // Radius scales with the surface: the lensing band clamps to it, and a fixed radius starves big dialogs to frost.
-    // Deliberately overwrites a panel's own radius every frame; the own radius read at creation only seeds the first frame.
+    // Scaled with the surface every frame, overriding the panel's own radius: the lensing band clamps to it, so a fixed one starves big dialogs.
     val radius = (minOf(r.width(), r.height()) * PANEL_RADIUS_FRACTION)
         .coerceIn(glass.dp(16f), glass.dp(PANEL_RADIUS_MAX_DP))
     if (abs(glass.params.cornerRadius - radius) > 0.5f) {
@@ -196,7 +195,7 @@ private var popupHooked = false
 
 private val popupGlassTag = tagKey("wathemer-popup-glass")
 
-/** The button each drop-down was shown from; showAtLocation's first argument is a parent token, not a button. */
+/** The view each drop-down was shown from, a button or a message row; showAtLocation's first argument is a parent token. */
 private val popupAnchors = WeakHashMap<PopupWindow, WeakReference<View>>()
 
 /** Popups expose no id, so PopupWindow's show methods are hooked; a menu is identified by its row ids. */
@@ -218,10 +217,10 @@ internal fun ensurePopupGlass() {
                 continue
             }
             if (m.name != "showAsDropDown" && m.name != "showAtLocation") continue
-            // Bound here, outside the hook: only a drop-down's first argument is the button it hangs from.
+            // Bound here, outside the hook: only a drop-down's first argument is the view it hangs from.
             val dropDown = m.name == "showAsDropDown"
             XposedBridge.hookMethod(m, object : XC_MethodHook() {
-                // Before the show: PopupWindow measures the content to place it, and WhatsApp reads that size for the tray's box.
+                // Before the show, so the popup's first layout already has the column; WhatsApp's own prior measure is left to hookWaeTrayPlacement.
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!WaeCompat.enabled) return
                     val pw = param.thisObject as? PopupWindow ?: return
@@ -248,8 +247,7 @@ internal fun ensurePopupGlass() {
 private fun glassPopup(pw: PopupWindow) {
     val content = pw.contentView ?: return
     if (content.getTag(popupGlassTag) != null) return
-    // A menu is rows carrying the menu-row id; one row is enough, the Calls Block menu has exactly one.
-    // Both row shapes count: overflow rows carry content, call-menu buttons carry menu_title and no content.
+    // A menu is rows carrying one of the three row ids; one row is enough, the Calls Block menu has exactly one.
     val rows = countDescendantsWithId(content, menuRowId, 0) +
         (if (menuTitleId != 0) countDescendantsWithId(content, menuTitleId, 0) else 0) +
         (if (menuSelRowId != 0) countDescendantsWithId(content, menuSelRowId, 0) else 0)
@@ -283,8 +281,7 @@ private fun glassPopup(pw: PopupWindow) {
         clearBg(clip, "paper_clip_layout")
         clip.elevation = 0f
     } != null
-    // The floating menu's glass is drawn live in the Activity's window, as the card's is; only when that fails
-    // does it fall back to the snapshot pane inside the popup, with the reactions pill's scrim either way.
+    // The floating menu's glass is live in the Activity's window, as the card's is; the snapshot pane in the popup is the fallback, both on the tray's scrim.
     if (dropdown != null && liveDropdownPane(dropdown, pw, radius ?: content.dp(PANEL_ROW_RADIUS_DP))) {
         content.setTag(panelGlassTag, true)
     } else {
@@ -549,12 +546,13 @@ internal fun glassSelfSheet(v: View, name: String) {
     logOnce("self sheet glassed: $name (${sheet.javaClass.simpleName})")
 }
 
-/** Tuned by eye: less blur than the panes, a scrim between the menu tint and the panel scrim. */
+/** Tuned by eye; unlike the panes' blur it does not follow the Backdrop blur slider. */
 internal const val TRAY_BLUR_DP = 10f
 
+/** Tuned by eye, lighter than MENU_SCRIM. */
 internal const val TRAY_SCRIM = 0x590E1418
 
-/** WaEnhancer rebuilds the tray in the popup's constructor; the column must stand before PopupWindow measures the content at show. */
+/** WaEnhancer rebuilds the tray in the popup's constructor; this flattens it back into one column. */
 private fun prepareWaeTray(content: View) {
     val res = content.resources
     val pkg = content.context.packageName
@@ -640,14 +638,13 @@ internal fun frostReactionsTray(v: View) {
         container.clipChildren = false
         // Both were drawn for an opaque tray: the fade square at the list's end and the halo disc behind the plus read as stains on glass.
         runCatching { quietTrayDecorations(tray, container) }
-        // The dialogs' recipe: the activity's content is another window, which is exactly what is behind a popup.
         val glass = newTrayPane(tray.context, content, TRAY_SCRIM)
         container.addView(glass, 0, FrameLayout.LayoutParams(0, 0))
         val box = IntArray(4)
         val sync = Runnable {
             if (tray.width <= 0 || tray.height <= 0) return@Runnable
             val row = container.parent as? ViewGroup ?: return@Runnable
-            // The pane overflows the container to reach under the plus; the tray lets that through, rows a module adds do not.
+            // Rows a module adds clip the pane's overflow; the tray itself lets it through.
             var up: ViewGroup? = row
             while (up != null && up !== tray) {
                 if (up.clipChildren) up.clipChildren = false
@@ -674,7 +671,7 @@ internal fun frostReactionsTray(v: View) {
         tray.post(sync)
         HookLog.hit("pane/reactionsTray")
     }
-    // The stock pill sits inside shadow padding; the wrappers' own fills go too.
+    // The popup's wrappers carry fills of their own; they go too.
     var p: View? = tray.parent as? View
     var hops = 0
     while (p != null && hops < 3) {
@@ -690,9 +687,10 @@ private fun rowContentBox(row: ViewGroup, container: View, glass: View, out: Int
     var top = Int.MAX_VALUE
     var right = Int.MIN_VALUE
     var h = 0
+    // Not visible, not counted: the tray's end fade is hidden by this module and would otherwise set the floor.
     for (i in 0 until row.childCount) {
         val c = row.getChildAt(i) ?: continue
-        if (c === glass || c.visibility == View.GONE) continue
+        if (c === glass || c.visibility != View.VISIBLE) continue
         val m = c.layoutParams as? ViewGroup.MarginLayoutParams
         val mt = m?.topMargin ?: 0
         left = minOf(left, c.left)
@@ -703,7 +701,7 @@ private fun rowContentBox(row: ViewGroup, container: View, glass: View, out: Int
     val w = if (right > left) right - left else 0
     if (container is ViewGroup) for (i in 0 until container.childCount) {
         val c = container.getChildAt(i) ?: continue
-        if (c === glass || c.visibility == View.GONE) continue
+        if (c === glass || c.visibility != View.VISIBLE) continue
         h = maxOf(h, c.height)
     }
     if (left == Int.MAX_VALUE) {
@@ -739,7 +737,7 @@ internal fun reassertSlabs() {
     }
 }
 
-/** Unnamed divider bands matched by a deliberately narrow shape rule; every condition rules out something real on this page. */
+/** The community info page's unnamed divider bands, by a deliberately narrow shape rule; every condition rules out something real there. */
 internal fun hideSlabsByShape(root: ViewGroup) {
     if (root.width <= 0) return
     val maxH = root.dp(12f).toInt()
@@ -760,7 +758,7 @@ internal fun hideSlabsByShape(root: ViewGroup) {
     walk(root)
 }
 
-/** Hide the id-less WDSDividers inside a glassed bar, matched by class and scoped to it; INVISIBLE, not GONE, so nothing shifts. */
+/** Hide the id-less WDSDividers under [root], matched by class and scoped to it; INVISIBLE, not GONE, so nothing shifts. */
 internal fun hideWdsDividers(root: ViewGroup) {
     fun walk(v: View) {
         if (v.javaClass.name.contains("WDSDivider")) {
@@ -779,15 +777,14 @@ private val selBottomTag = tagKey("wathemer-sel-bottom-menu")
 
 private val selBottomPanes = WeakHashMap<View, WeakReference<GlassView>>()
 
-/** The floating message menu's action card: a live pane beneath it in the entry holder, the compose pill's recipe with the menu's scrim. */
+/** The floating message menu's action card: a live pane beneath it in the entry holder, the compose pill's recipe on the tray's scrim. */
 internal fun glassSelectionBottomMenu(card: View) {
     val parent = card.parent as? ViewGroup ?: return
     // MaterialCardView: a transparent fill, never null; its shadow and stroke would frame the glass.
     clearBg(card, "message_selection_bottom_menu")
     runCatching { XposedHelpers.callMethod(card, "setCardElevation", 0f) }
     runCatching { XposedHelpers.callMethod(card, "setStrokeWidth", 0) }
-    // WhatsApp builds this holder in code and hands its children whichever params the host takes: a FrameLayout in the
-    // reply screen, a RelativeLayout in the conversation. Both can seat a child at an absolute box; anything else cannot.
+    // The holder is a FrameLayout in the reply screen and a RelativeLayout in the conversation, both able to seat an absolute box.
     val paneParams: ViewGroup.MarginLayoutParams? = when (parent) {
         is FrameLayout -> FrameLayout.LayoutParams(0, 0).apply { gravity = Gravity.TOP or Gravity.START }
         is RelativeLayout -> RelativeLayout.LayoutParams(0, 0).apply {

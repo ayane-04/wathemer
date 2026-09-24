@@ -47,7 +47,7 @@ internal var BLUR_DP = GlassDefaults.BLUR.toFloat()
 
 internal const val DOWNSAMPLE = 4f
 
-// One tint for every pane. Overwritten from KEY_GLASS_TINT at install; do not tune here, move the slider.
+// The panes' shared tint. Overwritten from KEY_GLASS_TINT at install; do not tune here, move the slider.
 internal var TINT_ALPHA = GlassDefaults.TINT
 
 /** The tint carries a whisper of the wallpaper's dominant hue when set; off is the neutral grey. */
@@ -68,7 +68,7 @@ internal var SMALL_OPTICS = GlassDefaults.SMALL_OPTICS
 /** The selected chat row runs the bubble program over the selection copy. */
 internal var ROW_OPTICS = GlassDefaults.ROW_OPTICS
 
-/** The glow threshold as a fraction of the brightest value the dim leaves, so a bright wallpaper detail can always reach it. */
+/** The glow threshold as a fraction of the brightest value the dim and the gamma leave, so bright wallpaper detail can always reach it. */
 internal const val BLOOM_THRESHOLD_FRACTION = 0.5f
 
 // ── One band width for every surface, as a fraction ───────────────────────────────
@@ -86,7 +86,6 @@ internal var RIM_ALPHA = GlassDefaults.RIM
 internal var RIM_WIDTH_DP = GlassDefaults.RIM_WIDTH.toFloat()
 
 // ── The chat-list card ────────────────────────────────────────────────────────────
-// CARD_GAP_DP matches the gap my_search_bar keeps below itself when it sits beside the list, so the card sits symmetrically.
 /** Every card's corner radius; CardOutline's clip must get the same value or content corners sit proud. */
 internal var CARD_RADIUS_DP = GlassDefaults.RADIUS.toFloat()
 
@@ -96,6 +95,7 @@ internal const val PANEL_ROW_RADIUS_DP = 14f
 /** The hairline between menu options. Low enough to read as a seam, not as a rule. */
 internal const val POPUP_DIVIDER_ALPHA = 28
 
+// Matches the gap my_search_bar keeps below itself when it sits beside the list, so the card sits symmetrically.
 internal const val CARD_GAP_DP = 8f
 
 // Every card, tighter than the pill's own inset. The one width knob.
@@ -105,14 +105,14 @@ internal const val CARD_INSET_DP = 6f
 internal const val CARD_CONTENT_PAD_DP = 8f
 
 // ── Filter chips ──────────────────────────────────────────────────────────────────
-// Drawn on the card, so tint-only: these alphas stack on the card's own tint. See FrostDrawable.small.
+// Drawn on the card, so tint-only: these alphas stack on the card's own tint; see FrostDrawable's source parameter.
 internal const val CHIP_ALPHA = 40           // resting
 
-internal const val CHIP_ALPHA_SELECTED = 105 // the selected "All" chip
+internal const val CHIP_ALPHA_SELECTED = 105 // any selected chip
 
 internal const val CHIP_RIM_ALPHA = 70
 
-/** The reply quote's own surface inside the compose pill: lighter than the glass, not a slab. */
+/** The reply quote's own surface, in the compose pill and in a bubble: lighter than the glass, not a slab. */
 internal const val QUOTE_ALPHA = 30
 
 internal const val QUOTE_RADIUS_DP = 16f
@@ -139,7 +139,7 @@ internal const val FAB_RADIUS_DP = 16f
 /** Brighter than the card so the buttons read; the ratio to TINT_ALPHA is what matters, not the absolute. */
 internal const val FAB_ALPHA = 32
 
-/** The large title; 41sp matches the iOS reference's letter height, 44 matches its width; the bigger figure is deliberate. */
+/** The large title, sized by the iOS reference's letter width rather than its height, on purpose. */
 internal const val TITLE_SP = 44f
 
 /** One clear step above WhatsApp's own title size. */
@@ -157,8 +157,8 @@ internal const val ALT_ICON_SCALE = 0.78f
 internal fun View.dp(v: Float) = v * resources.displayMetrics.density
 
 // Guard only the listener registration, never the paint: a repaint must be idempotent and must always run.
-// ── A raw hashCode() is not a legal tag key, and this cost a regression ────────────────
-// Every view tag goes through tagKey: a raw hashCode key can make setTag throw. Never use a bare hashCode().
+// ── A raw hashCode() is not a legal tag key ────────────────────────────────────────────
+// Every view tag goes through tagKey: a bare hashCode key can make setTag throw.
 internal fun tagKey(name: String): Int = (name.hashCode() and 0x00FFFFFF) or 0x7F000000
 
 /** Read once at install; values are baked into surfaces as built, so changes need a WhatsApp restart. */
@@ -312,7 +312,6 @@ internal fun resolveGlassTintFrom(bmp: Bitmap, dim: Float) {
     } else {
         glassTintRgb = ch * 0x010101
     }
-    // The glow starts above half of the brightest value the dim and the gamma leave, so bright detail can always reach it.
     val top = Math.pow(1.0 - dim, 2.0 * GlassParams.defaultTransGamma)
     GlassParams.defaultBloomThreshold = (BLOOM_THRESHOLD_FRACTION * top).toFloat().coerceIn(0.01f, 1f)
     val rgbHex = "%06x".format(glassTintRgb)
@@ -379,10 +378,10 @@ internal var navContainerIdPin = 0
 /** Backgrounds we insist on, keyed by INSTANCE: an id key fired mid-construction and crashed mutate(); the every-View hook must stay cheap. */
 internal val forcedBg = WeakHashMap<View, Drawable>()
 
-/** Human-readable names for [forcedBg]'s keys, for the log only. */
+/** Names for [forcedBg]'s keys, for the log; a named view's setBackgroundColor is also forced transparent. */
 internal val forcedBgLabels = WeakHashMap<View, String>()
 
-// forceBg keeps re-asserting its drawable; never pair this with a background you set yourself, it will null yours too.
+// forceBg keeps re-asserting its drawable; never pair this with a background you set yourself, it will replace yours too.
 /** A TRANSPARENT ColorDrawable, never null: Material reads its background back, and mutate() on null crashes WhatsApp. */
 internal fun clearBg(v: View, what: String) {
     synchronized(forcedBgLabels) { forcedBgLabels[v] = what }
@@ -418,7 +417,7 @@ internal fun roundView(v: View, what: String) {
 internal fun canStack(vg: ViewGroup): Boolean =
     vg is FrameLayout || vg.javaClass.name.contains("CoordinatorLayout")
 
-/** The Activity a view ultimately belongs to, through however many ContextWrappers. */
+/** The Activity a view belongs to, through a capped walk of its ContextWrappers. */
 internal fun activityOf(v: View): Activity? {
     var c: Context? = v.context
     var hops = 0
@@ -471,10 +470,10 @@ internal fun readCornerRadius(v: View): Float? {
 }
 
 // ── Cross-fading the home content ──────────────────────────────────────────────────────
-// pager_holder is hidden, never detached, so it can be faded; the ~2 janky frames are the compositing itself, not the buffer or duration.
+// pager_holder is hidden, never detached, so it can be faded; the cost is the compositing itself, not the buffer or duration.
 internal const val SEARCH_FADE_MS = 200L
 
-/** Material's "emphasized decelerate": fast departure, long settle. Reads as weight. */
+/** Material's standard easing: fast departure, long settle. Reads as weight. */
 internal val searchInterp: Interpolator by lazy {
     PathInterpolator(0.2f, 0f, 0f, 1f)
 }
@@ -489,7 +488,7 @@ internal fun wallpaperUnderlay(anyView: View): List<View> = runCatching {
     ).also { resolveGlassTint(it) }
 }.getOrDefault(emptyList())
 
-/** Wallpaper views from the activity, not the caller's root: a sheet's root is its dialog DecorView. */
+/** Home's wallpaper views, the last resort of [wallpaperUnderlayOf]. */
 internal fun wallpaperUnderlayGlobal(): List<View> =
     contentRef?.get()?.let { wallpaperUnderlay(it) } ?: emptyList()
 

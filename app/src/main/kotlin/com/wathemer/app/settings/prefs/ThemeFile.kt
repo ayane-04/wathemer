@@ -20,7 +20,7 @@ data class ThemeDoc(
     val name: String,
     val createdAt: Long,
     val appVersion: String,
-    /** Only the colours that are actually set; an empty map is a theme that deliberately carries none. */
+    /** Only the colours that are set; an empty map is a theme that deliberately carries none. */
     val colors: Map<String, Int>?,
     val wallpaper: ThemeWallpaper?,
     val bubbles: ThemeBubbles?,
@@ -34,7 +34,7 @@ data class ThemeDoc(
 /** [hasImage] says whether wallpaper.png is in the archive; without it there is nothing to point the store at. */
 data class ThemeWallpaper(val hasImage: Boolean, val enabled: Boolean, val dim: Int, val blur: Int)
 
-/** The glass sliders. Carries the look, never [Prefs.KEY_GLASS_ENABLED], which the wallpaper gate still owns. */
+/** The glass sliders and switches. Carries the look, never [Prefs.KEY_GLASS_ENABLED], which stays with the wallpaper gate. */
 data class ThemeGlass(
     val blur: Int,
     val tint: Int,
@@ -46,7 +46,7 @@ data class ThemeGlass(
     val rimWidth: Int,
     val rimAngle: Int,
     val bubbleMerge: Boolean,
-    // Defaulted: files written before the slider existed read as the shipped value, and older constructor calls compile.
+    // Defaulted for constructor calls written before a field existed; an old file gets the shipped value from parse, not from here.
     val saturation: Int = GlassDefaults.SATURATION,
     val huedTint: Boolean = GlassDefaults.HUED_TINT,
     val linearCopy: Boolean = GlassDefaults.LINEAR_COPY,
@@ -183,7 +183,7 @@ object ThemeFile {
         return Load.Ok(doc, staged, problems.distinct())
     }
 
-    /** Header only. Stops at the first entry, which is the reason theme.json is written first. */
+    /** Header only. Reads up to theme.json, which is why write puts it first. */
     fun peek(file: File): ThemeDoc? = runCatching {
         ZipInputStream(file.inputStream().buffered()).use { zis ->
             var seen = 0

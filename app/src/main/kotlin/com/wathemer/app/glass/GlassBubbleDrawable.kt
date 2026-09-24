@@ -24,7 +24,7 @@ class GlassBubbleDrawable(
     private val rowProvider: () -> View?,
     /** Hands the row, its bubble's raw bounds and the flags to the hook that feeds the list's bubble layer. */
     private val report: (View, Rect, Int) -> Unit,
-    /** True once the list's own layer is drawing the bubbles, in which case this draws nothing. */
+    /** True once the list's own layer is drawing the bubbles; with a row known too, this draws nothing. */
     private val listDraws: () -> Boolean,
     /** GlassBubblePane.FLAG_* bits; fresh per factory call, so it is per-message state the layer cannot hold. */
     private val flag: Int = 0,
@@ -60,7 +60,7 @@ class GlassBubbleDrawable(
     private val loc = IntArray(2)
     private val reported = Rect()
     private val radiiBuf = FloatArray(4)
-    /** Shared per density and built on first paint: one painter per drawable was two shader compiles per bind. */
+    /** Shared per density and built on first paint: a painter per drawable would compile its program on every bind. */
     private val painter: BubbleGlassPainter get() = sharedPainter(density)
 
     private val insetX = rimWidth
@@ -84,7 +84,7 @@ class GlassBubbleDrawable(
         if (b.width() <= 0 || b.height() <= 0) return
 
         val row = rowProvider()
-        // Report first, unconditionally: the only moment the bubble's rect inside its row is observable.
+        // Report first, whether or not this draws: the only moment the bubble's rect inside its row is observable.
         if (row != null) {
             reported.set(b)
             report(row, reported, flag)
@@ -93,22 +93,27 @@ class GlassBubbleDrawable(
         // Gate on row != null as well: listDraws is process-wide, and Message info rows lost their glass.
         if (row != null && listDraws()) return
 
-        // A shaped bubble keeps its whole box: WhatsApp draws a pack's overhang past the row, so this must too.
-        if (maskFor != null) clip.set(b) else clamp(b, row?.height ?: 0, insetX, insetY, clip)
+        // Resolved before the clip: whether the pack can be the edge at all decides which box this bubble keeps.
+        val rec: WallpaperRecord? = if (row != null) source(row) else null
+        val bmp: Bitmap? = rec?.bubble
+
+        // Where the pack is the edge, keep the whole box for the overhang WhatsApp draws past the row; elsewhere rounded glass would stretch over the padding.
+        if (maskFor != null && bmp != null && painter.shapesMasks) {
+            clip.set(b)
+        } else {
+            clamp(b, row?.height ?: 0, insetX, insetY, clip)
+        }
         if (clip.width() <= 0f || clip.height() <= 0f) return
 
-        // Resolve the backdrop only beside a row's true screen position, or it is built and never drawn.
-        // getLocationOnScreen, never InWindow: those agree only within one window (the frost sampling bug).
-        var rec: WallpaperRecord? = null
+        // The backdrop is sampled at the row's true screen position, so the clip's offset has to be added to it.
+        // getLocationOnScreen, never InWindow: those agree only within one window.
         var screenX = 0f
         var screenY = 0f
         if (row != null) {
             row.getLocationOnScreen(loc)
             screenX = loc[0] + clip.left
             screenY = loc[1] + clip.top
-            rec = source(row)
         }
-        val bmp: Bitmap? = rec?.bubble
         var radii: FloatArray? = null
         if (flatRadiusPx > 0f && (flag and GlassBubblePane.FLAG_EXT) != 0) {
             val rr = params.cornerRadius

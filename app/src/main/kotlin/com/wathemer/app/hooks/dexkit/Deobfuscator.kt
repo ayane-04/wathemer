@@ -25,7 +25,6 @@ object Deobfuscator {
     private val cache = DeobfuscatorCache()
     private var app: Application? = null
 
-    /** Prefix every diagnostic line with TAG; routed to the LSPosed module log. */
     private fun dlog(m: String) { XposedBridge.log("$TAG: $m") }
 
     init {
@@ -60,7 +59,7 @@ object Deobfuscator {
         }
     }
 
-    /** Persist the cache. Caller invokes after all loadXxx have run. */
+    /** Persist the cache; each installer calls this after its own loads. */
     fun saveCache() {
         app?.let { cache.save(it) }
     }
@@ -75,7 +74,7 @@ object Deobfuscator {
             .onFailure { dlog("DexKitBridge close failed: $it") }
     }
 
-    /** Null when DexKit is unavailable; resolvers must degrade gracefully, never throw. */
+    /** Null when no bridge is open; a resolver must then come back empty, never throw. */
     private fun bridgeOrNull(): DexKitBridge? = bridge
 
     // ── Bubble provider resolution ────────────────────────────────────────
@@ -148,7 +147,6 @@ object Deobfuscator {
             return null
         }
 
-        // Primary query: addUsingString + returnType=Drawable.
         val q1 = bridge.findMethod(
             FindMethod.create().matcher(
                 MethodMatcher.create()
@@ -208,7 +206,7 @@ object Deobfuscator {
         return balloonInsetMethod
     }
 
-    /** Shape-pick the 3 Drawable methods by parameter shape; the main painter is the max-arity (int,int,...) one. */
+    /** Shape-pick the three Drawable methods and the Rect inset; the main painter is the max-arity (int,int,...) one. */
     private fun resolveBubbleMethods(clazz: Class<*>) {
         val intType = Int::class.javaPrimitiveType
         val drawableMethods = clazz.declaredMethods.filter { it.returnType == Drawable::class.java }
@@ -238,7 +236,6 @@ object Deobfuscator {
                 m != balloonDateDrawableMethod
         }?.also { it.isAccessible = true }
 
-        // Inset method (for bubble-shape text padding): Rect return, (int, boolean) params.
         balloonInsetMethod = clazz.declaredMethods.firstOrNull { m ->
             m.returnType == Rect::class.java &&
                 m.parameterCount == 2 &&
@@ -317,7 +314,7 @@ object Deobfuscator {
         return bubbleTailedBuilder to bubbleExtBuilder
     }
 
-    /** Pick the two builders by arity alone; the tail-less one carries an extra tag argument. */
+    /** The two builders differ only in arity; the tail-less one carries an extra tag argument. */
     private fun pickBubbleLeafMethods(clazz: Class<*>): Boolean {
         val intType = Int::class.javaPrimitiveType
         val boolType = Boolean::class.javaPrimitiveType

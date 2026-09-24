@@ -60,8 +60,7 @@ object TextColorDispatcher {
                     labels[id]?.let { HookLog.hit(it) }
                     return
                 }
-                // Indexed, not for-in: the ledger needs the handler's number and indexOf would be a
-                // linear identity scan on a path that runs for every setTextColor in the process.
+                // Indexed, not for-in: indexOf would be a linear identity scan on a path that runs for every setTextColor.
                 for (i in handlers.indices) {
                     val h = handlers[i]
                     // Isolated per handler: one thrower must not starve the rest or log a stack per call.

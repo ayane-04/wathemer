@@ -73,7 +73,7 @@ object ActionModeColors {
     /** Last selection state we acted on, per window root, so the walk only runs on a change. */
     private val barState = WeakHashMap<View, Boolean>()
 
-    /** Through tagKey like every other tag: a raw hashCode key can make setTag throw. */
+    /** Through tagKey: a raw hashCode key can make setTag throw. */
     private val barWatchTag = tagKey("wathemer-action-mode-watch")
 
     /** One watcher per window; the walk runs only on the hidden-to-shown edge because layouts fire constantly. */
@@ -116,7 +116,6 @@ object ActionModeColors {
             }
         }
         if (closeRipple != 0 && view.id == closeBtnId && closeBtnId != 0) {
-            // Fresh stateful ripple: user's colour on state_checked, stock #33ffffff for the default press.
             val rippleCsl = ColorStateList(
                 arrayOf(
                     intArrayOf(android.R.attr.state_checked),

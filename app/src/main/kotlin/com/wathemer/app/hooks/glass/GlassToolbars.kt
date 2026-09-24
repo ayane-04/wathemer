@@ -1,5 +1,5 @@
-// Toolbars: the action-icon pane, the drilled-in screens' capsule and Back pill, the big titles, and
-// the guard that hides a toolbar bleeding through a selection bar. The bar's own isShown IS the mode.
+// Toolbars: the action-icon pane, the drilled-in screens' capsule and Back pill, the big titles, the nav count badge, and
+// the guard that hides a toolbar bleeding through a selection bar.
 package com.wathemer.app.hooks.glass
 
 import android.app.Application
@@ -51,7 +51,6 @@ internal fun syncAltToolbarGlass() {
 
     // The folder header's capsule already covers this whole bar, and it is the one that lines up with the card.
     if (folderCapsuleOwns(holder)) {
-        // Gated on a real change: an unconditional write from this per-layout path costs a pass every frame.
         altToolbarGlassRef?.get()?.let { if (it.visibility != View.GONE) it.visibility = View.GONE }
         altLeadingGlassRef?.get()?.let { if (it.visibility != View.GONE) it.visibility = View.GONE }
         return
@@ -183,7 +182,7 @@ internal fun syncAltToolbarGlass() {
     }
 }
 
-/** Every shown grandchild group of the holder: the two passes below differ only in what they accept. */
+/** Every shown grandchild group of the holder: the two passes in [syncAltToolbarGlass] differ only in what they accept. */
 private inline fun forEachActionCandidate(holder: ViewGroup, body: (ViewGroup) -> Unit) {
     for (i in 0 until holder.childCount) {
         val tb = holder.getChildAt(i) as? ViewGroup ?: continue
@@ -314,7 +313,7 @@ private const val ME_TAB_PHOTO_PAD_DP = 12f
 
 private val meTabWatchTag = tagKey("wathemer-me-tab-watch")
 
-/** Which toolbar an action icon belongs to. See the registration and [syncActionsGlass]. */
+/** Which toolbar a registered bar belongs to. See the registration and [syncActionsGlass]. */
 private val actionGroupTag = tagKey("wathemer-action-group")
 
 internal const val GROUP_NORMAL = 0
@@ -376,7 +375,7 @@ private fun syncActionsGlass() {
     var r = Int.MIN_VALUE
     var b = Int.MIN_VALUE
     var n = 0
-    // Dead anchors are pruned in-walk (main thread only); selection mode wins when any of its icons is shown, else the union spans both bars.
+    // Selection mode wins when any of its icons is shown; otherwise the normal set, which WhatsApp leaves attached under the action bar.
     var selectionMode = false
     for (ref in chipAnchors) {
         val a = ref.get() ?: continue
@@ -498,7 +497,7 @@ private fun meTabPhoto(header: View?): View? {
     return photo
 }
 
-/** The photo in a cell like an icon's, so the pill's insets match on every tab; WhatsApp's stub seat pads only the end. */
+/** Re-asserted from the sync as well as at attach, because WhatsApp's stub seat pads only the end. */
 internal fun padMeTabPhoto(v: View) {
     val pad = (ME_TAB_PHOTO_PAD_DP * v.resources.displayMetrics.density).toInt()
     if (v.paddingStart != pad || v.paddingEnd != pad) {
@@ -557,7 +556,7 @@ private fun iconTargets(a: View): List<View> {
     return if (out.isEmpty()) listOf(a) else out
 }
 
-/** The bar that owns a menu item; the container knows its children, a hard-coded id list cannot (WAEnhancer adds five). */
+/** The bar that owns a menu item; the container knows its children, a hard-coded id list cannot, and other modules add their own. */
 internal fun menuHolder(v: View): View = (v.parent as? ViewGroup) ?: v
 
 /** Specific group beats [GROUP_BOTH]: the overflow seed must not relabel a bar it shares. */
@@ -680,7 +679,7 @@ private fun syncBigTitleTexts(): List<String> {
 }
 
 /** The stock positions, the fallback until a big title has registered. */
-private val bigTitleTabs = listOf(1, 2, 3)   // Updates, Communities, Calls.
+private val bigTitleTabs = listOf(1, 2, 3)   // the three tabs after Chats
 
 internal fun syncToolbarTitle() {
     // Resolved from the live tree and scoped through content: a stale toolbarRef left this pass running on a dead view.
@@ -783,7 +782,7 @@ internal fun injectBigTitle(bar: View) {
 
 private var loggedHomeSyncThrow = false
 
-/** Glass between pager_holder and the header, so WhatsApp's toolbar contents keep painting on top. */
+/** Home's layout driver: records content and pager_holder, arms the fade, adds the nav pane, and re-syncs home's panes and titles on each layout. */
 internal fun injectToolbarGlass(header: View, pagerHolderId: Int) {
     val parent = header.parent as? ViewGroup ?: return
     if (parent.getTag(doneTag) != null) return
@@ -802,7 +801,7 @@ internal fun injectToolbarGlass(header: View, pagerHolderId: Int) {
     parent.viewTreeObserver.addOnGlobalLayoutListener {
         // Guarded: this is the home window's permanent layout driver, and an escape would crash WA on every layout.
         try {
-            // The sweep runs first and only from here: the search swap is the one event the anchors cannot report, being the thing removed.
+            // The sweep runs first: the search swap is the one event the anchors cannot report, being the thing removed.
             syncPaneVisibility()
             // Anchors alone cannot drive this: leaving selection mode lays none of them out, and the pane kept the old bar's width.
             syncActionsGlass()

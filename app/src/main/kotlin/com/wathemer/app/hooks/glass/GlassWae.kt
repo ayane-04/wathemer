@@ -1,4 +1,4 @@
-// WaEnhancer's own widgets on the glass, found by the tags and classes it gives them and dressed like the surfaces they sit on.
+// WaEnhancer's own widgets on the glass, found by the tags, classes and shapes it gives them and dressed like the surfaces they sit on.
 package com.wathemer.app.hooks.glass
 
 import android.app.Application
@@ -217,7 +217,7 @@ internal fun flattenWaeTray(tray: ViewGroup, container: View) {
     dressWaeTrayButtons(tray, container, TRAY_SCRIM)
 }
 
-/** WhatsApp sizes and seats the tray from a measure taken before attach; its two readers get a measure of the column instead. */
+/** WhatsApp sizes and seats the tray from a measure taken before attach; the seat and gap readers get a measure of the column instead. */
 internal fun hookWaeTrayPlacement(app: Application, classLoader: ClassLoader) {
     val res = app.resources
     val pkg = app.packageName
@@ -247,7 +247,7 @@ internal fun hookWaeTrayPlacement(app: Application, classLoader: ClassLoader) {
     var hooked = 0
     for (m in cls.declaredMethods) {
         val p = m.parameterTypes
-        // Both readers of the tray's measured size, the seat-and-animate call and the gap computation, found by signature.
+        // The seat-and-animate call and the gap computation, found by signature; the show method's own reads before them still see the old measure.
         val seats = p.size == 4 && p[0] == Int::class.javaPrimitiveType && p[1] == Int::class.javaPrimitiveType &&
             p[2] == Boolean::class.javaPrimitiveType && p[3] == Long::class.javaPrimitiveType
         val gaps = p.size == 3 && p[0] == View::class.java && p[1] == View::class.java &&

@@ -41,7 +41,7 @@ private var callSymLogged = false
 internal fun callScreenGlass(root: ViewGroup) {
     val pkg = root.context.packageName
     val res = root.resources
-    // The wallpaper injector reaches every Activity; the glass only lies without a real backdrop under it.
+    // The call screen normally carries the injected wallpaper; without a real backdrop under it the glass would lie.
     if (root.rootView?.findViewWithTag<View>("wt_wallpaper") == null) {
         logOnce("call screen: no wallpaper in this window; glass stands down")
         return
@@ -188,7 +188,7 @@ private fun collectCallCard(out: RectList) {
     }
 }
 
-/** The More dialog: its own window, so the container wears the sheet stamp and the rows keep ripples only. */
+/** The More dialog: its own window, so its card frame wears the sheet stamp and the rows keep ripples only. */
 internal fun callMoreMenuGlass(label: View) {
     val row = label.parent as? ViewGroup ?: return
     val container = row.parent as? ViewGroup ?: return
@@ -216,7 +216,7 @@ internal fun callMoreMenuGlass(label: View) {
             }
         }
     }
-    // The card is menu_card_frame above the rows (ancestry-traced); its own fill is the slab, nothing else is touched.
+    // The card is menu_card_frame above the rows' list; its own fill is the slab, and no other ancestor is touched.
     val frameId = label.resources.waId("menu_card_frame", label.context.packageName)
     var frame: View? = container
     var hops = 0

@@ -38,7 +38,7 @@ object ViewThemeDispatcher {
         ensureHooked()
     }
 
-    /** Register a fallback predicate callback. Return true to consume; false to continue. */
+    /** Register a predicate run on every attach after the id callbacks; true stops the predicates after it. */
     fun onView(action: (View) -> Boolean) {
         viewActions.add(action)
         HookLog.arm("view/predicate#${viewActions.size}")

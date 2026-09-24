@@ -1,6 +1,6 @@
 package com.wathemer.app.util
 
-/** Int ARGB to "#aarrggbb" helpers; lowercase hex to match [com.wathemer.app.hooks.ColorMap] keys. */
+/** Int ARGB to and from "#aarrggbb" text, as the theme file and the picker's hex field use it. */
 object HexColor {
 
     /** Format an ARGB int as `#aarrggbb` (lowercase, always 9 chars). */

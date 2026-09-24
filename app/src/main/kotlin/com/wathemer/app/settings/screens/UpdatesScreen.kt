@@ -91,7 +91,7 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
         }
     }
 
-    // One automatic check per visit, and only when the throttle in Prefs has expired.
+    // One automatic check per visit, and only once DAY_MS has passed since the last answered check.
     LaunchedEffect(Unit) {
         if (prefs.updateAutoCheck && System.currentTimeMillis() - prefs.updateLastCheck > DAY_MS) {
             check(manual = false)

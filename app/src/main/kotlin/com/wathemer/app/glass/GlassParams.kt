@@ -2,10 +2,10 @@ package com.wathemer.app.glass
 
 import android.graphics.Color
 
-/** Every tunable of the glass in one place, mutable with a listener because a copy per touch-move is garbage; lengths are screen px unless named, and density has no default on purpose. */
+/** Every tunable of the glass in one place, mutable with a listener because a copy per draw is garbage; lengths are screen px unless named, and density has no default on purpose. */
 class GlassParams(var density: Float) {
 
-    /** Notified after any property changes, so the view can invalidate itself. */
+    /** Notified after a setter changes a value, so the view can invalidate itself; [cornerRadii] and [density] never notify. */
     var onChanged: (() -> Unit)? = null
 
     private inline fun <T> set(current: T, new: T, assign: (T) -> Unit): Boolean {
@@ -109,7 +109,7 @@ class GlassParams(var density: Float) {
     var dispersion: Float = 0.06f
         set(v) { set(field, v.coerceIn(0f, 0.5f)) { field = it } }
 
-    /** Centre magnification, applied after the ceiling; [maxDisplacePx] does not bound it. Default 0 runs. */
+    /** Centre magnification, applied after the ceiling, so [maxDisplacePx] does not bound it; nothing assigns it, so 0 is what runs. */
     var magnify: Float = 0f
         set(v) { set(field, v.coerceIn(0f, 0.3f)) { field = it } }
 
@@ -150,7 +150,7 @@ class GlassParams(var density: Float) {
     // ── Dynamic response (light pass only) ─────────────────────────────────────────
     // Gains for GlassView's motion envelope. Never write per frame: every setter rebuilds the refraction chain.
 
-    /** Specular brightening at full motion, as a fraction of [specStrength]; 0.7 takes 0.34 to ~0.58. */
+    /** Specular brightening at full motion, as a fraction of [specStrength]; the lift shows only while a list scrolls. */
     var motionSpecGain: Float = 0.7f
         set(v) { set(field, v.coerceIn(0f, 4f)) { field = it } }
 
@@ -165,7 +165,7 @@ class GlassParams(var density: Float) {
     // ── Micro distortion (light pass only) ─────────────────────────────────────────
     // Perturbs the normal only; the window must stay 4t(1-t), zero at both band ends (1-t outlines the rim).
 
-    /** Normal-tilt amplitude; off by default. Rim outlining is the window's fault, not the amplitude's. */
+    /** Normal-tilt amplitude; stays 0: any normal perturbation lands on the rim first, whatever the window. */
     var microAmp: Float = 0f
         set(v) { set(field, v.coerceIn(0f, 0.3f)) { field = it } }
 
@@ -174,7 +174,7 @@ class GlassParams(var density: Float) {
         set(v) { set(field, v.coerceIn(0.25f, 80f)) { field = it } }
 
     // ── Multi-layer highlights (light pass) ────────────────────────────────────────
-    // Invented gradients, not physics; both must vanish on the plateau to keep flatInteriorColor() exact.
+    // Invented gradients, not physics; each must vanish on the plateau to keep flatInteriorColor() exact.
 
     /** Dark band inside the bright rim; 0.10 reads as a second pill, 0.04 is the most that stays shading. */
     var innerShadow: Float = 0f
@@ -214,7 +214,7 @@ class GlassParams(var density: Float) {
     var bloomThreshold: Float = defaultBloomThreshold
         set(v) { set(field, v.coerceIn(0.01f, 1f)) { field = it } }
 
-    /** How much sharp, bent wallpaper shows at the very rim over the frost; 0 is off. */
+    /** How much sharp, bent backdrop shows at the very rim over the frost; 0 is off. */
     var detail: Float = defaultDetail
         set(v) { set(field, v.coerceIn(0f, 1f)) { field = it } }
 
@@ -239,7 +239,7 @@ class GlassParams(var density: Float) {
 
     /** Install-time globals, so the hook sets them once rather than at every construction site. */
     companion object {
-        // Mirrors GlassDefaults by hand; the engine does not import settings.
+        // Where GlassDefaults has the value it is mirrored by hand; the engine does not import settings.
         @JvmStatic var defaultTransGamma: Float = 0.75f
         @JvmStatic var defaultSaturation: Float = 1.1f
         @JvmStatic var defaultBloom: Float = 0.5f

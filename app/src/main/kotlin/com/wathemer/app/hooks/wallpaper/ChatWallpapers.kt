@@ -21,6 +21,7 @@ import de.robv.android.xposed.XposedBridge
 import java.io.File
 import java.util.WeakHashMap
 import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
@@ -95,28 +96,41 @@ object ChatWallpapers {
 
     /** At first resume: the prefetched bitmap, waited for briefly, else prepared here; null means the global wallpaper this time. */
     fun take(a: Activity, entry: ChatWallpaperLibrary.Entry): Prepared? {
-        val future = pending.remove(a)
+        val future = pending[a]
         if (future != null) {
             val t0 = SystemClock.uptimeMillis()
             val ready = runCatching { future.get(WAIT_MS, TimeUnit.MILLISECONDS) }.getOrNull()
             val waited = SystemClock.uptimeMillis() - t0
             if (ready != null && ready.entry.stamp == entry.stamp) {
+                pending.remove(a)
                 XposedBridge.log("$TAG: stamp ${entry.stamp} ready at first resume after ${waited}ms wait")
                 return ready
             }
             if (!future.isDone) {
-                // Still decoding: the chat opens on the global wallpaper and the next resume picks this one up.
+                // Left in place on purpose: the re-check that follows must find it rather than start the decode again.
                 XposedBridge.log("$TAG: stamp ${entry.stamp} not ready after ${waited}ms; global wallpaper this time")
                 HookLog.hit("chat/wallpaperWaitTimeout", "stamp ${entry.stamp}")
                 return null
             }
+            pending.remove(a)
         }
         return prepare(a.applicationContext, entry, SystemClock.uptimeMillis())
     }
 
-    /** Synchronous prepare for the resume re-check; the cache makes a repeat free. */
-    fun prepareNow(context: Context, entry: ChatWallpaperLibrary.Entry): Prepared? =
-        prepare(context.applicationContext, entry, SystemClock.uptimeMillis())
+    /** The resume re-check's prepare. A decode still in flight for this chat is left to finish, never started a second time. */
+    fun prepareNow(a: Activity, entry: ChatWallpaperLibrary.Entry): Prepared? {
+        val future = pending[a]
+        if (future != null) {
+            if (!future.isDone) {
+                HookLog.hit("chat/wallpaperStillPreparing", "stamp ${entry.stamp}")
+                return null
+            }
+            pending.remove(a)
+            val ready = runCatching { future.get() }.getOrNull()
+            if (ready != null && ready.entry.stamp == entry.stamp) return ready
+        }
+        return prepare(a.applicationContext, entry, SystemClock.uptimeMillis())
+    }
 
     private fun prepare(context: Context, entry: ChatWallpaperLibrary.Entry, started: Long): Prepared? {
         val file = resolve(context, entry) ?: return null
@@ -124,7 +138,10 @@ object ChatWallpapers {
         if (cached != null) return Prepared(entry, cached)
         val dm = context.resources.displayMetrics
         val bitmap = BitmapDecoder.decodeScaled(file, dm.widthPixels, dm.heightPixels) ?: run {
-            XposedBridge.log("$TAG: stamp ${entry.stamp} did not decode (${file.length()} bytes)")
+            // Only bytes that are no image at all go; a decode that merely ran out of memory must keep its copy.
+            val size = file.length()
+            val junk = synchronized(lockFor(entry.stamp)) { !BitmapDecoder.isImage(file) && file.delete() }
+            XposedBridge.log("$TAG: stamp ${entry.stamp} did not decode ($size bytes), copy dropped=$junk")
             return null
         }
         WallpaperCache.put(file.absolutePath, entry.blur, bitmap)
@@ -135,8 +152,14 @@ object ChatWallpapers {
         return Prepared(entry, bitmap)
     }
 
-    /** WhatsApp's own copy, fetched once from the settings app's provider; a stamp never changes bytes, so a hit is right by construction. */
-    private fun resolve(context: Context, entry: ChatWallpaperLibrary.Entry): File? {
+    /** Per stamp, never one lock for all: each stamp names its own file, so no two of them can ever want the same file. */
+    private val fetchLocks = ConcurrentHashMap<Int, Any>()
+
+    /** Two threads of one process would write one target and delete each other's copy, which the staging name cannot stop. */
+    private fun lockFor(stamp: Int): Any = fetchLocks.getOrPut(stamp) { Any() }
+
+    /** WhatsApp's own copy, fetched once from the settings app's provider; within the store's life a stamp never changes bytes, so a hit is right. */
+    private fun resolve(context: Context, entry: ChatWallpaperLibrary.Entry): File? = synchronized(lockFor(entry.stamp)) {
         val cache = File(context.filesDir, CACHE_PREFIX + entry.stamp)
         if (cache.canRead() && cache.length() > 0) return cache
         val uri = Uri.parse("content://${BuildConfig.APPLICATION_ID}.wallpapers/${entry.file}")

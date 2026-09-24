@@ -38,7 +38,7 @@ private val infoGhostTag = tagKey("wathemer-info-ghost")
 /** Clear the header's black band (picture + photo_overlay); re-asserted every layout, one clear is undone by the first scroll. */
 internal fun infoHeaderGlass(header: View) {
     val holder = header as? ViewGroup ?: return
-    // The header id is shared with the home screen; the collapsing photo marks this one as contact info.
+    // The header id is shared with the home screen; the collapsing photo marks this one as an info screen.
     if (infoCollapsingPhotoId == 0 || holder.findViewById<View>(infoCollapsingPhotoId) == null) return
     val hideBand = Runnable {
         for (id in intArrayOf(infoPictureId, infoPhotoOverlayId)) {
@@ -63,13 +63,13 @@ private var infoTopPaneRef: WeakReference<GlassView>? = null
 
 private val infoTopAt = IntArray(2)
 
-/** Expanded height per header, weakly keyed: the two info screens share the id at different heights, one shared max dims both. */
+/** Expanded height per header, weakly keyed: the info screens share the id at different heights, and one shared max skews the shorter ones' collapse. */
 private val infoHeaderMaxH = WeakHashMap<View, Int>()
 
 /** Stronger than a reading surface: this panel exists to bury what slides under it. */
 private const val INFO_FADE_BLUR_BOOST = 1.8f
 
-/** Collapse-driven blur band. One GlassView because abutting panes cannot seam; its expanded height is learned from layout. */
+/** Collapse-driven blur band; its expanded height is learned from layout. */
 private fun syncInfoFade(header: ViewGroup) {
     val h = header.height
     if (h <= 0) return
@@ -189,12 +189,12 @@ private const val INFO_CARD_GAP_DP = 5f
 
 private const val INFO_CARD_RADIUS_DP = 22f
 
-/** One pane draws every section card, a background per card goes stale under scroll; hosted via a canStack walk, trailing list items unioned into their own card by collectInfoCardRects. */
+/** Hosted by a canStack walk above the list; the trailing list items get their own card in [collectInfoCardRects]. */
 internal fun infoCardGlass(card: View) {
     val stack = card.parent as? ViewGroup ?: return
     // The list, not the stack: the trailing action rows are separate list items that only attach on scroll.
     val list = stack.parent as? ViewGroup ?: return
-    // Held for the header pill, which blurs this list: the cards pass under that bar, not the wallpaper.
+    // Held for the header's covering pane, which blurs this list: the cards pass under that bar, not the wallpaper.
     infoListRef = WeakReference(list)
     // Tag the stack before any early return, on every attach: an untagged rebuilt stack unions into one page-wide slab.
     stack.setTag(infoCardStackTag, true)
@@ -273,7 +273,7 @@ internal fun memberSheetPane(sheet: View) {
                     tintColor = glassTintColor
                 }
                 tint = { glassTintColor }
-                // Through the sheet's own Activity, never home's decor. See [insertInfoCardPane].
+                // Through the sheet's own Activity first, home's decor only as the fallback. See [insertInfoCardPane].
                 backdrop = { bubbleBackdrop(sheet) }
                 placement = { bubblePlacement(sheet) }
                 dim = { 0f }
@@ -369,7 +369,7 @@ private fun collectStackCards(stack: ViewGroup, out: RectList, insetX: Float, in
             collectStackCards(card, out, insetX, insetY)
             continue
         }
-        // The shortcuts gap holds only a hairline, and a card inset into it reads as a floating sliver.
+        // The shortcuts gap is one of these.
         if (isHairlineOnly(card)) continue
         card.getLocationOnScreen(infoCardAt)
         // The participants block reads as one panel: from this card down, everything joins the tail union.

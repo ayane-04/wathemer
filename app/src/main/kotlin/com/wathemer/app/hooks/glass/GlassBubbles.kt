@@ -1,5 +1,5 @@
-// Chat bubbles. Rows carry no id and host no child, so the bubble drawable is replaced and the list's own
-// background draws them all; nothing recorded inside a row may depend on its screen position.
+// Chat bubbles. Rows carry no id and host no child, so the bubble drawable is replaced and the conversation list's own
+// background draws the glass; nothing recorded inside a row may depend on its screen position.
 package com.wathemer.app.hooks.glass
 
 import android.app.Application
@@ -44,11 +44,10 @@ private val maskCopies = arrayOfNulls<Drawable>(4)
 /** Follows the slider so the user's control still works; 5 heavier because a bubble transmits only wallpaper. */
 private const val BUBBLE_TINT_BOOST = 5
 
-/** The bubble tint: the slider's value plus [BUBBLE_TINT_BOOST], clamped to a legal alpha. */
 private val bubbleTintColor: Int
     get() = glassTint((TINT_ALPHA + BUBBLE_TINT_BOOST).coerceIn(0, 255))
 
-/** Fallback rim, drawn only when AGSL is unavailable; otherwise the light pass draws the edge. */
+/** Rim alpha for the bubbles and the stamped glass; the painter strokes it only where the light program is missing. */
 internal const val BUBBLE_RIM_ALPHA = 46
 
 /** The panes' recipe, field for field but the fringe; fresh per drawable, a shared GlassParams is last-writer-wins on bevelThickness. */
@@ -64,7 +63,7 @@ private fun bubbleParams(density: Float) = GlassParams(density).apply {
     // tintColor deliberately unset: it resolves after WhatsApp asks for this drawable, so a provider supplies it.
 }
 
-/** PRIORITY_HIGHEST so this result wins over BubbleShapes' hook; the user's bubble colours are deliberately ignored while glass is on. */
+/** PRIORITY_HIGHEST so this result is the factory's last word; the user's bubble colours are deliberately ignored while glass is on. */
 internal fun installBubbleGlass(app: Application) {
     val cl = app.classLoader
     // Open the bridge ourselves: never rely on BubbleColors or BubbleShapes to have opened it.
@@ -108,7 +107,7 @@ internal fun installBubbleGlass(app: Application) {
         method,
         object : XC_MethodHook(PRIORITY_HIGHEST) {
             override fun afterHookedMethod(param: MethodHookParam) {
-                // WA convention, from BubbleColors: position 3 is outgoing, anything else incoming.
+                // WA convention, as BubbleSide decodes it: 3 is outgoing, 2 incoming, anything else centred.
                 val position = param.args.getOrNull(0) as? Int ?: return
                 val density = app.resources.displayMetrics.density
                 // Arg 1 is WA's own collapse state, named by its error string; 2 and 3 are the tail-less continuations.
@@ -221,7 +220,6 @@ private fun isBubblelessRow(row: View): Boolean {
     return found
 }
 
-/** The conversation list's bubble background. */
 internal var convBubbleBgRef: WeakReference<GlassBubbleBackground>? = null
 
 private val bubbleRowAt = IntArray(2)
@@ -292,7 +290,6 @@ private fun collectBubbleRects(out: RectList) {
         if (bubbleRectScratch.width() <= 0f || bubbleRectScratch.height() <= 0f) continue
         val ref = if (shaped) maskOf(mark) else null
         row.getLocationOnScreen(bubbleRowAt)
-        // The mark is at rest; adding the live descendant translation back gives the exact screen position.
         val swipeDx = rowDisplacement(row)
         out.add(
             bubbleRowAt[0] + bubbleRectScratch.left + swipeDx,
@@ -430,7 +427,7 @@ internal fun ensureRowHook() {
 /** Reset per record and latched at its end, so it describes this record only. */
 internal var msgSelDrewThisRecord = false
 
-/** One flag per nested draw, so a fill lands on the view that drew it. Depth is bounded by ART. */
+/** One flag per nested draw, so a fill lands on the view that drew it. */
 private val msgSelDrewStack = BooleanArray(64)
 
 private var msgSelDepth = 0

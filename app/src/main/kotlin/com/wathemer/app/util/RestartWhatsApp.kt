@@ -7,11 +7,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 
-/** Kills and relaunches WhatsApp; needs KILL_BACKGROUND_PROCESSES. Keep the launcher intent vanilla or WA gets locked to portrait. */
+/** Kills every installed host and relaunches the first; needs KILL_BACKGROUND_PROCESSES. Keep the launcher intent vanilla or WA gets locked to portrait. */
 object RestartWhatsApp {
 
     private const val TAG = "WaThemer.Restart"
-    private const val WA_PKG = "com.whatsapp"
 
     enum class Result {
         SUCCESS,
@@ -19,11 +18,22 @@ object RestartWhatsApp {
         LAUNCH_FAILED,
     }
 
+    /** Installed hosts, in HostPackages order; an absent one has no launch intent. */
+    private fun installedHosts(context: Context): List<String> =
+        HostPackages.ALL.filter { context.packageManager.getLaunchIntentForPackage(it) != null }
+
     /** Best-effort restart. The relaunch stays inside the worker: the kill must finish first, and su can block on the root prompt. */
     fun restart(context: Context, onResult: (Result) -> Unit) {
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(WA_PKG)
+        // One store serves both hosts, so a write dirties every installed one and all of them are killed.
+        val hosts = installedHosts(context)
+        if (hosts.isEmpty()) {
+            Log.w(TAG, "no launch intent for any host; not installed?")
+            onResult(Result.NOT_INSTALLED)
+            return
+        }
+        // Only one can be brought to the front, so the first installed host wins and the rest come back cold.
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(hosts.first())
         if (launchIntent == null) {
-            Log.w(TAG, "No launch intent for $WA_PKG; not installed?")
             onResult(Result.NOT_INSTALLED)
             return
         }
@@ -31,11 +41,11 @@ object RestartWhatsApp {
         val app = context.applicationContext
 
         // Non-root kill, a cheap binder call; a no-op while WA is foreground, and on Android 14 and later always.
-        tryKillBackgroundProcesses(context)
+        for (pkg in hosts) tryKillBackgroundProcesses(context, pkg)
 
         Thread({
             // Root force-stop, silent without su; blocks until su returns, so the process is gone below here.
-            tryRootForceStop()
+            for (pkg in hosts) tryRootForceStop(pkg)
 
             // Small delay to let the kill propagate before we relaunch.
             Handler(Looper.getMainLooper()).postDelayed({
@@ -52,24 +62,23 @@ object RestartWhatsApp {
         }, "wathemer-restart").start()
     }
 
-    private fun tryKillBackgroundProcesses(context: Context) {
+    private fun tryKillBackgroundProcesses(context: Context, pkg: String) {
         try {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            am?.killBackgroundProcesses(WA_PKG)
-            Log.i(TAG, "killBackgroundProcesses($WA_PKG) called")
+            am?.killBackgroundProcesses(pkg)
+            Log.i(TAG, "killBackgroundProcesses($pkg) called")
         } catch (t: Throwable) {
-            Log.w(TAG, "killBackgroundProcesses failed: $t")
+            Log.w(TAG, "killBackgroundProcesses($pkg) failed: $t")
         }
     }
 
     /** Blocking. Call it off the main thread. See the note on [restart]. */
-    private fun tryRootForceStop() {
+    private fun tryRootForceStop(pkg: String) {
         try {
-            // su -c am force-stop; fails silently where su is missing or denied.
-            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "am force-stop $WA_PKG"))
+            val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "am force-stop $pkg"))
             val exit = proc.waitFor()
-            if (exit == 0) Log.i(TAG, "su force-stop succeeded")
-            else Log.i(TAG, "su force-stop exited $exit (non-rooted or denied, fine)")
+            if (exit == 0) Log.i(TAG, "su force-stop $pkg succeeded")
+            else Log.i(TAG, "su force-stop $pkg exited $exit (non-rooted or denied, fine)")
         } catch (t: Throwable) {
             Log.i(TAG, "su not available: ${t.message} (fine, non-rooted)")
         }

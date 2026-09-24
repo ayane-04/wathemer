@@ -66,7 +66,7 @@ fun GlobalColorsScreen(
         primary = p.primary; background = p.background; text = p.text
 
         // Unread circle cascades from the accent; the digit takes whichever colour reads best over it.
-        prefs.unreadAccent = 0                              // cascade -> primary
+        prefs.unreadAccent = 0
         prefs.unreadCountText = onAccentFor(p.primary, p.text)
 
         // Overrides for the surfaces where a plain cascade looks bad.
@@ -74,7 +74,7 @@ fun GlobalColorsScreen(
         prefs.setOverride(Prefs.OVR_NAVBAR_DIVIDER,  elevateInt(p.background, 0.05f))
         prefs.setOverride(Prefs.OVR_MINI_FAB_BG,     p.miniFabBg ?: elevateInt(p.background, 0.14f))
         prefs.setOverride(Prefs.OVR_FAB_ICON,        onAccentFor(p.primary, p.text))
-        // The active pill defaults to primary; Bordeaux swaps in another colour to keep icons readable.
+        // The pill cascades to primary, so only a preset whose pill differs writes the override.
         if (p.activePill != p.primary) {
             prefs.setOverride(Prefs.OVR_TAB_ACTIVE_PILL, p.activePill)
         }
@@ -213,7 +213,7 @@ fun GlobalColorsToolbarScreen(nav: NavController, prefs: Prefs) {
     }
 }
 
-/** Override row with state hoisted to the caller for live preview re-render. */
+/** Override row whose value the caller holds; re-seeds [LocalThemeSnapshot] after every write so the preview repaints live. */
 @Composable
 private fun ToolbarRow(
     name: String,
@@ -343,7 +343,7 @@ internal val PRESETS = listOf(
         primary = 0xFFC8A878.toInt(),     // brass
         background = 0xFF1A0E0F.toInt(),  // deep oxblood
         text = 0xFFF0E5D6.toInt(),        // warm cream
-        activePill = 0xFF6B2228.toInt(),  // burgundy red, contrasts with cream icons
+        activePill = 0xFF6B2228.toInt(),  // burgundy red
         miniFabBg = 0xFF3A1F22.toInt(),   // mid-tone burgundy from palette
     ),
     // Matte Lavender: a desaturated soft purple.

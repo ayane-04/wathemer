@@ -129,16 +129,9 @@ data class ThemeSnapshot(
     // ── System bars (raw overrides, 0 = cascade; the cascade itself lives in toTokens) ──
     val systemBarsEnabled: Boolean,
     val statusBarBg: Int,
-
-    // ── Pictures beside messages ──
-    val msgAvatarChats: Boolean,
-    val msgAvatarGroups: Boolean,
-    val msgAvatarMine: Boolean,
-    val msgAvatarFirstOnly: Boolean,
-    val msgAvatarSize: Int,
 )
 
-/** Read every token from prefs once. Cheap: ~50 int reads from a memory-resident SharedPreferences. */
+/** Read every token from prefs once; cheap, the store is memory-resident. */
 fun snapshotFromPrefs(prefs: Prefs): ThemeSnapshot = ThemeSnapshot(
     primary = prefs.primary,
     background = prefs.background,
@@ -219,15 +212,10 @@ fun snapshotFromPrefs(prefs: Prefs): ThemeSnapshot = ThemeSnapshot(
     wallpaperPath = prefs.wallpaperPath,
     wallpaperDim = prefs.wallpaperDim,
     wallpaperBlur = prefs.wallpaperBlur,
-    msgAvatarChats = prefs.msgAvatarChats,
-    msgAvatarGroups = prefs.msgAvatarGroups,
-    msgAvatarMine = prefs.msgAvatarMine,
-    msgAvatarFirstOnly = prefs.msgAvatarFirstOnly,
-    msgAvatarSize = prefs.msgAvatarSize,
 )
 
 // ── Wallpaper updaters ───────────────────────────────────────────────────────
-// Wallpaper prefs are non-Int so they don't fit SnapshotOverrideRow; rows call these directly.
+// Not colour overrides, so they don't fit SnapshotOverrideRow; the Wallpaper screen's rows call these directly.
 fun MutableState<ThemeSnapshot>.updateWallpaperEnabled(prefs: Prefs, v: Boolean) {
     value = value.copy(wallpaperEnabled = v)
     prefs.wallpaperEnabled = v
@@ -261,29 +249,6 @@ fun MutableState<ThemeSnapshot>.updateBubbleStyleOutgoing(prefs: Prefs, v: Int) 
 fun MutableState<ThemeSnapshot>.updateTickStyle(prefs: Prefs, v: Int) {
     value = value.copy(tickStyle = v)
     prefs.setOverride(Prefs.TICK_STYLE, v)
-}
-
-// ── Pictures beside messages ─────────────────────────────────────────────────
-fun MutableState<ThemeSnapshot>.updateMsgAvatarChats(prefs: Prefs, v: Boolean) {
-    value = value.copy(msgAvatarChats = v)
-    prefs.msgAvatarChats = v
-}
-fun MutableState<ThemeSnapshot>.updateMsgAvatarGroups(prefs: Prefs, v: Boolean) {
-    value = value.copy(msgAvatarGroups = v)
-    prefs.msgAvatarGroups = v
-}
-fun MutableState<ThemeSnapshot>.updateMsgAvatarMine(prefs: Prefs, v: Boolean) {
-    value = value.copy(msgAvatarMine = v)
-    prefs.msgAvatarMine = v
-}
-fun MutableState<ThemeSnapshot>.updateMsgAvatarFirstOnly(prefs: Prefs, v: Boolean) {
-    value = value.copy(msgAvatarFirstOnly = v)
-    prefs.msgAvatarFirstOnly = v
-}
-fun MutableState<ThemeSnapshot>.updateMsgAvatarSize(prefs: Prefs, v: Int) {
-    val c = v.coerceIn(Prefs.MSG_AVATAR_SIZE_MIN, Prefs.MSG_AVATAR_SIZE_MAX)
-    value = value.copy(msgAvatarSize = c)
-    prefs.msgAvatarSize = c
 }
 
 // ── Snapshot-aware row helper ───────────────────────────────────────────────

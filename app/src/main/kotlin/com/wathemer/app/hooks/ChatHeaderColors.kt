@@ -1,4 +1,4 @@
-// Conversation header title/subtitle theming; bar bg and icons share the toolbar tokens via HomeActivityHook.
+// Conversation header title/subtitle theming; the bar's fill and icons are CHAT_TOOLBAR_* tokens, applied in HomeActivityHook.
 // Do not use WDSToolbar's set(Sub)TitleTextColor: gated on a private field, it can silently no-op.
 package com.wathemer.app.hooks
 

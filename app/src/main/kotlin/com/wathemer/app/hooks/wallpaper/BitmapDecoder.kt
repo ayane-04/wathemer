@@ -8,7 +8,15 @@ import java.io.File
 
 object BitmapDecoder {
 
-    /** Decodes at the smallest power-of-2 sample that keeps both dimensions at least the target; null on failure. */
+    /** Bounds only, so it allocates nothing and cannot run out of memory: false means the bytes are not an image at all. */
+    fun isImage(file: File): Boolean {
+        if (!file.canRead()) return false
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        return bounds.outWidth > 0 && bounds.outHeight > 0
+    }
+
+    /** Decodes at the largest power-of-2 sample that keeps both dimensions at least the target; null on failure. */
     fun decodeScaled(file: File, targetW: Int, targetH: Int): Bitmap? {
         if (!file.canRead()) return null
         val path = file.absolutePath

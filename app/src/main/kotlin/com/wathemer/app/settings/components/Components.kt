@@ -195,7 +195,7 @@ fun TopBarMenu(items: List<Pair<String, () -> Unit>>) {
 
 // ── PreviewPanel ─────────────────────────────────────────────────────────
 
-/** Preview frame, deliberately unlabelled: an untouched mock is itself the signal the hook is not working. */
+/** Preview frame, deliberately unlabelled. */
 @Composable
 fun PreviewPanel(
     modifier: Modifier = Modifier,
@@ -244,7 +244,7 @@ private fun RowDivider(inset: Dp) {
     )
 }
 
-/** The list row every other row is: a leading slot, a label with an optional second line, a trailing slot. */
+/** The shared list row: a leading slot, a label with an optional second line, a trailing slot. */
 @Composable
 private fun ListRow(
     label: String,
@@ -344,7 +344,7 @@ fun ToggleItem(
 
 // ── SliderItem: label, track, value on one line ────────────────────────
 
-/** The compact control: the label on the left, a thin track, the value on the right. */
+/** Fixed label and value columns, so the tracks and the numbers line up down a page. */
 @Composable
 fun SliderItem(
     title: String,

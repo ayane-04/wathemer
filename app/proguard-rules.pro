@@ -3,20 +3,20 @@
 
 -dontwarn *
 
-# R class accessed via reflection (Xposed resource injection)
+# A precaution: nothing reflects on R; the hooks look module resources up by name.
 -keep class com.wathemer.app.R { *; }
 -keep class com.wathemer.app.R$* { *; }
 -keepclassmembers class com.wathemer.app.R$* {
     public static <fields>;
 }
 
-# Keep all hook entry classes (must not be stripped or renamed; LSPosed loads by FQN)
+# A blanket keep of every module class; any narrower rule must still keep ModernEntry, which the framework loads by name.
 -keepclasseswithmembers class com.wathemer.app.** {
     *;
 }
 -keepclasseswithmembernames class com.wathemer.app.**
 
-# Standard Xposed API: keep its annotations
+# The legacy Xposed API is compileOnly and provided at runtime; kept whole as a precaution.
 -keep class de.robv.android.xposed.** { *; }
 -keep interface de.robv.android.xposed.** { *; }
 

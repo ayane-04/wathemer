@@ -1,5 +1,5 @@
-// Receipt tick artwork: WhatsApp keeps choosing the glyph and the tint, the drawable is swapped at the view.
-// Read arrives as a blue tint on the same drawable id, so the read art swaps in when that tint lands.
+// Receipt tick artwork: WhatsApp keeps choosing the glyph and the tint; only the drawable is swapped.
+// In plain rows, read arrives as a blue tint on the same drawable id, so the read art swaps in when that tint lands.
 package com.wathemer.app.hooks
 
 import android.app.Application
@@ -46,7 +46,7 @@ object TickShapes {
     private val readTag = tagKey("wathemer-tick-read")
     private val unfixedTag = tagKey("wathemer-tick-unfixed")
 
-    // Main thread only: set while this object clears a tint it put there, so the tint hook lets that call through.
+    // Main thread only: set while apply() clears WhatsApp's tint, so the tint hook lets that call through.
     private var clearing = false
 
     // Bitmaps are shared read-only; every view gets its own BitmapDrawable around one.

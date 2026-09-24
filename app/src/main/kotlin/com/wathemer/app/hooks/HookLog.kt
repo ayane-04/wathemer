@@ -69,7 +69,7 @@ object HookLog {
     /** True once this surface has done its work, for callers that want to log a state change only. */
     fun isHit(name: String): Boolean = entries[name]?.state == State.HIT
 
-    /** The whole ledger in one block, grouped by state; ARMED means registered and never fired, which on a screen the user has visited is the line worth reading. */
+    /** The whole ledger in one block, grouped by state; ARMED on a screen the user has visited is the line worth reading. */
     fun dump(reason: String) {
         val all = entries.values.sortedBy { it.name }
         if (all.isEmpty()) {

@@ -12,13 +12,13 @@ import android.view.WindowInsetsController
 import android.widget.FrameLayout
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
 import com.wathemer.app.settings.prefs.Prefs
+import com.wathemer.app.util.HostPackages
 import de.robv.android.xposed.XposedBridge
 
 object SystemBars {
 
     private const val TAG = "WaThemer.SystemBars"
     private const val LOGTAG = "WaThemerBars"
-    private const val WHATSAPP_PKG = "com.whatsapp"
     private const val STATUS_TAG = "wt_statusbar"
 
     // Immersive viewers where a themed strip would look wrong; kept short on purpose.
@@ -36,7 +36,7 @@ object SystemBars {
                 runCatching { apply(a) }
                     .onFailure { Log.w(LOGTAG, "apply(created ${a.javaClass.simpleName}) failed: ${it.message}") }
             }
-            if (a.packageName == WHATSAPP_PKG) runCatching { watchFocus(a) }
+            if (HostPackages.isHost(a.packageName)) runCatching { watchFocus(a) }
         }
         // Re-applied on every resume too; this runs at the top of onResume, so the focus listener is what lands after WhatsApp's own writes.
         ActivityLifecycle.onResumed("systemBars") { a ->
@@ -62,7 +62,7 @@ object SystemBars {
         }
     }
 
-    /** Checks the pref, not just the active flag, which is still false on the first Activity (hook-order race). */
+    /** Checks the pref, not just the active flag: this client runs before the wallpaper's, so the flag is still false on the first Activity. */
     private fun wallpaperOwnsBars(): Boolean {
         if (WallpaperImage.INSTANCE?.isWallpaperActive() == true) return true
         if (!xprefs.getBoolean(Prefs.KEY_WALLPAPER_ENABLED, false)) return false
@@ -80,7 +80,7 @@ object SystemBars {
 
     /** Gate: package match + master toggle + not immersive + wallpaper inactive. Reloads prefs. */
     private fun shouldTheme(a: Activity): Boolean {
-        if (a.packageName != WHATSAPP_PKG) return false
+        if (!HostPackages.isHost(a.packageName)) return false
         xprefs.reload()
         // Wallpaper check runs before the master toggle so a leftover strip is cleaned up either way.
         if (wallpaperOwnsBars()) { runCatching { removeStrips(a) }; return false }

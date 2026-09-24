@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -94,7 +93,7 @@ private fun rememberIsColourArt(style: Int, dir: String): Boolean {
     }
 }
 
-/** Bubble padding from the nine-patch content region (keeps text clear of tail and border), else tail-aware insets. */
+/** Content region of the nine-patch plus a margin, so text clears tail and border; tail-aware if it has none, uniform with no nine-patch. */
 @Composable
 private fun bubbleContentPadding(shape: Drawable?, tailStart: Boolean): PaddingValues {
     if (shape == null) return PaddingValues(horizontal = 9.dp, vertical = 5.dp)
@@ -143,8 +142,7 @@ fun SingleBubblePreview(isOutgoing: Boolean, style: Int, tint: Color, modifier: 
     val shape = rememberBubbleShape(style, dir)
     // Colour artwork is drawn untinted, so the preview matches what WhatsApp will render.
     val tintable = !rememberIsColourArt(style, dir)
-    // onColorFor ignores alpha, so a translucent tint must be composited over the real backdrop first.
-    // Do not fix onColorFor instead; its other callers sit on different backdrops.
+    // onColorFor ignores alpha, so composite over the real backdrop here; do not fix onColorFor, chatPalette's accent sits elsewhere.
     val onTint = onColorFor(tint.compositeOver(Palette.Bg).toArgb())
     val dateColor = onTint.copy(alpha = 0.6f)
     Box(modifier = modifier.fillMaxSize().padding(14.dp), contentAlignment = Alignment.Center) {

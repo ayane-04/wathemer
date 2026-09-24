@@ -20,7 +20,7 @@ import java.util.WeakHashMap
 
 private val chatFabTag = tagKey("wathemer-chat-fab")
 
-/** The chevron and search discs float over the bubbles, so the pane captures the list live, inside the disc's own frame. */
+/** The chat's floating discs sit over the bubbles, so the pane captures the list live, inside the disc's own frame. */
 internal fun glassChatFab(fab: View, label: String) {
     val host = fab as? FrameLayout ?: return
     if (host.getTag(chatFabTag) != null) return
@@ -101,7 +101,7 @@ internal fun floatNav(container: View) {
             lp.leftMargin = side
             lp.rightMargin = side
             lp.bottomMargin = lift
-            lp.topMargin = -(h + lift)                     // hand the space to id/content
+            lp.topMargin = -(h + lift)
             v.layoutParams = lp
 
             bottomInset = h + lift
@@ -204,7 +204,7 @@ private var wdsFabElevField: Field? = null
 
 private var wdsFabFieldResolved = false
 
-/** WDSFab ignores its background and tint setters, the A03 field is the way in; stands down entirely when the user set a FAB colour. */
+/** Stands down entirely when the user set a colour on that button. */
 private fun glassFab(v: View) {
     if (v.width <= 0 || v.height <= 0) return
 
@@ -295,7 +295,6 @@ private fun syncPageFabPane(fab: View) {
     if (glass.translationY != fab.top.toFloat()) glass.translationY = fab.top.toFloat()
 }
 
-/** Kill the drop shadow, a smudge under a translucent button; WDSFab re-applies its A00 field, so the field is what changes. */
 private fun ensureWdsFabFields(v: View) {
     if (wdsFabFieldResolved) return
     wdsFabFieldResolved = true
@@ -312,6 +311,7 @@ private fun ensureWdsFabFields(v: View) {
         WaIds.field(v.javaClass, "A00", java.lang.Float.TYPE, "glass FAB elevation")
 }
 
+/** Kill the drop shadow, a smudge under a translucent button; WDSFab re-applies its A00 field, so the field is what changes. */
 private fun flattenFab(v: View) {
     if (v.elevation == 0f && v.translationZ == 0f) return
     v.stateListAnimator = null
@@ -337,7 +337,6 @@ private fun syncFabPane(fab: View) {
                 depthRatio = DEPTH_RATIO
                 maxDisplacePx = content.dp(DISPLACE_DP)
                 fresnelStrength = 0.5f
-                // The one pane with its own heavier alpha, which keeps a primary control readable on the card.
                 tintColor = glassTint(FAB_ALPHA)
             }
         }

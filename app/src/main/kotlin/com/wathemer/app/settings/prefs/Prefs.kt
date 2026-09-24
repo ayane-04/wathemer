@@ -16,7 +16,7 @@ class Prefs(
     val moduleStoreActive: Boolean = true,
 ) {
 
-    /** What [reconcileFreshInstall] did; after a reinstall the file can belong to the old UID with no write bit, which is what writeFailed records. */
+    /** What [reconcileFreshInstall] did; writeFailed means the store refused the clear and the old settings are still there. */
     data class InstallReconcile(
         val cleared: Int,
         val backup: String?,
@@ -25,7 +25,7 @@ class Prefs(
         val deferred: Boolean = false,
     )
 
-    /** One-shot clear of settings that outlive an uninstall: the framework store survives the package, the filesDir marker does not. Backs up to prefs_before_reset.json first. */
+    /** One-shot clear of any settings a prior install left in the framework store; the filesDir marker never outlives the package. Backs up to prefs_before_reset.json first. */
     fun reconcileFreshInstall(): InstallReconcile? {
         val marker = File(context.filesDir, "install.marker")
         if (marker.exists()) return null
@@ -52,10 +52,10 @@ class Prefs(
                 f.writeText(json.toString(2))
                 f.absolutePath
             }.getOrNull()
-            // commit(), not apply(): the return value is the only signal the file is not writable by this UID.
+            // commit(), not apply(): the return value is the only signal the store refused the clear.
             writeFailed = !runCatching { sp.edit().clear().commit() }.getOrDefault(false)
         }
-        // Marker only when the clear worked, or the unwritable-file case is suppressed forever.
+        // Marker only when the clear worked, or a refused clear is never tried again.
         if (!writeFailed) runCatching { marker.writeText("1") }
             .onFailure { Log.w(TAG, "reconcile: install.marker not written: $it") }
         return InstallReconcile(existing.size, backup, writeFailed)
@@ -105,26 +105,6 @@ class Prefs(
         get() = sp.getBoolean(KEY_EFFECT_SNOW, false)
         set(value) { commitBoolean(KEY_EFFECT_SNOW, value) }
 
-    var msgAvatarChats: Boolean
-        get() = sp.getBoolean(KEY_MSG_AVATAR_CHATS, false)
-        set(value) { commitBoolean(KEY_MSG_AVATAR_CHATS, value) }
-
-    var msgAvatarGroups: Boolean
-        get() = sp.getBoolean(KEY_MSG_AVATAR_GROUPS, false)
-        set(value) { commitBoolean(KEY_MSG_AVATAR_GROUPS, value) }
-
-    var msgAvatarMine: Boolean
-        get() = sp.getBoolean(KEY_MSG_AVATAR_MINE, false)
-        set(value) { commitBoolean(KEY_MSG_AVATAR_MINE, value) }
-
-    var msgAvatarFirstOnly: Boolean
-        get() = sp.getBoolean(KEY_MSG_AVATAR_FIRST_ONLY, false)
-        set(value) { commitBoolean(KEY_MSG_AVATAR_FIRST_ONLY, value) }
-
-    var msgAvatarSize: Int
-        get() = sp.getInt(KEY_MSG_AVATAR_SIZE, MSG_AVATAR_SIZE_DEFAULT)
-        set(value) { commitInt(KEY_MSG_AVATAR_SIZE, value.coerceIn(MSG_AVATAR_SIZE_MIN, MSG_AVATAR_SIZE_MAX)) }
-
     /** Styles the surfaces WaEnhancer adds or reveals; read once at hook install, so it takes effect on the next WhatsApp start. */
     var waeCompat: Boolean
         get() = sp.getBoolean(KEY_WAE_COMPAT, true)
@@ -149,12 +129,12 @@ class Prefs(
         return fixed
     }
 
-    /** Global unread accent for the chatlist badge and the navbar BadgeDrawable. 0 = primary token. */
+    /** Global unread accent: the chat list badge, and the nav badge under glass. 0 = the primary token, or the frost under glass. */
     var unreadAccent: Int
         get() = sp.getInt(KEY_UNREAD_ACCENT, 0)
         set(value) { commitInt(KEY_UNREAD_ACCENT, value) }
 
-    /** Global unread count text colour for both badges. 0 = text token. */
+    /** Global unread count colour on the same badges; 0 = the text token, or white under glass. */
     var unreadCountText: Int
         get() = sp.getInt(KEY_UNREAD_COUNT_TEXT, 0)
         set(value) { commitInt(KEY_UNREAD_COUNT_TEXT, value) }
@@ -165,7 +145,7 @@ class Prefs(
         get() = sp.getBoolean(KEY_WALLPAPER_ENABLED, false)
         set(value) { commitBoolean(KEY_WALLPAPER_ENABLED, value) }
 
-    /** Absolute path to the cropped wallpaper PNG. Null = no wallpaper picked. */
+    /** Absolute path to the cropped wallpaper, JPEG bytes under a .png name. Null = no wallpaper picked. */
     var wallpaperPath: String?
         get() = sp.getString(KEY_WALLPAPER_PATH, null)
         set(value) { commitStringOrRemove(KEY_WALLPAPER_PATH, value) }
@@ -175,7 +155,7 @@ class Prefs(
         get() = sp.getInt(KEY_WALLPAPER_DIM, 0)
         set(value) { commitInt(KEY_WALLPAPER_DIM, value.coerceIn(0, 100)) }
 
-    /** RenderEffect blur radius in px (0..150). The ceiling is 150 because under glass this is the frost behind the chrome. */
+    /** RenderEffect blur radius in px (0..150); a RenderEffect is free per frame, and the glass blurs on its own. */
     var wallpaperBlur: Int
         get() = sp.getInt(KEY_WALLPAPER_BLUR, 0)
         set(value) { commitInt(KEY_WALLPAPER_BLUR, value.coerceIn(0, 150)) }
@@ -185,12 +165,12 @@ class Prefs(
         get() = sp.getBoolean(KEY_GLASS_ENABLED, false)
         set(value) { commitBoolean(KEY_GLASS_ENABLED, value) }
 
-    /** Backdrop blur radius in dp (4..40). The screen blur behind every glass surface. */
+    /** Backdrop blur radius in dp (4..40): the panes' blur, and the copies' too while they follow the slider. */
     var glassBlur: Int
         get() = sp.getInt(KEY_GLASS_BLUR, GlassDefaults.BLUR)
         set(value) { commitInt(KEY_GLASS_BLUR, value.coerceIn(4, 40)) }
 
-    /** Tint alpha 0..80. How much white the glass adds over what shows through. */
+    /** Tint alpha 0..80 on the channel the wallpaper's luma picks: white over a dark wallpaper, black over a bright one. */
     var glassTint: Int
         get() = sp.getInt(KEY_GLASS_TINT, GlassDefaults.TINT)
         set(value) { commitInt(KEY_GLASS_TINT, value.coerceIn(0, 80)) }
@@ -230,7 +210,7 @@ class Prefs(
         get() = sp.getInt(KEY_GLASS_RIM_WIDTH, GlassDefaults.RIM_WIDTH)
         set(value) { commitInt(KEY_GLASS_RIM_WIDTH, value.coerceIn(1, 4)) }
 
-    /** Rim gradient angle in degrees (0..360); decides which side of every surface lights up. */
+    /** Rim gradient angle in degrees (0..360); both ends of that axis light up. */
     var glassRimAngle: Int
         get() = sp.getInt(KEY_GLASS_RIM_ANGLE, GlassDefaults.RIM_ANGLE)
         set(value) { commitInt(KEY_GLASS_RIM_ANGLE, value.coerceIn(0, 360)) }
@@ -306,7 +286,7 @@ class Prefs(
         set(value) { commitBoolean(KEY_GLASS_ASSEMBLE, value) }
 
 
-    /** Look for a new release when the settings app opens. Throttled to one request a day. */
+    /** Look for a new release when the Updates page opens, at most once a day after an answered check. */
     var updateAutoCheck: Boolean
         get() = sp.getBoolean(KEY_UPDATE_AUTO_CHECK, true)
         set(value) { commitBoolean(KEY_UPDATE_AUTO_CHECK, value) }
@@ -417,7 +397,6 @@ class Prefs(
             ?: emptyList()
         set(value) { commitString(KEY_RECENTS, value.joinToString(",")) }
 
-    /** Push a new colour to the front of the recents list, dedupe, cap at MAX_RECENTS. */
     fun pushRecent(color: Int) {
         val next = (listOf(color) + recents.filter { it != color }).take(MAX_RECENTS)
         recents = next
@@ -441,7 +420,7 @@ class Prefs(
     fun hasGlobalTheme(): Boolean =
         sp.contains(KEY_PRIMARY) || sp.contains(KEY_BACKGROUND) || sp.contains(KEY_TEXT)
 
-    /** Set the three globals and clear every ALL_COLOR_OVERRIDE_KEYS entry in one commit. Presets and Reset both funnel through here, so no colour token can go stale. */
+    /** Set the three globals and clear every ALL_COLOR_OVERRIDE_KEYS entry in one commit, so a preset leaves no colour token stale. */
     fun applyPresetFull(primary: Int, background: Int, text: Int) {
         val ok = sp.edit().apply {
             putInt(KEY_PRIMARY, primary)
@@ -478,9 +457,9 @@ class Prefs(
         return ok
     }
 
-    /** Snapshots the store to filesDir, the one place that survives an update; a snapshot import is the recovery path for a framework swap. */
+    /** Snapshots the store to filesDir, which no framework owns; a snapshot import is the recovery path for a framework swap. */
     fun exportForMigration(): Int? {
-        // A snapshot of the private fallback would be empty and would overwrite a good one.
+        // The private fallback is not the store the hooks read; a snapshot of it would overwrite a good one.
         if (!moduleStoreActive) return null
         return runCatching {
             val all = sp.all
@@ -508,7 +487,7 @@ class Prefs(
     /** What [importSnapshotIfEmpty] found. [warn] is the case the UI must say out loud. */
     data class SnapshotImport(val imported: Int, val source: String?, val warn: Boolean)
 
-    /** One-shot restore into an empty store from the snapshot the previous build wrote; it must run before the reconcile, because an uninstall leaves no snapshot and the reconcile still clears there. */
+    /** One-shot restore of an empty store from the filesDir snapshot; must run before the reconcile, whose own backup it would otherwise import straight back. */
     fun importSnapshotIfEmpty(): SnapshotImport? {
         if (!moduleStoreActive) return null
         val current = runCatching { sp.all }
@@ -556,7 +535,7 @@ class Prefs(
         return SnapshotImport(if (ok) wrote else 0, source.name, warn = !ok)
     }
 
-    /** Logs failed commits: after a reinstall the store can belong to the old UID and writes silently vanish. */
+    /** Logs a refused commit; a landed one reports to [onWrite] unless its key owes no restart. */
     private fun commitChecked(key: String, ok: Boolean) {
         if (!ok) Log.w(TAG, "commit FAILED for $key: the settings file is not writable by this UID")
         else if (key !in NO_RESTART_KEYS) onWrite?.invoke()
@@ -595,7 +574,7 @@ class Prefs(
     companion object {
         private const val TAG = "WaThemer.Prefs"
 
-        /** Every successful write reports here; the settings app uses it to know a restart is owed. */
+        /** Raised by commitChecked for each landed write outside [NO_RESTART_KEYS]; the settings app uses it to know a restart is owed. */
         var onWrite: (() -> Unit)? = null
 
         /** Writes here owe WhatsApp no restart: this app alone reads them, or the hook reads them as a chat opens. */
@@ -606,29 +585,19 @@ class Prefs(
 
         const val FILE = "com.wathemer.app_prefs"
 
-        /** Handover file for the move off the framework store; the next build reads it once and deletes it. */
+        /** The standing snapshot in filesDir, rewritten on every launch and stop; an empty store imports it once and renames it. */
         const val EXPORT_FILE = "prefs_export.json"
 
         const val KEY_CHATLIST_DIVIDER = "chatlist_divider"
         const val KEY_EFFECT_SNOW = "effect_snow"
         const val KEY_WAE_COMPAT = "waenhancer_compat"
 
-        // Pictures beside messages: whose, how big, and whether only the first of a run.
-        const val KEY_MSG_AVATAR_CHATS = "msg_avatar_chats"
-        const val KEY_MSG_AVATAR_GROUPS = "msg_avatar_groups"
-        const val KEY_MSG_AVATAR_MINE = "msg_avatar_mine"
-        const val KEY_MSG_AVATAR_FIRST_ONLY = "msg_avatar_first_only"
-        const val KEY_MSG_AVATAR_SIZE = "msg_avatar_size"
-        const val MSG_AVATAR_SIZE_DEFAULT = 32
-        const val MSG_AVATAR_SIZE_MIN = 24
-        const val MSG_AVATAR_SIZE_MAX = 48
-
         const val KEY_PRIMARY = "primary_color"
         const val KEY_BACKGROUND = "background_color"
         const val KEY_TEXT = "text_color"
         const val KEY_RECENTS = "recent_colors"
 
-        // Global unread tokens, shared by chatlist + navbar.
+        // Global unread tokens: the chat list badges, and the nav badge under glass.
         const val KEY_UNREAD_ACCENT = "unread_accent"
         const val KEY_UNREAD_COUNT_TEXT = "unread_count_text"
 
@@ -665,8 +634,7 @@ class Prefs(
         const val KEY_FONT_USER_LIBRARY = "font_user_library"
         const val KEY_FONT_USER_SEQ = "font_user_seq"
 
-        // Status bar. The toggles are structural; OVR_STATUS_BAR_BG is the colour override.
-        // The names still say "system_bars" on purpose: they are on-disk pref names, never rename them.
+        // Status bar. The names say "system_bars" on purpose: they are on-disk pref names, never rename them.
         const val KEY_SYSTEM_BARS_ENABLED = "system_bars_enabled"
         const val KEY_SYSTEM_BAR_AUTO_ICONS = "system_bar_auto_icons"
         const val OVR_STATUS_BAR_BG = "override_status_bar_bg"
@@ -724,18 +692,18 @@ class Prefs(
         const val MEDIA_CAPTION_COLOR   = "media_caption_color"   // caption (image/video bubbles)
         const val LINK_COLOR            = "link_color"            // clickable links, via the span base's updateDrawState hook
 
-        // Conversation header title + subtitle; these two exist only in Conversation.
+        // Conversation header title + subtitle; both ids recur on other screens, which take the colours too.
         const val CHAT_HEADER_TITLE    = "chat_header_title"    // conversation_contact_name (TextEmojiLabel)
         const val CHAT_HEADER_SUBTITLE = "chat_header_subtitle" // conversation_contact_status (TextEmojiLabel)
 
-        // Toolbar tokens split per activity: OVR_TOOLBAR_* is Home (+ContactInfo fallback), CHAT_TOOLBAR_* is Conversation only.
-        const val CHAT_TOOLBAR_BG    = "chat_toolbar_bg"     // Conversation toolbar bg
-        const val CHAT_TOOLBAR_ICONS = "chat_toolbar_icons"  // Conversation toolbar icons
+        // CHAT_TOOLBAR_* for pages named *Conversation*; OVR_TOOLBAR_* for pages named *HomeActivity* and ContactInfo, and its icons for the drilled-in pages.
+        const val CHAT_TOOLBAR_BG    = "chat_toolbar_bg"
+        const val CHAT_TOOLBAR_ICONS = "chat_toolbar_icons"
 
         // Long-press selection toolbar; the same action_mode_bar id serves Home and Conversation.
         const val OVR_ACTION_MODE_BG           = "override_action_mode_bg"           // action_mode_bar (ActionBarContextView) bg
         const val OVR_ACTION_MODE_ICONS        = "override_action_mode_icons"        // close X + ActionMenuItemView icons
-        const val OVR_ACTION_MODE_TITLE        = "override_action_mode_title"        // action_bar_title (the "1"/"5"/"6" count)
+        const val OVR_ACTION_MODE_TITLE        = "override_action_mode_title"        // action_bar_title (the selection count)
         const val OVR_ACTION_MODE_CLOSE_RIPPLE = "override_action_mode_close_ripple" // close button's check-state ripple (WA green by default)
 
         // ── Wallpaper ─────────────────────────────────
@@ -802,7 +770,7 @@ class Prefs(
             // Bubbles (colours only, shape excluded by design)
             BUBBLE_LEFT_BG, BUBBLE_RIGHT_BG, BUBBLE_LEFT_TEXT, BUBBLE_RIGHT_TEXT,
             BUBBLE_LEFT_DATE, BUBBLE_RIGHT_DATE,
-            // Compose / input bar
+            // Compose / input bar, and the emoji tray
             COMPOSE_BAR_BG, COMPOSE_ENTRY_TEXT,
             COMPOSE_SEND_BG, COMPOSE_SEND_ICON, COMPOSE_ICON_TINT,
             TRAY_BG, TRAY_HEADER_BG, TRAY_ICON_TINT,
@@ -825,14 +793,13 @@ class Prefs(
             listOf(KEY_PRIMARY, KEY_BACKGROUND, KEY_TEXT, KEY_UNREAD_ACCENT, KEY_UNREAD_COUNT_TEXT) +
                 ALL_COLOR_OVERRIDE_KEYS
 
-        /** The on/off keys a theme file carries. Glass is out by choice, and so is anything true of one device only. */
+        /** The on/off keys of a theme file's flags section; the glass switch stays out by choice, as does anything true of one device only. */
         val THEME_FLAG_KEYS: List<String> = listOf(
             KEY_IOS_ICON_PACK, KEY_CHATLIST_DIVIDER, KEY_EFFECT_SNOW,
             KEY_SYSTEM_BARS_ENABLED, KEY_SYSTEM_BAR_AUTO_ICONS, KEY_FONT_MAP_MONOSPACE,
-            KEY_MSG_AVATAR_CHATS, KEY_MSG_AVATAR_GROUPS, KEY_MSG_AVATAR_MINE, KEY_MSG_AVATAR_FIRST_ONLY,
         )
 
-        /** The glass sliders as one list, so the writable set and the exporter cannot drift apart. */
+        /** The glass tuning keys, switches and sliders alike, as one list, so the writable set and the exporter's guard cannot drift apart. */
         val THEME_GLASS_KEYS: List<String> = listOf(
             KEY_GLASS_BLUR, KEY_GLASS_TINT, KEY_GLASS_DISPLACE, KEY_GLASS_BEVEL, KEY_GLASS_RADIUS,
             KEY_GLASS_GAMMA, KEY_GLASS_RIM, KEY_GLASS_RIM_WIDTH, KEY_GLASS_RIM_ANGLE,

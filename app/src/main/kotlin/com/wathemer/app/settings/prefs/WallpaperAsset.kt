@@ -1,4 +1,4 @@
-// Where the wallpaper lives and the staged write that puts it there. Downloads is mandatory: WhatsApp can only read a media file across apps.
+// Where the wallpaper lives and the staged write that puts it there. Downloads, because the hook reads it by path, and across apps a path reaches only a media file.
 // The picker and the theme importer both come through here, so there is one road and it cannot drift.
 package com.wathemer.app.settings.prefs
 
@@ -20,7 +20,7 @@ object WallpaperAsset {
     /** The public copy WhatsApp reads; its path is what [Prefs.wallpaperPath] holds. */
     private fun activeFile(): File = File(publicDir(), "wallpaper.png")
 
-    /** The private master copy. Survives anything except an uninstall. */
+    /** The private master copy, out of any cleaner's reach; only an uninstall or a data clear removes it. */
     fun masterFile(context: Context): File = File(context.filesDir, "wallpaper_master.png")
 
     fun hasAllFilesAccess(): Boolean = Environment.isExternalStorageManager()

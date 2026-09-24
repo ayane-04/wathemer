@@ -30,7 +30,7 @@ object GlassDefaults {
     /** Rim stroke width in dp. */
     const val RIM_WIDTH = 2
 
-    /** Rim gradient angle in degrees, deciding which side of a surface lights up. */
+    /** Rim gradient angle in degrees; both ends of that axis light up. */
     const val RIM_ANGLE = 90
 
     /** Grouped continuations flatten their top corner toward the message above. */

@@ -77,14 +77,13 @@ object BubbleShapes {
         val satPct = saturated * 100 / opaque
         val mr = (sr / opaque).toInt(); val mg = (sg / opaque).toInt(); val mb = (sb / opaque).toInt()
         val meanSpread = maxOf(mr, mg, mb) - minOf(mr, mg, mb)
-        // Strong colour, or a deliberate flat hue. Both tests are needed; see the kdoc above.
+        // Strong colour, or a deliberate flat hue.
         val verdict = satPct > 5 || meanSpread > 12
         XposedBridge.log("$TAG: $name -> ${if (verdict) "COLOUR ARTWORK (no tint)" else "mask (tintable)"}" +
             " [sat=$satPct% meanSpread=$meanSpread]")
         verdict
     }
 
-    /** Apply the per-side tint, unless the asset is finished colour artwork. */
     private fun tintUnlessColourArt(shaped: Drawable, dir: Int, name: String) {
         if (isColourArtwork(name)) return
         shaped.colorFilter = PorterDuffColorFilter(tintFor(dir), PorterDuff.Mode.SRC_IN)
@@ -98,7 +97,7 @@ object BubbleShapes {
 
     fun install(app: Application, classLoader: ClassLoader) {
         xprefs.reload()
-        // The leaf hooks stand down under glass: nothing arbitrates factory vs leaf hooks, so the glass factory hook owns the drawable and installUnderGlass handles packs and insets.
+        // The leaf hooks stand down under glass: nothing arbitrates factory vs leaf hooks, so the glass factory hook owns the drawable.
         if (xprefs.getBoolean(Prefs.KEY_GLASS_ENABLED, false)) {
             XposedBridge.log("$TAG: Liquid Glass draws the bubbles; only the packs load, through installUnderGlass")
             HookLog.skip("install/BubbleShapes", "Liquid Glass draws the bubbles; packs load through installUnderGlass")
@@ -178,7 +177,7 @@ object BubbleShapes {
         return moduleRes != null
     }
 
-    /** A side with a pack is colour art or a mask; a mask counts only while the glass switch wants it. */
+    /** A side with a pack is colour art or a mask; a mask counts only while the glass switch wants it, on API 33 or later. */
     private fun classify(styleValue: Int, dir: Int, masks: Boolean): GlassKind {
         if (styleValue == 0) return GlassKind.NONE
         val name = assetName(styleValue, dir, ext = false) ?: return GlassKind.NONE
@@ -204,7 +203,7 @@ object BubbleShapes {
         return loadBase(style, dir, ext)?.constantState?.newDrawable()?.mutate()
     }
 
-    /** Populate both caches for one side's tailed and tail-less variants. See the call site. */
+    /** Populate both caches for one side's tailed and tail-less variants; the reason is at the calls in [install]. */
     private fun prewarm(styleValue: Int, dir: Int) {
         for (ext in booleanArrayOf(false, true)) {
             loadBase(styleValue, dir, ext)
@@ -251,7 +250,7 @@ object BubbleShapes {
         )
     }
 
-    /** Text-inset override. Known defect kept on purpose; any fix must derive from WA's Rect or ~20 working styles regress. */
+    /** Text-inset override. Known defect kept on purpose; any fix must derive from WA's Rect or the styles that look right today regress. */
     private fun installInsetOverride(classLoader: ClassLoader) {
         val inset = Deobfuscator.loadBalloonInsetMethod(classLoader)
         if (inset == null) {
@@ -261,7 +260,7 @@ object BubbleShapes {
         XposedBridge.hookMethod(inset, object : XC_MethodHook() {
             override fun afterHookedMethod(p: MethodHookParam) {
                 val dir = p.args.getOrNull(0) as? Int ?: return
-                // Under glass a side pads only when the glass hook actually draws its pack.
+                // Under glass a side pads only when the glass hook draws its pack.
                 if (underGlass) {
                     if (glassKind(dir) == GlassKind.NONE) return
                 } else if (styleFor(dir) == 0) {

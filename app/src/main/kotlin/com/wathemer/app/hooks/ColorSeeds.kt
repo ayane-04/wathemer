@@ -14,7 +14,7 @@ object ColorSeeds {
         0x144d37,
         0x1b8755,
         0x15603e,
-        0xd9fdd3,  // light bubble bg (incoming bubble in light mode)
+        0xd9fdd3,  // light bubble bg (outgoing bubble in light mode)
         0x008069,  // tab indicator
         0x128c7e,  // legacy WA teal
         0x103529,  // deep green container

@@ -146,6 +146,7 @@ fun WaHomePreview(
         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(tokens.navbarDivider).copy(alpha = 0.30f)))
 
         // ── Bottom navigation ────────────────────────────────────────
+        // OVR_NAVBAR_BG themes WhatsApp's own tab bar, not the phone's navigation strip.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -160,8 +161,6 @@ fun WaHomePreview(
             NavTab(label = "Communities", icon = { tint -> CommunitiesTabIcon(tint) }, active = false, tokens = tokens, badge = 0, modifier = Modifier.weight(1f))
             NavTab(label = "Calls",       icon = { tint -> CallsTabIcon(tint) },       active = false, tokens = tokens, badge = 0, modifier = Modifier.weight(1f))
         }
-
-        // OVR_NAVBAR_BG themes WhatsApp's own tab bar, not the phone's navigation strip.
     }
 }
 

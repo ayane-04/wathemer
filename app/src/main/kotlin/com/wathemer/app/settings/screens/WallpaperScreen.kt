@@ -155,7 +155,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
                     checked = snap.wallpaperEnabled,
                     onCheckedChange = { newChecked ->
                         snapshot.updateWallpaperEnabled(prefs, newChecked)
-                        // Glass cannot turn on without a wallpaper; wallpaper off must switch glass off with it, announced by toast.
+                        // The glass switch refuses to turn on without a wallpaper; this keeps that true the other way, never silently.
                         if (!newChecked && prefs.glassEnabled) {
                             prefs.glassEnabled = false
                             // Two lines max, Android truncates anything longer.
@@ -219,7 +219,6 @@ private fun WallpaperThumbnail(path: String?, stamp: Long, dim: Int, blur: Int) 
         }
         return
     }
-    // Blur must be scaled twice, for px vs dp and for thumbnail size; unscaled it reads roughly 8x too soft.
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         // Shared with the chat previews (previewBlurDp) so the two cannot drift apart.
         val blurDp = previewBlurDp(blur, with(LocalDensity.current) { maxHeight.toPx() })

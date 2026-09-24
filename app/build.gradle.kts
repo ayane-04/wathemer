@@ -22,12 +22,11 @@ android {
         minSdk = 31
         targetSdk = 36
         // Bump on every build that leaves this machine, or a log cannot be tied to a build.
-        versionCode = 228
-        versionName = "1.0.6"
+        versionCode = 238
+        versionName = "1.0.8"
 
         ndk {
-            // arm64 only: no 32-bit Android 12 devices exist, and emulators cannot run an Xposed module.
-            // APK bulk is DEX, not natives; R8 stays off until someone writes the reflective keep rules.
+            // arm64 only: 32-bit-only Android 12 phones effectively do not exist, and emulators are not a target.
             abiFilters += listOf("arm64-v8a")
         }
     }
@@ -52,6 +51,7 @@ android {
             } else {
                 null
             }
+            // R8 stays off until someone writes the reflective keep rules.
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -125,9 +125,8 @@ dependencies {
     // Material (XML theme parent for settings activity)
     implementation(libs.material)
 
-    // UCrop crops the wallpaper; JitPack-resolved via the repo in settings.gradle.kts.
-    // OkHttp/Okio excluded: UCrop uses them only to download http Uris and the picker only hands it local ones.
-    // ART resolves a missing class when the referencing method RUNS, so a remote Uri would throw NoClassDefFoundError; delete the two excludes to revert.
+    // OkHttp/Okio excluded: UCrop needs them only to download an http Uri, and both croppers hand it a local one.
+    // ART resolves the missing class when that path runs, so a remote Uri would throw NoClassDefFoundError; delete the excludes to revert.
     implementation(libs.ucrop) {
         exclude(group = "com.squareup.okhttp3")
         exclude(group = "com.squareup.okio")

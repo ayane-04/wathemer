@@ -26,12 +26,12 @@ object ChatWallpaperLibrary {
     /** Each entry is a full-screen image here and a copy inside WhatsApp; the cap keeps that honest. */
     const val MAX_ENTRIES = 30
 
-    /** The copy stops here: a cropped screen-size image is a couple of megabytes, a mistaken pick is not. */
+    /** The copy stops here: a cropped screen-size image is a couple of megabytes, so anything far past it is not one. */
     const val MAX_IMAGE_BYTES = 24L * 1024 * 1024
 
     private const val MAX_NAME_CHARS = 48
 
-    /** One chat's wallpaper. [file] lives in [dir]; [stamp] is unique forever, WhatsApp keys its cached copy on it. */
+    /** One chat's wallpaper. [file] lives in [dir]; [stamp] is unique for the life of the store, and WhatsApp keys its cached copy on it. */
     data class Entry(
         val jid: String,
         val name: String,
@@ -55,7 +55,7 @@ object ChatWallpaperLibrary {
     /** Every stored entry, file present or not; the hook reads this shape too. */
     fun all(prefs: Prefs): List<Entry> = parse(prefs.chatWallpapers)
 
-    /** Entries whose file still exists; a missing file resolves to the global wallpaper and is not worth a row. */
+    /** Entries whose file still exists; one without its file gets no row, though WhatsApp may still show its cached copy. */
     fun list(context: Context, prefs: Prefs): List<Entry> =
         all(prefs).filter { fileOf(context, it).canRead() }
 
@@ -68,7 +68,7 @@ object ChatWallpaperLibrary {
         val existing = entries.firstOrNull { it.jid == jid }
         if (existing == null && entries.size >= MAX_ENTRIES) return PutResult.Full
         val stamp = prefs.chatWallpaperSeq + 1
-        // Unguessable on purpose: the provider is exported, and a counted name would let any app enumerate these.
+        // Unguessable on purpose: a second lock beside the provider's caller check, since these are per-contact pictures.
         val fileName = "$stamp-${randomHex(16)}.jpg"
         val target = File(dir(context), fileName)
         val part = File(dir(context), "$fileName.part")
@@ -78,7 +78,7 @@ object ChatWallpaperLibrary {
             target.parentFile!!.mkdirs()
             openStream()!!.use { input ->
                 part.outputStream().use { out ->
-                    // Bounded by hand: a picker hands over any file and need not declare a size.
+                    // Bounded by hand: a stream declares no size, so the copy counts its own bytes.
                     val buf = ByteArray(64 * 1024)
                     while (true) {
                         val n = input.read(buf)
@@ -126,7 +126,7 @@ object ChatWallpaperLibrary {
         Log.i(TAG, "removed stamp ${entry.stamp}")
     }
 
-    /** One line, bounded, no control characters; the title view can be blank, so the jid's user part stands in. */
+    /** One line, bounded, no control characters; a blank title falls back to the previous name, then the jid's readable half. */
     fun sanitizeName(raw: String?, fallback: String?, jid: String): String {
         val clean = ThemeFile.oneLine(raw)
         if (clean.isNotBlank()) return clean

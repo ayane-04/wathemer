@@ -25,7 +25,6 @@ import java.lang.reflect.Method
 private const val TAG = "WaThemer.BubbleColors"
 private const val MAX_PARENT_WALK = 15
 
-/** Prefix every diagnostic line with TAG; routed to the LSPosed module log. */
 private fun dlog(m: String) { XposedBridge.log("$TAG: $m") }
 
 object BubbleColors {
@@ -106,7 +105,7 @@ object BubbleColors {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val drawable = param.result as? Drawable ?: return
                 val position = param.args.getOrNull(directionArgIndex) as? Int ?: return
-                // Do not shorten to position == 3: that folds CENTERED into INCOMING. BubbleSide is the only decoder.
+                // Do not shorten to position == 3: that folds CENTERED into INCOMING. Decode through BubbleSide.
                 val side = BubbleSide.of(position)
                 // When a shape owns this side, do not tint: SRC_IN flattens artwork styles BubbleShapes leaves untinted on purpose.
                 val shape = when (side) {
@@ -136,12 +135,12 @@ object BubbleColors {
         val pkg = app.packageName
         val res = app.resources
         val candidateNames = arrayOf(
-            // Confirmed leak surfaces (fg=NinePatchDrawable in live dumps)
+            // Verified leak surfaces.
             "quoted_message_frame",
             "location_bubble_frame",
             "link_preview_frame",
             "thumb_0", "thumb_1", "thumb_2", "thumb_3",
-            // Present in dumps + matches the same WA bubble engine pattern
+            // Same pattern, not individually verified.
             "media_container_wrapper",
             "media_container",
             "document_frame",
@@ -195,9 +194,9 @@ object BubbleColors {
         applyRoundedOutline(app, "thumb_2", topOnly = false)
         applyRoundedOutline(app, "thumb_3", topOnly = false)
         // Maps: clipping the location_bubble_frame overlay does not round the visible map, so clip map_holder and map_frame.
-        applyRoundedOutline(app, "map_frame", topOnly = false)               // static-location map outer (FrameLayout); skipped if WDSRoundedFrameLayout (live)
+        applyRoundedOutline(app, "map_frame", topOnly = false)               // static-location map outer (FrameLayout); skipped if WDSRoundedFrameLayout
         applyRoundedOutline(app, "map_holder", topOnly = false)              // map widget itself (WaMapView)
-        applyRoundedOutline(app, "link_preview_frame", topOnly = false)      // link preview card (WebPagePreviewView, fg=NinePatch confirmed)
+        applyRoundedOutline(app, "link_preview_frame", topOnly = false)      // link preview card (WebPagePreviewView)
         applyRoundedOutline(app, "live_location_info_holder", topOnly = false) // live location info row (LinearLayout/FrameLayout per layout XML)
     }
 
@@ -214,7 +213,6 @@ object BubbleColors {
         val messageTextId = res.waId("message_text", pkg)
         val dateId = res.waId("date", pkg)
         val mainLayoutId = res.waId("main_layout", pkg)
-        // The delivery tick: present only in outgoing rows, the side signal this file uses.
         statusTickId = res.waId("status", pkg)
 
         if (messageTextId == 0 && dateId == 0) {
@@ -337,8 +335,8 @@ object BubbleColors {
                     val b = h - view.paddingBottom
                     if (r - l <= 0 || b - t <= 0) return
                     if (topOnly) {
-                        // A path outline does not clip (MODE_PATH cannot), and preview looks right anyway.
-                        // Do not "fix" this with setRoundRect: it rounds all four corners and starts clipping.
+                        // A path outline clips only from API 33; below that, preview's ancestor already rounds it.
+                        // Do not "fix" this with setRoundRect: it rounds all four corners.
                         val cr = cornerRadius
                         val path = Path().apply {
                             addRoundRect(

@@ -132,7 +132,7 @@ object ThemeLibrary {
 
     // ── Apply ─────────────────────────────────────────────────────────────
 
-    /** Apply a theme file. Nothing is written until the whole archive has been read and the wallpaper is on disk. */
+    /** Apply a theme file. No setting is written until the whole archive has been read and the wallpaper is on disk. */
     fun apply(context: Context, prefs: Prefs, file: File, keepUndo: Boolean): Outcome {
         val stage = File(context.cacheDir, "theme_apply.png")
         val loaded = runCatching { ThemeFile.load(file.inputStream(), stage) }.getOrNull()
@@ -277,7 +277,7 @@ object ThemeLibrary {
 
     // ── Capture ───────────────────────────────────────────────────────────
 
-    /** Read the store into a theme. Only keys that are set travel: an unset global must not arm the substitution on someone else's phone. */
+    /** Read the store into a theme. Only colours that are set travel: an unset global must not arm the substitution on someone else's phone. */
     fun capture(prefs: Prefs, name: String, hasWallpaper: Boolean): ThemeDoc {
         val colors = LinkedHashMap<String, Int>()
         for (key in Prefs.THEME_COLOR_KEYS) {
@@ -295,10 +295,6 @@ object ThemeLibrary {
                 Prefs.KEY_SYSTEM_BARS_ENABLED -> prefs.systemBarsEnabled
                 Prefs.KEY_SYSTEM_BAR_AUTO_ICONS -> prefs.systemBarAutoIcons
                 Prefs.KEY_FONT_MAP_MONOSPACE -> prefs.fontMapMonospace
-                Prefs.KEY_MSG_AVATAR_CHATS -> prefs.msgAvatarChats
-                Prefs.KEY_MSG_AVATAR_GROUPS -> prefs.msgAvatarGroups
-                Prefs.KEY_MSG_AVATAR_MINE -> prefs.msgAvatarMine
-                Prefs.KEY_MSG_AVATAR_FIRST_ONLY -> prefs.msgAvatarFirstOnly
                 else -> { Log.w(TAG, "capture: no reader for flag $key"); false }
             }
         }
@@ -326,7 +322,7 @@ object ThemeLibrary {
             ticks = ThemeTicks(style = TickStyles.assetPrefix(prefs.getOverride(Prefs.TICK_STYLE))),
             flags = flags,
             font = font,
-            // Only once a slider has actually been moved, or every theme would stamp defaults on its importer.
+            // Only once a glass key has been set, or every theme would stamp defaults on its importer.
             glass = if (Prefs.THEME_GLASS_KEYS.none { prefs.isSet(it) }) null else ThemeGlass(
                 blur = prefs.glassBlur,
                 tint = prefs.glassTint,

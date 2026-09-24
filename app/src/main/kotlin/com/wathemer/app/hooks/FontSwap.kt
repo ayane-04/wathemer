@@ -105,7 +105,7 @@ object FontSwap {
         return Typeface.create(base, style)   // synth bold / italic / bold-italic
     }
 
-    /** Load the chosen face(s) from our own APK (res/font), via createPackageContext. */
+    /** Load the chosen face(s): a user font through [resolveUserFont], a built-in from our own APK's res/font via createPackageContext. */
     private fun loadFaces(app: Application, choice: String) {
         if (choice == "user") {
             val f = resolveUserFont(app)
@@ -142,12 +142,12 @@ object FontSwap {
         Log.i(LOGTAG, "loaded faces: normal=${normalFace != null} bold=${boldFace != null} (realBold=${bid != 0})")
     }
 
-    /** The user font file, WA-readable. Cache in our filesDir first, FontProvider second, the legacy Downloads path last. */
+    /** The user font file, WA-readable. Cache in WhatsApp's filesDir first, FontProvider second, the legacy Downloads path last. */
     private fun resolveUserFont(app: Application): File? {
         val name = (xprefs.getString(Prefs.KEY_FONT_USER_FILE, "") ?: "").trim()
         if (name.isNotBlank()) {
             val stamp = xprefs.getInt(Prefs.KEY_FONT_USER_STAMP, 0)
-            // Stamps are unique forever, so a matching cache file is the right bytes by construction.
+            // Stamps are unique for the life of the settings store, so within it a matching cache file is the right bytes.
             val cache = File(app.filesDir, "wt_font_$stamp")
             if (cache.canRead() && cache.length() > 0) return cache
             runCatching {

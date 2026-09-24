@@ -1,5 +1,5 @@
-// The cards: one rounded pane per page, sized to the list it wraps and clipped to the same rect.
-// Every edge is re-derived each pass from the list's own padding box, never snapshotted.
+// The cards: a rounded pane behind each list page, sized to the list or its rows' ink, plus the folder header.
+// Every edge is re-derived each pass from the live views; only WhatsApp's chrome clearance is captured, once.
 package com.wathemer.app.hooks.glass
 
 import android.graphics.Canvas
@@ -111,7 +111,7 @@ private val cardRect = Rect()
 
 private var loggedHostMismatch = false
 
-/** Shared card recipe for four surfaces; Chats is NOT one of them, its twin lives in [injectListPanel] and gets left behind. */
+/** Shared card recipe; the chat-list card keeps a twin in [injectListPanel], which an edit here leaves behind. */
 internal fun newCardGlass(parent: ViewGroup): GlassView = GlassView(parent.context).apply {
     underlay = wallpaperUnderlay(parent)
     params.apply {
@@ -197,7 +197,7 @@ internal fun syncUpdatesCard() {
     val right = host.width - side
     if (bottom - top < gap || right - side < gap) return
 
-    // Padding first, because the clip below reads it. The pad is the content's breathing room inside the border, equal on all four sides.
+    // Padding first, because the clip below reads it.
     val pad = (CARD_CONTENT_PAD_DP * d).toInt()
     val padBottom = host.height - bottom + pad
     if (list.paddingLeft != side + pad || list.paddingTop != top + pad ||
@@ -247,8 +247,7 @@ internal fun syncListCard(page: ChatsPage) {
     val list = page.list?.get() ?: return
     if (host.width <= 0 || host.height <= 0) return
     if (list.width <= 0 || list.height <= 0) return
-    // Archived inflates this coordinator too and has no floating nav, so the inset is taken only when the nav is in THIS window.
-    // Asked of the window structurally, never of an Activity name or of install order.
+    // Only a window holding the floating nav reserves its strip, asked structurally, never by Activity name or install order.
     val navInWindow = navContainerIdPin != 0 &&
         host.rootView?.findViewById<View>(navContainerIdPin) != null
     val inset = if (navInWindow) bottomInset else 0
@@ -326,7 +325,7 @@ internal fun syncListCard(page: ChatsPage) {
 
 // ── Folder pages that reuse the chat-list layout ───────────────────────────────────
 // Archived carries conversations_coordinator_layout but no header, nav or big title, so it takes its own card.
-// Its own refs too, so cardHostRef never follows the user off the home screen.
+// Its own refs too, kept out of chatsPages, so no home lookup follows the user off the home screen.
 private var folderHostRef: WeakReference<ViewGroup>? = null
 
 private var folderPanelRef: WeakReference<GlassView>? = null
@@ -345,7 +344,7 @@ internal fun injectFolderCard(host: ViewGroup) {
     XposedBridge.log("[$TAG] folder card inserted into ${host.javaClass.simpleName}")
 }
 
-/** One gap in from every side of the host. The list is resolved by id each pass, never remembered. */
+/** The list is resolved by id each pass, never remembered. */
 private fun syncFolderCard() {
     val host = folderHostRef?.get() ?: return
     val glass = folderPanelRef?.get() ?: return
@@ -425,8 +424,7 @@ private fun syncFolderCard() {
 }
 
 // ── List pages whose own root cannot host a pane ───────────────────────────────────
-// None of their roots stack, so android.R.id.content hosts: a later sibling of the wallpaper, its index 0 sits above it and below the page.
-// A framework id, not a WhatsApp one, so it is looked up directly and never through waId.
+// None of their roots stack, so android.R.id.content hosts, looked up directly as a framework id and never through waId.
 // Weak values here and below: the pane sits in the key's own window, and a strong value would pin a dead window's tree.
 private val contentCards = WeakHashMap<View, WeakReference<GlassView>>()
 
@@ -440,8 +438,7 @@ private val inkAt = IntArray(2)
 
 internal val hostAt = IntArray(2)
 
-/** Screen-px union of everything under [v] that actually paints; a group that only holds children is not ink.
- *  A transparent background is not ink either: the wallpaper protocol installs ColorDrawable(0) all over this tree. */
+/** Screen-px union of what under [v] paints: a group that only holds children is not ink, nor is the wallpaper protocol's ColorDrawable(0). */
 private fun collectInk(v: View, depth: Int) {
     // GONE, not "other than VISIBLE": an INVISIBLE view reserves its box and turning it on is no layout.
     if (v.visibility == View.GONE || v.width <= 0 || v.height <= 0) return
@@ -616,7 +613,7 @@ internal fun watchForPageScroller(content: ViewGroup, label: String) {
             }.getOrDefault(false)
             tries++
             if (done || tries >= 40) {
-                // Remove through the observer captured at registration; a dead one silently no-ops.
+                // Remove through the observer captured at registration; a dead one throws, so the live one stands in.
                 (if (obs.isAlive) obs else content.viewTreeObserver)
                     .removeOnGlobalLayoutListener(this)
                 if (!done) logOnce("$label: no scroller found after $tries layouts, no card")
@@ -638,7 +635,7 @@ private fun isAppScroller(v: View): Boolean {
     return false
 }
 
-/** The page's main scroller: the first shown vertical scrolling container of real height. */
+/** The page's main scroller: the first shown scrolling container of real height. */
 internal fun findPageScroller(content: ViewGroup): View? {
     val queue = ArrayDeque<View>()
     queue.add(content)
@@ -683,14 +680,13 @@ private fun alignIconlessRows(v: View, gutter: Int, want: Int, depth: Int) {
     }
 }
 
-/** Wraps the list itself, so an empty page whose list is GONE gets no slab. */
+/** Wraps the list itself, so an empty Starred or Broadcast page, whose list is GONE, gets no slab. */
 private fun syncContentCard(list: View, label: String, frameCard: Boolean) {
     val glass = contentCards[list]?.get() ?: return
     val host = glass.parent as? ViewGroup ?: return
     if (host.width <= 0 || host.height <= 0) return
     // Before the empty early-out: the header band belongs to the window, not to the list's content.
     runCatching { ensureFolderHeader(host, label) }
-    // The list is GONE on an empty Starred or Broadcast page; a card behind nothing is a blank slab.
     if (!list.isShown || list.width <= 0 || list.height <= 0) {
         if (glass.visibility != View.GONE) glass.visibility = View.GONE
         return
@@ -698,7 +694,6 @@ private fun syncContentCard(list: View, label: String, frameCard: Boolean) {
     if (glass.visibility != View.VISIBLE) glass.visibility = View.VISIBLE
 
     // The frame card insets the VIEW, never its insides: headers and rows move together, so the sticky copy cannot drift.
-    // The card then CONTAINS the frame by the grid's own item gap, so thumbnails breathe off its border.
     var frameGap = 0
     if (frameCard) {
         val dd = host.resources.displayMetrics.density
@@ -725,8 +720,7 @@ private fun syncContentCard(list: View, label: String, frameCard: Boolean) {
     val gap = (CARD_GAP_DP * d).toInt()
     val pad = (CARD_CONTENT_PAD_DP * d).toInt()
 
-    // A row is often a full-height container with a picture in the middle, so its box is not its content; union what the rows ink.
-    // From the ROWS, not the list: the list fills its viewport, so starting there is a slab.
+    // Union what the rows ink, not a box: a row is often a full-height container, and the list fills its viewport.
     inkUnion.setEmpty()
     (list as? ViewGroup)?.let { g ->
         for (i in 0 until g.childCount) collectInk(g.getChildAt(i), 1)
@@ -763,8 +757,7 @@ private fun syncContentCard(list: View, label: String, frameCard: Boolean) {
     if (frameCard) bottom = minOf(bottom, host.height - gap)
     if (right - l < gap || bottom - t < gap) return
 
-    // Horizontal padding puts the rows inside the card; none on the bottom, where the card ends at the rows and padding would chase itself.
-    // Not on a frame-carded grid: the gallery lays its own edges, and the write doubled its sticky headers.
+    // Rows inset on three sides; not the bottom, where padding would chase the card, nor a frame-carded grid, where it doubled the sticky headers.
     if (!frameCard &&
         (list.paddingLeft != side + pad || list.paddingTop != gap + pad ||
             list.paddingRight != side + pad)
@@ -845,7 +838,7 @@ internal fun injectBlockCard(block: View, label: String) {
     XposedBridge.log("[$TAG] $label panel inserted into ${host.javaClass.simpleName}")
 }
 
-/** Sides pinned to the list card's inset so the two edges align; top and bottom hug the block's ink. */
+/** Hugs the block's ink by its own pad; the sides never sit inside the list card's inset. */
 private fun syncBlockCard(block: View, label: String) {
     val glass = blockCards[block]?.get() ?: return
     val host = glass.parent as? ViewGroup ?: return
@@ -855,9 +848,8 @@ private fun syncBlockCard(block: View, label: String) {
         return
     }
     if (glass.visibility != View.VISIBLE) glass.visibility = View.VISIBLE
-    // From here, not from inject: attach is not layout, and the divider's height reads 0 there.
-    // A rule reads as a seam over glass; INVISIBLE keeps the row's height.
-    block.findViewById<View>(block.resources.waId("divider", "com.whatsapp"))?.let {
+    // Hidden here, not at inject where its height still reads 0: a rule is a seam over glass, and INVISIBLE keeps the row's height.
+    block.findViewById<View>(block.resources.waId("divider", block.context.packageName))?.let {
         if (it.height in 1..8 && it.visibility == View.VISIBLE) it.visibility = View.INVISIBLE
     }
 
@@ -1156,7 +1148,6 @@ private fun syncPageCard(card: PageCard) {
     val right = host.width - side
     if (bottom - top < gap || right - side < gap) return
 
-    // The pad is the content's breathing room inside the border, equal on all four sides.
     val pad = (CARD_CONTENT_PAD_DP * d).toInt()
     val wasAtTop = !list.canScrollVertically(-1)
     if (list.paddingLeft != side + pad || list.paddingTop != top + pad ||
@@ -1235,7 +1226,6 @@ internal fun syncChannelCard() {
     if (bottom - top < gap || right - side < gap) return
 
     // Every padding edge must stay invariant under the collapse, or setPadding fires a requestLayout per frame from pre-draw.
-    // The pad on top is the content's breathing room inside the border, equal on all four sides.
     val pad = (CARD_CONTENT_PAD_DP * d).toInt()
     val padL = (side - list.left).coerceAtLeast(0) + pad
     val padR = (list.left + list.width - right).coerceAtLeast(0) + pad
@@ -1291,13 +1281,13 @@ private val folderHeaderAt = IntArray(2)
 
 private val folderHeaderAbrAt = IntArray(2)
 
-/** Solid over the status bar and toolbar, then the chat screen's fade; a capsule under the toolbar's content. */
+/** Solid over the status bar and toolbar, as on the chat screen, with a capsule under the toolbar's content. */
 private fun ensureFolderHeader(anchor: View, label: String) {
     val root = anchor.rootView ?: return
     val content = root.findViewById<ViewGroup>(android.R.id.content) ?: return
     val under = wallpaperUnderlay(content)
     if (under.isEmpty()) return
-    // Settings hides its toolbar behind a persistent search bar, so the shown bar decides the band's reach; a capsule needs a shown toolbar.
+    // Settings hides its toolbar behind a persistent search bar, so the shown bar decides the band's reach.
     val toolbar = (if (homeToolbarId != 0) root.findViewById<View>(homeToolbarId) else null)
         ?.takeIf { it.isShown && it.height > 0 }
     val searchBarId = content.resources.waId("wds_search_bar", content.context.packageName)

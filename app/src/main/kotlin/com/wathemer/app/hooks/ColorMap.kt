@@ -55,7 +55,7 @@ object ColorMap {
         if (map.isEmpty()) return argb
         val rgb = argb and 0xFFFFFF
         val newRgb = map[rgb] ?: return argb
-        val alphaMask = argb and 0xFF000000.toInt()  // preserve original alpha
+        val alphaMask = argb and 0xFF000000.toInt()
         return alphaMask or newRgb
     }
 

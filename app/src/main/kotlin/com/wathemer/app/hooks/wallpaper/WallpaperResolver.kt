@@ -16,7 +16,6 @@ object WallpaperResolver {
     private const val TAG = "WaThemer.WPResolver"
     private const val CACHE_FILENAME = "wt_wallpaper.png"
 
-    /** Returns the wallpaper file, or null meaning skip painting this Activity. */
     fun resolve(context: Context, prefs: SharedPreferences): File? {
         val storedPath = prefs.getString(Prefs.KEY_WALLPAPER_PATH, null)
             ?.takeIf { it.isNotBlank() }

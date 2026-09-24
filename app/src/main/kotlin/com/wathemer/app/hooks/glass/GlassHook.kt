@@ -58,7 +58,7 @@ object GlassHook {
         }
         // Before any pane exists: every capture draws live views, and a ripple in one crashes the frame.
         ensureSelectorGuard()
-        // A refused capture must reach the module log; the engine's own Log.w never does.
+        // A refused capture must reach the module log, and the engine has no Xposed to write it.
         BackdropCapture.onRefused = { msg ->
             XposedBridge.log("[$TAG] $msg")
             HookLog.hit("guard/captureCycle", msg)
@@ -117,8 +117,7 @@ object GlassHook {
         coordIdPin = coordId
         if (coordId != 0) ViewThemeDispatcher.onId(coordId) { v ->
             val vg = v as? ViewGroup ?: return@onId
-            // Not home-only: Archived inherits this same layout, and home is the window that has header.
-            // Anywhere else takes its own card, or cardHostRef follows the user off home onto a foreign host.
+            // Archived inherits this layout but not home's header, so it takes its own card instead of a chats page.
             if (headerIdPin != 0 && vg.rootView?.findViewById<View>(headerIdPin) == null) {
                 runCatching { injectFolderCard(vg) }
                     .onFailure { XposedBridge.log("[$TAG] injectFolderCard threw: $it") }
@@ -142,7 +141,7 @@ object GlassHook {
                     .onFailure { XposedBridge.log("[$TAG] $label card threw: $it") }
             }
         }
-        // The stub declares no inflatedId, so the inflated stats view attaches carrying the stub's id.
+        // The stub's inflatedId is its own id, so the inflated stats view attaches carrying it.
         val counterId = res.waId("broadcast_counter_view_stub", pkg)
         if (counterId != 0) ViewThemeDispatcher.onId(counterId) { v ->
             if (v is ViewStub) return@onId
@@ -160,8 +159,7 @@ object GlassHook {
                 }
             }
         }
-        // Settings is the same shape with a ScrollView; content taller than the viewport clamps the card to it.
-        // An A/B flag swaps in a me-tab layout that scrolls a different id; hooking both covers either.
+        // An A/B flag swaps settings_scroll_view for a me-tab layout's nested scroller; hooking both covers either.
         for (n in listOf("settings_scroll_view", "settings_nested_scroll_view")) {
             val sid2 = res.waId(n, pkg)
             if (sid2 != 0) ViewThemeDispatcher.onId(sid2) { v ->
@@ -169,8 +167,7 @@ object GlassHook {
                     .onFailure { XposedBridge.log("[$TAG] settings card threw: $it") }
             }
         }
-        // Sub-pages have few stable list ids, but their Activity names are manifest names and never obfuscate.
-        // Rides the lifecycle callbacks, never Activity.onPostCreate; the card machinery is idempotent and a treated scroller skips by tag.
+        // Manifest names never obfuscate, so sub-pages match by prefix; ride the lifecycle callbacks, never Activity.onPostCreate.
         ActivityLifecycle.onCreated("glassCards") { a ->
             val name = a.javaClass.name
             if (CARDED_ACTIVITY_PREFIXES.none { name.startsWith(it) }) return@onCreated
@@ -229,7 +226,6 @@ object GlassHook {
             f.post {
                 runCatching {
                     // No clear first: the forced frost replaces the fill, and a clear that outlives a zero-size bail leaves the bar bare.
-                    // The menu's scrim, not the wallpaper tint: a bar floats over content and carries no blur of its own.
                     // Forced: Material's snackbar bridges setBackground to setBackgroundDrawable, and the interceptor sees that path.
                     frost(
                         f, tintOverride = MENU_SCRIM, allowSquare = true, ignorePadding = true,
@@ -344,7 +340,6 @@ object GlassHook {
             }
         }
 
-        // Do not frost the voice overlay: the trashcan has no fill of its own and the lock container is full-screen.
         // The picker arms on contact_picker_layout; toolbar and list are names WhatsApp reuses across screens.
         val pickerId = res.waId("contact_picker_layout", pkg)
         if (pickerId != 0) ViewThemeDispatcher.onId(pickerId) { v ->
@@ -352,19 +347,19 @@ object GlassHook {
                 .onFailure { XposedBridge.log("[$TAG] pickerGlass threw: $it") }
         }
 
-        // The lock pill is styled via ensureLockPane; the trashcan's own disc has no known id.
+        // Do not frost the voice overlay: the trashcan has no fill of its own and the lock container is full-screen; ensureLockPane styles the pill.
         val lockId = res.waId("voice_note_lock_container", pkg)
         if (lockId != 0) ViewThemeDispatcher.onId(lockId) { v -> runCatching { ensureLockPane(v) } }
 
         // ── WaEnhancer's New UI group filter ──────────────────────────────────────────
-        // A Chats/Groups pill it builds inside WhatsApp's filter row; its stock green and 2 dp strokes sit on the card.
+        // A Chats/Groups pill it builds inside WhatsApp's filter row; its stock green and thick outlines sit on the card.
         if (WaeCompat.enabled) {
             HookLog.arm("compat/filterGroups")
             // Its IGStatus strip is folded into the chats card by syncListCard; armed here so the ledger names it.
             HookLog.arm("compat/igStatus")
             // Its Show Name and Bio: two id-less TextViews it adds to the home toolbar, found by that shape.
             HookLog.arm("compat/toolbarText")
-            // Its Copy selection button under the reaction emojis, dressed from frostReactionsTray.
+            // Its Copy selection button under the reaction emojis, shelled by flattenWaeTray.
             HookLog.arm("compat/trayButtons")
             HookLog.arm("compat/trayStack")
             // WhatsApp measures the tray before it shows; the column must be what it measures.
@@ -409,8 +404,7 @@ object GlassHook {
         }
 
         // ── "See all", the region filters, and the appbar seam ─────────────────────────
-        // addon_button is shared: See all on channels, the chevron on Updates; frost()'s shape guard skips the chevron.
-        // A WDSButton paints its fill from its variant, so setBackground cannot outrank it; left as a plain frost.
+        // Shared by See all and the Updates chevron, which frost's shape guard skips; a WDSButton's variant fill outranks setBackground.
         val addonId = res.waId("addon_button", pkg)
         if (addonId != 0) ViewThemeDispatcher.onId(addonId) { v -> frostOnLayout(v) }
 
@@ -510,7 +504,7 @@ object GlassHook {
         }
 
         // ── Cards on the drilled-in channel screens ────────────────────────────────────
-        // The card's top is list.top, not the host origin: the chrome differs and one screen's list starts at y321.
+        // The card's top is list.top, not the host origin: these screens' chrome differs and one list starts well down the window.
         // The call list's WDSDivider reads as a rule on the glass; the list recycles, so the hide re-runs on layout.
         val logsId = res.waId("logs", pkg)
         if (logsId != 0) ViewThemeDispatcher.onId(logsId) { v ->
@@ -703,7 +697,7 @@ object GlassHook {
             }
         }
 
-        // action_tile_icon spans three screens; only tiles under a known group frost, or the community tiles get it too.
+        // action_tile_icon is shared beyond these groups; only tiles under a known one frost, or the community tiles get it too.
         val tileIconId = res.waId("action_tile_icon", pkg)
         val tileGroupIds = intArrayOf(
             res.waId("call_log_actions", pkg),          // the call log's row of three
@@ -827,7 +821,7 @@ object GlassHook {
         }
 
         // ── The mention autocomplete panel ───────────────────────────────────────────────
-        // A pane, not a film: the list under it must blur or the two text layers fight.
+        // A wallpaper pane with no source: it covers the chat under the list, or the two text layers fight.
         val mentionAttachId = res.waId("mention_attach", pkg)
         if (mentionAttachId != 0) ViewThemeDispatcher.onId(mentionAttachId) { v ->
             val host = v as? FrameLayout ?: return@onId
@@ -868,8 +862,7 @@ object GlassHook {
                             existing.setRadius(v.height / 2f)
                             return@runCatching
                         }
-                        // Blurred wallpaper as the fill: a film lets the bubble edge bleed through these.
-                        // The reactions pill overlaps its own bubble, and a lens over a lens is the one thing left as a stamp.
+                        // Blurred wallpaper, not a film, which lets the bubble edge through; the reactions pill, a lens over its bubble, stays a stamp.
                         val d = FrostDrawable(
                             v, { host -> wallpaperRecordOf(host) }, v.height / 2f, glassTint(CHIP_ALPHA),
                             strokeWidth = v.dp(1f), strokeColor = glassTint(CHIP_RIM_ALPHA),
@@ -953,7 +946,7 @@ object GlassHook {
             liquidFrostOnLayout(v, 16f, keepPadding = true)
         }
 
-        // With no bubble on the row this timestamp chip IS the surface; the 100-odd inline ones sit in a bubble already.
+        // With no bubble on the row this timestamp chip IS the surface; everywhere else it sits inside a bubble already.
         bubblelessRootIds = intArrayOf(
             res.waId("sticker_root", pkg),
             res.waId("push_to_video_root", pkg),
@@ -1007,8 +1000,7 @@ object GlassHook {
         }
 
         // ── The follow button on the updates card ──────────────────────────────────────
-        // A pane cannot go in (every capturable subtree is an ancestor), so it takes the chips' tint-only frost.
-        // button_view is generic, so it is scoped to its container; Explore more and Create channel stay stock.
+        // No pane fits (every capturable subtree is an ancestor), so the chips' tint-only frost, scoped since button_view is generic.
         val followContainerId = res.waId("quick_follow_button_container", pkg)
         val followBtnId = res.waId("button_view", pkg)
         if (followBtnId != 0 && followContainerId != 0) {
@@ -1018,7 +1010,7 @@ object GlassHook {
         }
 
         // ── The add-status tile on the updates card ─────────────────────────────────────
-        // Stock is an opaque slab and a pane cannot go in, so the chips' frost at a card's radius; the tile is too tall for a pill.
+        // Stock is an opaque slab and a pane cannot go in, so the chips' frost with a card-like corner; the tile is too tall for a pill.
         val statusTileId = res.waId("status_tile_layout", pkg)
         if (statusTileId != 0) ViewThemeDispatcher.onId(statusTileId) { v ->
             frostOnLayoutWith(v, glassTint(CHIP_ALPHA), v.dp(16f))
@@ -1095,7 +1087,7 @@ object GlassHook {
             }
         }
 
-        // Status privacy parks viewport slack inside its stretched column; wrap and pin it so the card hugs real content.
+        // Status privacy parks viewport slack inside its stretched column; wrapped, the card hugs real content.
         val spHeaderId = res.waId("see_my_status_header", pkg)
         if (spHeaderId != 0) ViewThemeDispatcher.onId(spHeaderId) { v ->
             val col = v.parent as? View ?: return@onId
@@ -1110,14 +1102,13 @@ object GlassHook {
         // Material's own container, so this covers every sheet; sheets live in their own window, so screen coordinates.
         val sheetId = res.waId("design_bottom_sheet", pkg)
         if (sheetId != 0) ViewThemeDispatcher.onId(sheetId) { v ->
-            // On layout, not attach: a sheet attaches at 0x0, so an attach hook alone sees nothing.
+            // The pane is MATCH_PARENT, so the 0x0 a sheet attaches at is no obstacle.
             runCatching { injectSheetGlass(v) }
                 .onFailure { XposedBridge.log("[$TAG] injectSheetGlass threw: $it") }
         }
 
         // ── Self-declared sheets ─────────────────────────────────────────────────────────
-        // These carry BottomSheetBehavior themselves, so the design_bottom_sheet hook never sees them.
-        // Deliberately stock: expressions tray, the call popups, the two webview sheets; the status viewer's details sheet gets tint-only frost.
+        // These carry BottomSheetBehavior, so design_bottom_sheet misses them; the expressions tray, call popups and webview sheets stay stock by decision.
         for (n in listOf(
             "bottom_sheet",
             "audio_chat_bottom_sheet",
@@ -1136,8 +1127,7 @@ object GlassHook {
         }
 
         // ── Sheet contents that paint OVER the wrapper's glass ──────────────────────────
-        // These roots paint their own fill above the cleared wrapper, and no shell clearing reaches a dialog window.
-        // This id roots a full-screen page as well as the sheet, and only the sheet is a card.
+        // No shell clearing reaches a dialog window, so these roots keep painting; this id also roots a full page, and only the sheet is a card.
         val galleryPickerId = res.waId("gallery_picker_layout", pkg)
         if (galleryPickerId != 0) ViewThemeDispatcher.onId(galleryPickerId) { v ->
             if (!isMediaPickerSheet(v)) return@onId
@@ -1187,8 +1177,7 @@ object GlassHook {
         }
 
         // ── Inline opaque panels ───────────────────────────────────────────────────────
-        // parentPanel is AppCompat's dialog container, so this reaches every AlertDialog in the app.
-        // The expressions tray stays stock (a legible grid needs its fill); the editors' body is in because the catchall strips its fill.
+        // parentPanel reaches every AlertDialog; the expressions tray stays stock (its grid needs its fill), the editors' body joins.
         for (n in listOf("media_picker_popup_content", "parentPanel", "emoji_edit_text_layout")) {
             val pid = res.waId(n, pkg)
             if (pid == 0) continue
@@ -1223,7 +1212,7 @@ object GlassHook {
         }
 
         // ── The reactions tray ─────────────────────────────────────────────────────────
-        // It rides three transform AnimatorSets, so the glass is a background drawable, never a pane.
+        // It rides three transform AnimatorSets, so the glass is a pane inside the tray, where it rides them too.
         val trayId = res.waId("reactions_tray_layout", pkg)
         if (trayId != 0) ViewThemeDispatcher.onId(trayId) { v ->
             runCatching { frostReactionsTray(v) }
@@ -1253,13 +1242,13 @@ object GlassHook {
             runCatching { callCardGlass(v as? ViewGroup ?: return@onId) }
                 .onFailure { XposedBridge.log("[$TAG] call card glass threw: $it") }
         }
-        // The More rows carry their own opaque fills over the pane; the label's attach is the inflate signal.
+        // The More rows carry their own opaque fills over the card's stamp; the label's attach is the inflate signal.
         val noiseLabelId = res.waId("noise_cancellation_label", pkg)
         if (noiseLabelId != 0) ViewThemeDispatcher.onId(noiseLabelId) { v ->
             runCatching { callMoreMenuGlass(v) }
                 .onFailure { XposedBridge.log("[$TAG] call more menu threw: $it") }
         }
-        // Both the call header's WDSButtons and the Meta AI voice toolbar's WaImageButton fill from their own background, which is what is retinted here; send_message_btn is a bare frame and declines.
+        // Each fills from its own background, which is what is retinted; send_message_btn is a bare frame and declines.
         for (n in listOf("minimize_btn", "participant_btn", "network_health_btn", "security_btn", "send_message_btn")) {
             val bid = res.waId(n, pkg)
             if (bid == 0) continue
@@ -1270,7 +1259,7 @@ object GlassHook {
         }
 
         // ── Overflow / dropdown menus ──────────────────────────────────────────────────
-        // content is each menu row's id and the only handle a popup exposes; its fill lives in another window.
+        // A popup exposes no container id and its fill lives in another window, so its rows are found by these three ids.
         menuRowId = res.waId("content", pkg)
         menuTitleId = res.waId("menu_title", pkg)
         menuSelRowId = res.waId("message_selection_drop_down_row_text", pkg)
@@ -1334,8 +1323,7 @@ object GlassHook {
             }
         }
 
-        // The AppCompat SearchView gets its own path: it declines hosts that cannot carry a pane rather than clearing a fill it cannot replace.
-        // search_bar_layout too: where search_view sits in a LinearLayout, that layout's parent can carry the pane.
+        // The SearchView path declines hosts that cannot carry a pane; search_bar_layout joins for where search_view sits in a LinearLayout.
         for (sn in listOf("search_view", "search_bar_layout")) {
             val searchViewId = res.waId(sn, pkg)
             if (searchViewId != 0) ViewThemeDispatcher.onId(searchViewId) { v ->
@@ -1422,7 +1410,7 @@ object GlassHook {
         if (navContainerId != 0) ViewThemeDispatcher.onId(navContainerId) { v ->
             runCatching { floatNav(v) }.onFailure { XposedBridge.log("[$TAG] floatNav threw: $it") }
         }
-        // No pane of ours: the nav is themeable. Round both views, they share bounds and the square one shows through.
+        // The nav keeps its own themeable fill; round both views, they share bounds and the square one shows through.
         for (n in listOf("bottom_nav", "bottom_nav_container")) {
             val nid = res.waId(n, pkg)
             if (nid == 0) continue
@@ -1439,8 +1427,7 @@ object GlassHook {
             }
         }
         // ── The active tab pill ──────────────────────────────────────────────────────────
-        // A pane only for the droplet, and only because it reads the indicators' LAYOUT boxes; Material animates
-        // them by transform, and a pane following a transform is the reaction bar's killer. The stamp is the other path.
+        // A pane only for the droplet, which reads the indicators' layout boxes; Material animates them by transform, which no pane follows.
         val pillId = res.waId("navigation_bar_item_active_indicator_view", pkg)
         if (pillId != 0 && !tokenTabPillSet) {
             // Forced in either path: the menu view re-applies its own indicator drawable on every refresh, and that fires no layout.
@@ -1542,8 +1529,6 @@ object GlassHook {
         infoGroupTitleId = res.waId("group_title", pkg)
         infoGroupSubtitleId = res.waId("group_details_card_subtitle", pkg)
 
-        // The info tiles ride the action_tile_icon registration above; a control on glass must be brighter than the glass.
-
         // Rounded, not inset: the strip is deliberately edge-to-edge. Re-run on layout as the thumbs arrive.
         val thumbsId = res.waId("media_card_thumbs", pkg)
         if (thumbsId != 0) ViewThemeDispatcher.onId(thumbsId) { host ->
@@ -1627,7 +1612,6 @@ object GlassHook {
                             if (!armed) return
                             val v = param.thisObject as? View ?: return
                             if (v.id == 0 || v.id !in draftSendBtnIds) return
-                            // The widget derives paint colour and icon filter from this list; white rides its own path.
                             param.args[0] = draftWhiteContent
                         }
                     },
@@ -1702,8 +1686,7 @@ object GlassHook {
     }
 
 
-    // status.playback and group.product are named per page, the rest of those packages must stay bare; the dialer has no scroller to card.
-    /** Manifest names never obfuscate; every non-sheet page under these takes the content card and folder header. */
+    /** Carded by prefix; status.playback and group.product are named per page, the rest of those packages must stay bare; the dialer has no scroller. */
     private val CARDED_ACTIVITY_PREFIXES = listOf(
         "com.whatsapp.settings.",
         "com.whatsapp.payments.",
@@ -1763,8 +1746,7 @@ object GlassHook {
         chatOpenHooked = true
         runCatching {
             // Framework fade ids; our own anim resources cannot resolve in WhatsApp's process.
-            // No shared elements by design; requestFeature changes the whole process's window animations, so the removal is total.
-            // Only where it can act: below 34 Activity.onCreate stays unhooked and undeoptimised.
+            // No shared elements, by design: they need requestFeature, which changes the whole process's window animations.
             if (Build.VERSION.SDK_INT >= 34) {
                 XposedHelpers.findAndHookMethod(
                     Activity::class.java, "onCreate", Bundle::class.java,

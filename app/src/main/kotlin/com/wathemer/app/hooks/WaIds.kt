@@ -153,7 +153,7 @@ object WaIds {
                 )
             }
         }
-        // Reflected members all resolve during install, so they can be summarised here.
+        // Reflected pins made at install are decided by now; the glass FAB's resolve later from a view and log their own lines.
         if (failedAnchors.isNotEmpty()) {
             XposedBridge.log(
                 "[$TAG] WA reflected anchors FAILED: ${failedAnchors.sorted()}; those features are " +

@@ -106,7 +106,7 @@ class GlassBubblePane(context: Context) : View(context) {
     private var loggedCollectThrow = false
 
     init {
-        // The framework skips onDraw for a background-less plain View; be explicit.
+        // Explicit only: a plain View already draws; it is a background-less ViewGroup that skips onDraw.
         setWillNotDraw(false)
     }
 

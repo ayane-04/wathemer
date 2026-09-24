@@ -3,7 +3,7 @@ package com.wathemer.app.glass
 import android.graphics.Bitmap
 import kotlin.math.roundToInt
 
-/** Real blurs for the wallpaper copies: shrink-and-stretch leaves a lattice on high-contrast content, a kernel does not. */
+/** Real blurs for the wallpaper copies and the popup snapshot: shrink-and-stretch leaves a lattice on high-contrast content, a kernel does not. */
 internal object BitmapBlur {
 
     /** Halve by 2x2 averages until the width is at or under source.width / divisor; each halving is a true box average. */

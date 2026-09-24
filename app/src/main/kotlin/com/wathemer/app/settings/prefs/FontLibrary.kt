@@ -16,20 +16,20 @@ object FontLibrary {
 
     private const val TAG = "WaThemer.FontLib"
 
-    /** One imported font. [file] lives in [dir]; [stamp] is unique forever, WhatsApp keys its cache on it. */
+    /** One imported font. [file] lives in [dir]; [stamp] is unique for the life of the store, and WhatsApp keys its cache on it. */
     data class Entry(val file: String, val name: String, val stamp: Int)
 
     /** [duplicate] means the pick matched an existing entry and nothing was written. */
     data class ImportOutcome(val entry: Entry, val duplicate: Boolean)
 
-    /** Why a pick produced no entry, kept apart so the message never blames the file for the wrong reason. */
+    /** What a pick produced; the two failures stay apart so the message never blames the file for the wrong reason. */
     sealed class ImportResult {
         class Done(val outcome: ImportOutcome) : ImportResult()
         object Unreadable : ImportResult()
-        class TooLarge(val bytes: Long) : ImportResult()
+        object TooLarge : ImportResult()
     }
 
-    /** The copy stops here: the largest CJK collections fit under it, a mistaken video pick does not. */
+    /** The copy stops here: the largest single-weight CJK fonts fit under it, a mistaken video pick does not. */
     const val MAX_FONT_BYTES = 32L * 1024 * 1024
 
     fun dir(context: Context): File = File(context.filesDir, "fonts")
@@ -64,7 +64,7 @@ object FontLibrary {
                 }
             }
         }.isSuccess
-        if (overflow) { tmp.delete(); return ImportResult.TooLarge(total) }
+        if (overflow) { tmp.delete(); return ImportResult.TooLarge }
         if (!copied) { tmp.delete(); return ImportResult.Unreadable }
         val outcome = importFile(context, prefs, tmp, displayNameStem(context, uri))
         tmp.delete()

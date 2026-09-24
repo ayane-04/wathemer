@@ -6,12 +6,12 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 
-/** Four programs from shared fragments: the panes split refraction and light around their blur, a bubble's blur is baked into its bitmap so it runs both in one pass, and a rim program gives a wallpaper-only pane its edge. */
+/** Four programs from shared fragments: the panes split refraction and light around their blur, a bubble's blur is baked into its bitmap so it runs both in one pass, and a rim program gives a pane its sharp edge. */
 object GlassShader {
 
     private const val TAG = "WaThemer.Shader"
 
-    /** Shared prelude (SDF, gradient, lens profile), included in both programs so geometry cannot drift. */
+    /** Shared prelude (SDF, gradient, lens profile), included in every program so geometry cannot drift. */
     private val COMMON = """
         uniform float2 size;
         uniform float4 radii;        // per-corner radius, TL TR BR BL; four equal values are the old single radius
@@ -123,7 +123,7 @@ object GlassShader {
         }
     """.trimIndent()
 
-    /** The transmission's uniforms, one text for the pane and the bubble programs. */
+    /** The transmission's uniforms, one text for the pane, rim and bubble programs. */
     private val REFRACT_UNIFORMS = """
         uniform shader content;
         uniform float ior;
@@ -159,7 +159,7 @@ object GlassShader {
         uniform float  edgeShadow;       // darkening on the outer edge; 0 disables
     """.trimIndent()
 
-    /** Snell through the slab to the displacement `off`; needs `n`, `t`, `fragCoord` in scope. */
+    /** Snell through the slab to the displacement `off`; needs `n` and `fragCoord` in scope. */
     private val TRANSMIT_BEND = """
             // Snell, then walk the bent ray down through the slab to the backdrop plane. On the
             // flat plateau n = +z, the ray comes straight back out and the displacement is exactly
@@ -207,7 +207,7 @@ object GlassShader {
             half4 outc = half4(cr, cg.g, cb, cg.a);
     """.trimIndent()
 
-    /** The bubble's reads into `outc`; the fringe reads are skipped when dispersion is 0. */
+    /** The bubble's reads into `outc`, reused by the rim program; the fringe reads are skipped when dispersion is 0. */
     private val TAPS_BUBBLE = """
             float2 lo = float2(0.5, 0.5);
             float2 hi = size - float2(0.5, 0.5);
@@ -419,7 +419,7 @@ object GlassShader {
         }
     """.trimIndent()
 
-    /** The band alone, from the sharp wallpaper: the bend the frost's blur would otherwise erase, blended over it by a detail alpha. */
+    /** The band alone, from the sharp backdrop: the bend the frost's blur would otherwise erase, blended over it by a detail alpha. */
     val RIM_AGSL: String = """
         $REFRACT_UNIFORMS
         uniform float detail;         // how much sharp content shows at the very rim; 0 is off
@@ -544,7 +544,7 @@ object GlassShader {
     /** The hook's ledger hears a compile failure; logcat alone is invisible from the module log. */
     var onCompileFailure: ((what: String, t: Throwable) -> Unit)? = null
 
-    /** And a success, so a device check can tell which program actually drew. */
+    /** And a success, so a device check can tell which programs compiled. */
     var onCompiled: ((what: String) -> Unit)? = null
 
     /** True when this device can run the refraction tier at all. */
@@ -587,7 +587,7 @@ object GlassShader {
         return rs
     }
 
-    /** A fresh rim shader for one wallpaper-only pane; null falls the pane back to the frost alone. */
+    /** A fresh rim shader for one pane; null falls the pane back to the frost alone. */
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     fun newRimShader(): RuntimeShader? {
         if (rimFailed) return null
@@ -605,7 +605,7 @@ object GlassShader {
             .coerceIn(1f, maxOf(1f, minOf(w, h) * 0.5f))
     }
 
-    /** Geometry uniforms for both programs, in one place so the passes agree where the bevel is. */
+    /** Geometry uniforms for every program, in one place so the passes agree where the bevel is. */
     private fun setGeometry(
         rs: RuntimeShader,
         params: GlassParams,
@@ -712,7 +712,7 @@ object GlassShader {
             ((c shr 16) and 0xFF) / 255f,
             ((c shr 8) and 0xFF) / 255f,
             (c and 0xFF) / 255f,
-            // A parameter like the two strengths, never a params write: a setter fires onChanged and rebuilds the effect chain.
+            // A parameter like the two strengths, never a params write.
             ((c ushr 24) and 0xFF) / 255f * tintScale.coerceIn(0f, 1f),
         )
         rs.setFloatUniform("specStrength", specStrength)

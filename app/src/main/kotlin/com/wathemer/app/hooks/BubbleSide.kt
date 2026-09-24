@@ -1,6 +1,6 @@
 package com.wathemer.app.hooks
 
-/** The single decoder of WhatsApp's direction argument, so [BubbleShapes] and [BubbleColors] cannot disagree. */
+/** Decodes WhatsApp's direction argument for [BubbleShapes] and [BubbleColors], so the two cannot disagree. */
 enum class BubbleSide {
     INCOMING,
     OUTGOING,

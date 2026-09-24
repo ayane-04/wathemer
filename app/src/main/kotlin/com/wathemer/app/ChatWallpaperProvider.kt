@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Binder
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import com.wathemer.app.util.HostPackages
 import java.io.File
 import java.io.FileNotFoundException
 
@@ -27,14 +28,16 @@ class ChatWallpaperProvider : ContentProvider() {
         return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
     }
 
-    /** WhatsApp or this app, compared by app id so a cloned WhatsApp in another user passes too. */
+    /** A themed host or this app, compared by app id so a cloned host in another user passes too. */
     private fun callerAllowed(): Boolean {
         val caller = Binder.getCallingUid()
         if (caller == Process.myUid()) return true
-        val whatsapp = runCatching {
-            requireNotNull(context).packageManager.getPackageUid("com.whatsapp", 0)
-        }.getOrNull() ?: return false
-        return caller % PER_USER_RANGE == whatsapp % PER_USER_RANGE
+        val pm = requireNotNull(context).packageManager
+        // An uninstalled host throws rather than returning 0, so each lookup stands on its own.
+        return HostPackages.ALL.any { pkg ->
+            val uid = runCatching { pm.getPackageUid(pkg, 0) }.getOrNull() ?: return@any false
+            caller % PER_USER_RANGE == uid % PER_USER_RANGE
+        }
     }
 
     override fun getType(uri: Uri): String = "image/jpeg"

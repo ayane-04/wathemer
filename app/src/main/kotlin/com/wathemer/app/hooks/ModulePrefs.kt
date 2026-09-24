@@ -41,13 +41,13 @@ object ModulePrefs {
             .getOrNull()
     }
 
-    /** SharedPreferences over the remote store, refreshable in place so the fields holding it stay valid; absent a framework store every read returns its default, which is stock behaviour. */
+    /** SharedPreferences over the remote store, refreshable in place so the fields holding it stay valid. */
     class WtPrefs internal constructor(private val provider: () -> SharedPreferences?) : SharedPreferences {
 
         @Volatile private var current: SharedPreferences? = provider()
         @Volatile private var lastFetch = SystemClock.elapsedRealtime()
 
-        /** Refetches the store; floored because shouldTheme calls this on every resume and focus gain. */
+        /** Refetches the store, at most once per [RELOAD_FLOOR_MS] while one is held. */
         fun reload() {
             val now = SystemClock.elapsedRealtime()
             if (current != null && now - lastFetch < RELOAD_FLOOR_MS) return

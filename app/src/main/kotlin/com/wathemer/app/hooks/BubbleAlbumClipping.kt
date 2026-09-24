@@ -20,7 +20,7 @@ object BubbleAlbumClipping {
 
     fun install(app: Application, classLoader: ClassLoader) {
         xprefs.reload()
-        // Gate on a themed bubble, a colour or the glass pane: stock bubbles clip their own album.
+        // Gate on a themed bubble, a colour or glass: stock bubbles clip their own album.
         val active = xprefs.getInt(Prefs.BUBBLE_LEFT_BG, 0) != 0 ||
                      xprefs.getInt(Prefs.BUBBLE_RIGHT_BG, 0) != 0 ||
                      xprefs.getBoolean(Prefs.KEY_GLASS_ENABLED, false)

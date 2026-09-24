@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.wathemer.app.settings.prefs.Prefs
+import com.wathemer.app.util.HostPackages
 import de.robv.android.xposed.XposedBridge
 import java.util.Random
 import kotlin.math.cos
@@ -30,7 +31,7 @@ object EffectsOverlays {
         if (!xprefs.getBoolean(Prefs.KEY_EFFECT_SNOW, false)) return
         // Dispatched after the wallpaper client; the flakes sit in content, above the wallpaper, whichever attaches first.
         ActivityLifecycle.onCreated("snow") { a ->
-            if (a.packageName == "com.whatsapp") {
+            if (HostPackages.isHost(a.packageName)) {
                 runCatching { attach(a) }.onFailure { XposedBridge.log("$TAG: snow attach failed on ${a.javaClass.simpleName}: $it") }
             }
         }

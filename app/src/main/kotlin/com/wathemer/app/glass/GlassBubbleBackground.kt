@@ -13,7 +13,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewTreeObserver
 
-/** Every visible bubble's glass, painted behind the rows from inside the list's own display list; in-row glass freezes on scroll and a pane beside the list misses the stretch. */
+/** Every visible bubble's glass, painted behind the rows from inside the list's own display list; in-row glass freezes on scroll. */
 class GlassBubbleBackground(private val host: View) : Drawable() {
 
     var params: GlassParams = GlassParams(host.resources.displayMetrics.density)
@@ -100,7 +100,7 @@ class GlassBubbleBackground(private val host: View) : Drawable() {
     /** True when [v] is the list this draws behind; one conversation's background must not stand in for another's. */
     fun serves(v: View): Boolean = host === v
 
-    /** Stops a superseded instance collecting: both listeners go, the drawable itself the host has already let go of. */
+    /** Stops a superseded instance collecting: both listeners go; the host's background is left alone, as a finishing chat may still draw it. */
     fun release() {
         host.removeOnAttachStateChangeListener(attach)
         host.viewTreeObserver.removeOnPreDrawListener(preDraw)
