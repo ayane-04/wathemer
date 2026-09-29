@@ -6,7 +6,7 @@ import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 
-/** Every WA id lookup routes through here so a miss logs; instrumentation only, callers still get the raw 0. */
+/** Every WA id lookup routes through here so a miss logs and each name is scanned for once; callers still get the raw 0. */
 object WaIds {
 
     private const val TAG = "WaThemer"
@@ -23,9 +23,17 @@ object WaIds {
     /** The name [id] was resolved from, or a hex id when it never came through here. */
     fun nameOf(id: Int): String = names[id] ?: "id/0x${id.toString(16)}"
 
+    /** Answers by package, then name: an app's getIdentifier scans its whole key pool, and an id never changes in a process. */
+    private val resolved = ConcurrentHashMap<String, ConcurrentHashMap<String, Int>>()
+
     /** Resolves a WA id, logging the first miss per name; returns the raw 0 so existing guards keep working. */
     fun id(res: Resources, name: String, pkg: String): Int {
-        val value = runCatching { res.getIdentifier(name, "id", pkg) }.getOrDefault(0)
+        val byName = resolved.getOrPut(pkg) { ConcurrentHashMap() }
+        byName[name]?.let { return it }
+        var threw = false
+        val value = runCatching { res.getIdentifier(name, "id", pkg) }.getOrElse { threw = true; 0 }
+        // A lookup that threw is not an answer, so the next call asks again.
+        if (!threw) byName[name] = value
         requested.add(name)
         if (value != 0) names[value] = name
         if (value == 0 && missing.add(name)) {

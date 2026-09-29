@@ -61,6 +61,7 @@ data class ThemeGlass(
     val popupMorph: Boolean = GlassDefaults.POPUP_MORPH,
     val rowOptics: Boolean = GlassDefaults.ROW_OPTICS,
     val shapedBubbles: Boolean = GlassDefaults.SHAPED_BUBBLES,
+    val stillSkipsScroll: Boolean = GlassDefaults.STILL_SKIPS_SCROLL,
 )
 
 /** Shapes travel as asset names, never as the stored index: the registry is ordered and a removal renumbers it. */
@@ -307,7 +308,8 @@ object ThemeFile {
                     .put("smallOptics", g.smallOptics)
                     .put("popupMorph", g.popupMorph)
                     .put("rowOptics", g.rowOptics)
-                    .put("shapedBubbles", g.shapedBubbles),
+                    .put("shapedBubbles", g.shapedBubbles)
+                    .put("stillSkipsScroll", g.stillSkipsScroll),
             )
         }
         return root.toString(2)
@@ -397,6 +399,7 @@ object ThemeFile {
                 popupMorph = o.optBoolean("popupMorph", GlassDefaults.POPUP_MORPH),
                 rowOptics = o.optBoolean("rowOptics", GlassDefaults.ROW_OPTICS),
                 shapedBubbles = o.optBoolean("shapedBubbles", GlassDefaults.SHAPED_BUBBLES),
+                stillSkipsScroll = o.optBoolean("stillSkipsScroll", GlassDefaults.STILL_SKIPS_SCROLL),
             )
         }
 

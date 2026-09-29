@@ -245,6 +245,11 @@ class Prefs(
         get() = sp.getBoolean(KEY_GLASS_SHAPED_BUBBLES, GlassDefaults.SHAPED_BUBBLES)
         set(value) { commitBoolean(KEY_GLASS_SHAPED_BUBBLES, value) }
 
+    /** Glass with only the wallpaper behind it skips the redraws another view's scrolling would ask of it. */
+    var glassStillSkipsScroll: Boolean
+        get() = sp.getBoolean(KEY_GLASS_STILL_SKIPS_SCROLL, GlassDefaults.STILL_SKIPS_SCROLL)
+        set(value) { commitBoolean(KEY_GLASS_STILL_SKIPS_SCROLL, value) }
+
     /** The glass tint carries a whisper of the wallpaper's dominant hue; off is the neutral grey. */
     var glassHuedTint: Boolean
         get() = sp.getBoolean(KEY_GLASS_HUED_TINT, GlassDefaults.HUED_TINT)
@@ -739,6 +744,7 @@ class Prefs(
         const val KEY_GLASS_POPUP_MORPH = "glass_popup_morph"
         const val KEY_GLASS_ROW_OPTICS = "glass_row_optics"
         const val KEY_GLASS_SHAPED_BUBBLES = "glass_shaped_bubbles"
+        const val KEY_GLASS_STILL_SKIPS_SCROLL = "glass_still_skips_scroll"
 
         // ── Updates ───────────────────────────────────
         // Settings-app only; the hook never reads these and a theme file can never write them.
@@ -807,7 +813,7 @@ class Prefs(
             KEY_GLASS_HUED_TINT, KEY_GLASS_LINEAR_COPY, KEY_GLASS_EDGE_SHADOW, KEY_GLASS_GLOW, KEY_GLASS_EDGE_CLARITY,
             KEY_GLASS_LIVE_CLARITY, KEY_GLASS_NAV_DROPLET, KEY_GLASS_ASSEMBLE,
             KEY_GLASS_ONE_BLUR, KEY_GLASS_SMALL_OPTICS, KEY_GLASS_POPUP_MORPH, KEY_GLASS_ROW_OPTICS,
-            KEY_GLASS_SHAPED_BUBBLES,
+            KEY_GLASS_SHAPED_BUBBLES, KEY_GLASS_STILL_SKIPS_SCROLL,
         )
 
         /** Every key an imported theme may touch. A key missing here is unreachable from a theme file, which is the whole guarantee. */

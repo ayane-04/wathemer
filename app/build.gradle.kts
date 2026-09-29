@@ -22,8 +22,8 @@ android {
         minSdk = 31
         targetSdk = 36
         // Bump on every build that leaves this machine, or a log cannot be tied to a build.
-        versionCode = 238
-        versionName = "1.0.8"
+        versionCode = 241
+        versionName = "1.0.9"
 
         ndk {
             // arm64 only: 32-bit-only Android 12 phones effectively do not exist, and emulators are not a target.
@@ -51,8 +51,8 @@ android {
             } else {
                 null
             }
-            // R8 stays off until someone writes the reflective keep rules.
-            isMinifyEnabled = false
+            // Shrink only, per proguard-rules.pro: WhatsApp copies and verifies this whole dex at every start.
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

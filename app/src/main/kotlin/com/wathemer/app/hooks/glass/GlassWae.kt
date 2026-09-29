@@ -12,6 +12,7 @@ import android.graphics.drawable.shapes.RoundRectShape
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -35,10 +36,20 @@ internal fun dressWaeFilterRow(container: ViewGroup) {
     val fix = Runnable { runCatching { dressWaeFilterRowNow(container) } }
     fix.run()
     // WaEnhancer rebuilds both halves' drawables on every tap; pre-draw catches that before the frame.
-    container.viewTreeObserver.addOnPreDrawListener {
-        if (container.isAttachedToWindow) fix.run()
-        true
-    }
+    val observer = container.viewTreeObserver
+    observer.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+        override fun onPreDraw(): Boolean {
+            if (container.isAttachedToWindow) {
+                fix.run()
+                return true
+            }
+            // The window outlives the row: leave with it and clear the tag, so a re-attach dresses and registers again.
+            if (observer.isAlive) observer.removeOnPreDrawListener(this)
+            else container.viewTreeObserver.removeOnPreDrawListener(this)
+            container.setTag(waeFilterRowTag, null)
+            return true
+        }
+    })
     HookLog.hit("compat/filterGroups")
 }
 
@@ -224,11 +235,7 @@ internal fun hookWaeTrayPlacement(app: Application, classLoader: ClassLoader) {
     val trayId = res.waId("reactions_tray_layout", pkg)
     val containerId = res.waId("reactions_tray_container", pkg)
     if (trayId == 0 || containerId == 0) return
-    if (!Deobfuscator.ensureBridge(app)) {
-        logOnce("tray placement: no DexKit bridge")
-        return
-    }
-    val cls = Deobfuscator.loadReactionsTrayClass(classLoader, trayId) ?: run {
+    val cls = Deobfuscator.loadReactionsTrayClass(app, classLoader, trayId) ?: run {
         logOnce("tray placement: tray class unresolved")
         return
     }

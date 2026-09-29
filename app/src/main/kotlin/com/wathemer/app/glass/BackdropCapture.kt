@@ -68,6 +68,9 @@ class BackdropCapture(
     var hasContent: Boolean = false
         private set
 
+    /** No content yet, or a display list the system dropped (an Activity stop takes every one in the window). */
+    val needsFreshCapture: Boolean get() = !hasContent || !glassNode.hasDisplayList()
+
     /** [node] keeps the capture sharp, since refraction can only bend detail that still exists; [glassNode] redraws it at effectScaleFor's divisor and carries the shader with the blur chained after. */
     val node = RenderNode("wathemer-backdrop")
     private val glassNode = RenderNode("wathemer-glass")

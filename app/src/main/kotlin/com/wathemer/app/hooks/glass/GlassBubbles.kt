@@ -66,13 +66,9 @@ private fun bubbleParams(density: Float) = GlassParams(density).apply {
 /** PRIORITY_HIGHEST so this result is the factory's last word; the user's bubble colours are deliberately ignored while glass is on. */
 internal fun installBubbleGlass(app: Application) {
     val cl = app.classLoader
-    // Open the bridge ourselves: never rely on BubbleColors or BubbleShapes to have opened it.
+    // The resolver opens DexKit itself on a cache miss, so this never relies on BubbleColors or BubbleShapes having opened it.
     val dex = Deobfuscator
-    if (!dex.ensureBridge(app)) {
-        XposedBridge.log("[$TAG] DexKit bridge unavailable; no bubble glass")
-        return
-    }
-    val method = dex.loadBubbleDrawableMethod(cl) ?: run {
+    val method = dex.loadBubbleDrawableMethod(app, cl) ?: run {
         XposedBridge.log("[$TAG] bubble drawable method unresolved; no bubble glass")
         return
     }

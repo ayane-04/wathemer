@@ -937,6 +937,8 @@ internal fun extendList(list: View) {
     list.setTag(doneTag, true)
     page.list = WeakReference(list)
     (list as? ViewGroup)?.clipToPadding = false
+    // WaEnhancer's chat filter can drop the search bar the title rides in on; the list's first layout says so.
+    if (WaeCompat.enabled) watchForBarlessPage(list, page)
     syncListCard(page)              // the nav may already have floated
     list.requestLayout()
 }

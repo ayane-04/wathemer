@@ -12,6 +12,7 @@ import android.graphics.Paint
 import android.graphics.RecordingCanvas
 import android.graphics.RuntimeShader
 import android.graphics.Shader
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.SystemClock
 import android.util.AttributeSet
@@ -20,6 +21,7 @@ import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import android.widget.ImageView
 import java.lang.ref.WeakReference
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -42,6 +44,8 @@ class GlassView @JvmOverloads constructor(
         get() = capture.source
         set(value) {
             capture.source = value
+            // A source handed over later goes live at once, not a heartbeat late.
+            if (stillSkipsScroll) lastActivityMs = SystemClock.uptimeMillis()
             invalidate()
         }
 
@@ -50,6 +54,7 @@ class GlassView @JvmOverloads constructor(
         get() = capture.underlay
         set(value) {
             capture.underlay = value
+            if (stillSkipsScroll) lastActivityMs = SystemClock.uptimeMillis()
             invalidate()
         }
 
@@ -65,6 +70,12 @@ class GlassView @JvmOverloads constructor(
                     lastScreenX = screenLoc[0]
                     lastScreenY = screenLoc[1]
                     lastActivityMs = now
+                }
+                // Nothing live behind it: only the wallpaper views, or a dropped display list, change what it shows.
+                if (stillSkipsScroll && backdrop == null) {
+                    val fresh = capture.needsFreshCapture
+                    val changed = underlayChanged()
+                    if (fresh || changed) lastActivityMs = now
                 }
                 val moving = now - lastActivityMs < params.activeWindowMs
                 updateMotion(now)
@@ -106,12 +117,47 @@ class GlassView @JvmOverloads constructor(
     // Scroll only: a global-layout listener never lets the throttle engage.
     private val activityListener = ViewTreeObserver.OnScrollChangedListener {
         val now = SystemClock.uptimeMillis()
-        lastActivityMs = now
         lastScrollMs = now
+        // Another view's scroll leaves a pane with nothing live behind it unchanged; pre-draw watches what it does show.
+        if (!(stillSkipsScroll && backdrop == null)) lastActivityMs = now
     }
 
     /** Scroll only, a separate clock: attach and resize must not read as motion or panes appear bright. */
     private var lastScrollMs = 0L
+
+    /** The wallpaper views as last seen, [SIG_FIELDS] ints each: size, screen position, visibility, alpha, picture, dim colour. */
+    private var underlaySig = IntArray(0)
+    private val sigLoc = IntArray(2)
+
+    /** Updates the signature in place and says whether any field of it changed. */
+    private fun underlayChanged(): Boolean {
+        val u = capture.underlay
+        var changed = false
+        if (underlaySig.size != u.size * SIG_FIELDS) {
+            underlaySig = IntArray(u.size * SIG_FIELDS)
+            changed = true
+        }
+        for (i in u.indices) {
+            val v = u[i]
+            v.getLocationOnScreen(sigLoc)
+            val b = i * SIG_FIELDS
+            changed = sig(b, v.width) or changed
+            changed = sig(b + 1, v.height) or changed
+            changed = sig(b + 2, sigLoc[0]) or changed
+            changed = sig(b + 3, sigLoc[1]) or changed
+            changed = sig(b + 4, v.visibility) or changed
+            changed = sig(b + 5, java.lang.Float.floatToRawIntBits(v.alpha)) or changed
+            changed = sig(b + 6, System.identityHashCode((v as? ImageView)?.drawable)) or changed
+            changed = sig(b + 7, (v.background as? ColorDrawable)?.color ?: 0) or changed
+        }
+        return changed
+    }
+
+    private fun sig(i: Int, value: Int): Boolean {
+        if (underlaySig[i] == value) return false
+        underlaySig[i] = value
+        return true
+    }
 
     init {
         // A ViewGroup skips onDraw unless told; the backdrop draws there to land under our children.
@@ -128,6 +174,8 @@ class GlassView @JvmOverloads constructor(
         params.onChanged = {
             // Comparing every uniform costs more than the rebuild it avoids; just flag stale.
             capture.effectDirty = true
+            // Captured at once, not a heartbeat late: still glass takes no capture from other views' scrolls.
+            if (stillSkipsScroll) lastActivityMs = SystemClock.uptimeMillis()
             clarityValid = false
             invalidateLight()
             invalidateOutline()
@@ -432,7 +480,16 @@ class GlassView @JvmOverloads constructor(
         // Ceiled, with slack, so the translucent rects abut exactly: a fractional edge leaves a row bare and an overlap tints one twice.
         val band = ceil(GlassShader.effectiveBevel(params, width, height) + 2f)
 
-        // A fading or expanded surface cannot use the shortcut: a flat rect cannot ramp its alpha.
+        // All plateau, so the program would return this one colour at every pixel.
+        if (allPlateau()) {
+            val c = flatInteriorColor()
+            if (c ushr 24 != 0) {
+                flatPaint.color = c
+                canvas.drawRect(0f, 0f, w, h, flatPaint)
+            }
+            return
+        }
+        // Otherwise a fading or expanded surface cannot use the shortcut: a flat rect cannot ramp its alpha.
         val fading = params.fadeTopLenPx > 0f ||
             params.edgeExpandLeft > 0f || params.edgeExpandTop > 0f ||
             params.edgeExpandRight > 0f || params.edgeExpandBottom > 0f
@@ -452,6 +509,20 @@ class GlassView @JvmOverloads constructor(
             // Abutting again; see the note on band above.
             canvas.drawRect(band, band, w - band, h - band, flatPaint)
         }
+    }
+
+    /** Every pixel is plateau: expanded past the bevel on every side by the shader's own margin, with no corner, fade or press. */
+    private fun allPlateau(): Boolean {
+        if (params.fadeTopLenPx > 0f || pressAmp > 0f || params.cornerRadius != 0f) return false
+        val rr = params.cornerRadii
+        if (rr != null && rr.any { it != 0f }) return false
+        val bevel = GlassShader.effectiveBevel(params, width, height)
+        val k = (bevel * 0.35f).coerceIn(2f, 64f)
+        val expand = minOf(
+            minOf(params.edgeExpandLeft, params.edgeExpandRight),
+            minOf(params.edgeExpandTop, params.edgeExpandBottom),
+        )
+        return expand >= bevel + k / 4f - 0.5f
     }
 
     /** The exact plateau colour the light program returns: f0 survives there, the premultiplied rgb must be un-premultiplied for a Paint, and it must read [effFresnelStrength] or the edge steps. */
@@ -550,6 +621,12 @@ class GlassView @JvmOverloads constructor(
 
         /** Surfaces assemble their lens as they appear rather than arriving whole; set at install. */
         @JvmStatic var assembleOnAppear: Boolean = false
+
+        /** Glass with nothing live behind it ignores other views' scrolling and watches its wallpaper views instead; set at install. */
+        @JvmStatic var stillSkipsScroll: Boolean = false
+
+        /** Ints per wallpaper view in the signature [underlayChanged] keeps. */
+        private const val SIG_FIELDS = 8
 
         const val APPEAR_MS = 220L
 

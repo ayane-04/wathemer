@@ -117,9 +117,11 @@ object BubbleShapes {
 
         if (!loadModuleResources(app)) return
 
-        if (!Deobfuscator.ensureBridge(app)) {
-            XposedBridge.log("$TAG: DexKit init failed; shapes off")
-            HookLog.skip("install/BubbleShapes", "DexKit init failed")
+        // Resolved first, as it gates the prewarm; each resolver opens DexKit only on its own cache miss.
+        val (tailed, extBuilder) = Deobfuscator.loadBubbleLeafBuilders(app, classLoader)
+        if ((tailed == null || extBuilder == null) && Deobfuscator.loadBubbleProviderClass(app, classLoader) == null) {
+            XposedBridge.log("$TAG: leaf builders and bubble provider both unresolved; shapes off")
+            HookLog.skip("install/BubbleShapes", "leaf builders and bubble provider unresolved")
             return
         }
 
@@ -127,7 +129,6 @@ object BubbleShapes {
         if (incomingStyle != 0) prewarm(incomingStyle, dir = 2)
         if (outgoingStyle != 0) prewarm(outgoingStyle, dir = 3)
 
-        val (tailed, extBuilder) = Deobfuscator.loadBubbleLeafBuilders(app, classLoader)
         if (tailed != null && extBuilder != null) {
             // dir is arg 2 on the tailed builder, arg 3 on ext (extra tag argument ahead of it).
             hookLeafBuilder(tailed, dirArgIndex = 2, ext = false)
@@ -137,10 +138,10 @@ object BubbleShapes {
                     "(in=$incomingStyle out=$outgoingStyle)",
             )
         } else {
-            installFactoryFallback(classLoader)
+            installFactoryFallback(app, classLoader)
         }
 
-        installInsetOverride(classLoader)
+        installInsetOverride(app, classLoader)
         Deobfuscator.saveCache()
     }
 
@@ -151,8 +152,9 @@ object BubbleShapes {
         outgoingStyle = xprefs.getInt(Prefs.BUBBLE_STYLE_OUTGOING, 0)
         if (incomingStyle == 0 && outgoingStyle == 0) return false
         if (!loadModuleResources(app)) return false
-        if (!Deobfuscator.ensureBridge(app)) {
-            XposedBridge.log("$TAG: DexKit init failed; packs off under glass")
+        // False on a miss: going on would set underGlass with no inset hook behind it.
+        if (Deobfuscator.loadBubbleProviderClass(app, classLoader) == null) {
+            XposedBridge.log("$TAG: bubble provider unresolved; packs off under glass")
             return false
         }
         if (incomingStyle != 0) prewarm(incomingStyle, dir = 2)
@@ -161,7 +163,7 @@ object BubbleShapes {
         glassKinds[1] = classify(outgoingStyle, dir = 3, masks)
         if (glassKinds[0] == GlassKind.NONE && glassKinds[1] == GlassKind.NONE) return false
         underGlass = true
-        installInsetOverride(classLoader)
+        installInsetOverride(app, classLoader)
         Deobfuscator.saveCache()
         return true
     }
@@ -227,8 +229,8 @@ object BubbleShapes {
     }
 
     /** Fallback when leaf builders fail to resolve: factory keyed on direction, so grouped messages keep a tail. */
-    private fun installFactoryFallback(classLoader: ClassLoader) {
-        val factory = Deobfuscator.loadBubbleDrawableMethod(classLoader)
+    private fun installFactoryFallback(app: Application, classLoader: ClassLoader) {
+        val factory = Deobfuscator.loadBubbleDrawableMethod(app, classLoader)
         if (factory == null) {
             XposedBridge.log("$TAG: leaf builders AND factory both unresolved; shapes off")
             HookLog.skip("BubbleShapes/leafBuilders", "leaf builders and factory both unresolved")
@@ -251,8 +253,8 @@ object BubbleShapes {
     }
 
     /** Text-inset override. Known defect kept on purpose; any fix must derive from WA's Rect or the styles that look right today regress. */
-    private fun installInsetOverride(classLoader: ClassLoader) {
-        val inset = Deobfuscator.loadBalloonInsetMethod(classLoader)
+    private fun installInsetOverride(app: Application, classLoader: ClassLoader) {
+        val inset = Deobfuscator.loadBalloonInsetMethod(app, classLoader)
         if (inset == null) {
             XposedBridge.log("$TAG: inset method unresolved; text padding stays stock")
             return

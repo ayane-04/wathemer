@@ -57,17 +57,17 @@ object BubbleColors {
         // ── Bg tint hooks gate: DexKit + the provider's 3 Drawable methods + edge-leak fixes ───
         if (bgActive) {
             runCatching {
-                if (Deobfuscator.ensureBridge(app)) {
+                if (Deobfuscator.loadBubbleProviderClass(app, classLoader) != null) {
                     // Only the main bubble factory defers to shapes; date pill and border keep their tint unconditionally.
                     hookBubbleMethod(
-                        Deobfuscator.loadBubbleDrawableMethod(classLoader), leftBg, rightBg, 0,
+                        Deobfuscator.loadBubbleDrawableMethod(app, classLoader), leftBg, rightBg, 0,
                         shapeIncoming = shapeIn, shapeOutgoing = shapeOut,
                     )
-                    hookBubbleMethod(Deobfuscator.loadBalloonDateDrawableMethod(classLoader), leftBg, rightBg, 0)
-                    hookBubbleMethod(Deobfuscator.loadBalloonBorderDrawableMethod(classLoader), leftBg, rightBg, 1)
+                    hookBubbleMethod(Deobfuscator.loadBalloonDateDrawableMethod(app, classLoader), leftBg, rightBg, 0)
+                    hookBubbleMethod(Deobfuscator.loadBalloonBorderDrawableMethod(app, classLoader), leftBg, rightBg, 1)
                     Deobfuscator.saveCache()
                 } else {
-                    dlog("DexKit init failed; bubble tint will not work")
+                    dlog("bubble provider unresolved; bubble tint will not work")
                 }
             }.onFailure { dlog("tint hook setup FAILED: ${it.stackTraceToString()}") }
 
@@ -137,6 +137,7 @@ object BubbleColors {
         val candidateNames = arrayOf(
             // Verified leak surfaces.
             "quoted_message_frame",
+            "bubble_quoted_message_frame",   // the same frame, renamed partway through building a row
             "location_bubble_frame",
             "link_preview_frame",
             "thumb_0", "thumb_1", "thumb_2", "thumb_3",

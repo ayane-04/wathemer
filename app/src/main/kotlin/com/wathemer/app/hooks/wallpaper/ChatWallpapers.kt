@@ -85,7 +85,7 @@ object ChatWallpapers {
     /** Inside the chat's onCreate: read the Intent, hand the decode off, return. Nothing here may touch a view. */
     private fun prefetch(a: Activity, saved: Bundle?) {
         if (a.javaClass.name != CONVERSATION) return
-        // Snapshot reads only: the reload is a binder call and belongs to the first resume, where it already happens.
+        // Snapshot reads only: the reload belongs to the first resume, where it already happens.
         if (!xprefs.getBoolean(Prefs.KEY_WALLPAPER_ENABLED, false)) return
         val entry = entryFor(a, saved) ?: return
         val app = a.applicationContext

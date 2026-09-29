@@ -743,11 +743,52 @@ internal fun injectBigTitle(bar: View) {
     }
     if (container.getTag(titleTag) != null) return
     val barLp = bar.layoutParams as? ViewGroup.MarginLayoutParams ?: return
-    container.setTag(titleTag, true)
 
     // The chrome clearance moves onto the title: the bar's own margin, or the list's padding once the bar is a row.
     val headerClearance =
         if (seated) (list?.paddingTop ?: 0) + container.dp(4f).toInt() else barLp.topMargin
+    insertBigTitle(container, headerClearance, if (seated) "bar seated in the list" else "bar beside the list")
+    // A seated bar keeps its margin: it is the list's row inset, and the extension recurrence lands the rows under the title.
+    if (!seated) {
+        barLp.topMargin = container.dp(2f).toInt()
+        bar.layoutParams = barLp
+    }
+}
+
+/** A page whose list lays out with no search bar, as WaEnhancer's "No search" and "Search icon" leave it, takes its title from the list. */
+internal fun watchForBarlessPage(list: View, page: ChatsPage) {
+    list.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+        override fun onLayoutChange(
+            v: View, left: Int, top: Int, right: Int, bottom: Int,
+            oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int,
+        ) {
+            if (v.height <= 0) return
+            // One look, after the first real layout: a seated bar is bound in that same pass, so by now it has attached.
+            v.removeOnLayoutChangeListener(this)
+            if (page.bar?.get() != null) return
+            val container = v.parent as? ViewGroup ?: return
+            // WhatsApp puts the header's clearance on the list or on the container, and IGStatus moves the list's onto its strip.
+            val stripMargin = (waeStatusStrip(container)?.layoutParams as? ViewGroup.MarginLayoutParams)?.topMargin ?: 0
+            val clearance = when {
+                v.paddingTop > 0 -> v.paddingTop
+                stripMargin > 0 -> stripMargin
+                container.paddingTop > 0 -> 0
+                else -> {
+                    logOnce("big title declined: no search bar and no header clearance on the list, strip or container")
+                    return
+                }
+            }
+            // Inside WhatsApp's layout pass: nothing may escape from here.
+            runCatching { insertBigTitle(container, clearance + container.dp(4f).toInt(), "no search bar") }
+                .onFailure { logOnce("big title for a page with no search bar threw: $it") }
+        }
+    })
+}
+
+/** Child 0 of the page's container, [clearance] below its top; whichever way in arrives first places the page's one title. */
+private fun insertBigTitle(container: ViewGroup, clearance: Int, where: String) {
+    if (container.getTag(titleTag) != null) return
+    container.setTag(titleTag, true)
     val ctx = container.context
     val tv = TextView(ctx).apply {
         text = navLabelForPage(container) ?: navLabel() ?: "Chats"
@@ -768,16 +809,10 @@ internal fun injectBigTitle(bar: View) {
         tv, 0,
         LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = headerClearance },
+        ).apply { topMargin = clearance },
     )
     registerBigTitle(tv)
-    // A seated bar keeps its margin: it is the list's row inset, and the extension recurrence lands the rows under the title.
-    if (!seated) {
-        barLp.topMargin = container.dp(2f).toInt()
-        bar.layoutParams = barLp
-    }
-    val where = if (seated) "bar seated in the list" else "bar beside the list"
-    XposedBridge.log("[$TAG] big title '${tv.text}' inserted (clearance=$headerClearance, $where)")
+    XposedBridge.log("[$TAG] big title '${tv.text}' inserted (clearance=$clearance, $where)")
 }
 
 private var loggedHomeSyncThrow = false

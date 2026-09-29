@@ -12,7 +12,7 @@ object ModulePrefs {
 
     private const val TAG = "WaThemer.Prefs"
 
-    /** Refetch floor: shouldTheme reads on every resume and focus gain, and a binder call there would be felt. */
+    /** Refetch floor: shouldTheme reads on every resume and focus gain; it bounds a framework that refetches over binder. */
     private const val RELOAD_FLOOR_MS = 500L
 
     @Volatile private var iface: XposedInterface? = null

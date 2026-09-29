@@ -12,6 +12,7 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ListView
@@ -106,7 +107,7 @@ internal fun pickerGlass(root: ViewGroup) {
     }
 }
 
-// Resolved once: waId is an uncached getIdentifier and this collect runs per pre-draw frame.
+// Resolved once: this collect runs per pre-draw frame, so it reads ints rather than asking by name.
 private var pickerIdsResolved = false
 
 private var pickerActionIds = IntArray(0)
@@ -592,12 +593,28 @@ private fun clearSearchViewFills(field: View) {
     }
 }
 
+/** Runs [sync] on every layout of [view]'s window while it stays attached; the window outlives each search fragment, so the listener leaves with its view. */
+internal fun armSearchLayoutDriver(view: View, sync: () -> Unit) {
+    if (view.getTag(wdsBarTag) != null) return
+    view.setTag(wdsBarTag, true)
+    val observer = view.viewTreeObserver
+    observer.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+        override fun onGlobalLayout() {
+            if (view.isAttachedToWindow) {
+                runCatching { sync() }
+                return
+            }
+            // `isAlive` because a dead observer throws on removal; the tag goes too, so a re-attach registers again.
+            if (observer.isAlive) observer.removeOnGlobalLayoutListener(this)
+            else view.viewTreeObserver.removeOnGlobalLayoutListener(this)
+            view.setTag(wdsBarTag, null)
+        }
+    })
+}
+
 /** Several ids reach this one component, so the capsule and its listener arm from here rather than at each id. */
 internal fun armWdsSearchBar(bar: FrameLayout, why: String) {
-    if (bar.getTag(wdsBarTag) == null) {
-        bar.setTag(wdsBarTag, true)
-        bar.viewTreeObserver.addOnGlobalLayoutListener { runCatching { syncWdsSearchBar(bar) } }
-    }
+    armSearchLayoutDriver(bar) { syncWdsSearchBar(bar) }
     runCatching { syncWdsSearchBar(bar) }
         .onFailure { logOnce("wds search bar glass threw on " + why + ": " + it) }
 }

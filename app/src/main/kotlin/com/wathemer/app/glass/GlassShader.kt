@@ -86,6 +86,9 @@ object GlassShader {
             float r = (p.x < 0.0) ? ((p.y < 0.0) ? radii.x : radii.w)
                                   : ((p.y < 0.0) ? radii.y : radii.z);
             float d = sdRoundRect(p, halfSize, r, k);
+            float t = clamp(-d / max(bevel, 1.0), 0.0, 1.0);
+            // On the plateau the normal is +z whatever the gradient says, so the gradient's four taps are skipped.
+            if (t >= 1.0) return float4(0.0, 0.0, 1.0, d);
 
             float2 g = float2(
                 sdRoundRect(p + float2(1.0, 0.0), halfSize, r, k) -
@@ -96,7 +99,6 @@ object GlassShader {
             float gl = length(g);
             float2 n2 = gl > 0.0001 ? g / gl : float2(0.0, -1.0);
 
-            float t = clamp(-d / max(bevel, 1.0), 0.0, 1.0);
             float2 hp = lensProfile(t);
             float s = (depth / max(bevel, 1.0)) * hp.y;
             float3 n = normalize(float3(n2 * s, 1.0));
@@ -490,6 +492,9 @@ object GlassShader {
         /** surfaceAt for a pack: the same bevel and normal, read off the inward distance instead of the rounded box. */
         float4 surfaceAtField(float2 fragCoord) {
             float din = fieldInward(fragCoord);
+            float t = clamp(din / max(bevel, 1.0), 0.0, 1.0);
+            // On the plateau the normal is +z whatever the gradient says, so the gradient's four taps are skipped.
+            if (t >= 1.0) return float4(0.0, 0.0, 1.0, -din);
             // The inward distance grows away from the edge, so the outward gradient is its negative.
             float2 g = -float2(
                 fieldInward(fragCoord + float2(1.0, 0.0)) - fieldInward(fragCoord - float2(1.0, 0.0)),
@@ -497,7 +502,6 @@ object GlassShader {
             );
             float gl = length(g);
             float2 n2 = gl > 0.0001 ? g / gl : float2(0.0, -1.0);
-            float t = clamp(din / max(bevel, 1.0), 0.0, 1.0);
             float2 hp = lensProfile(t);
             float s = (depth / max(bevel, 1.0)) * hp.y;
             float3 n = normalize(float3(n2 * s, 1.0));

@@ -181,10 +181,7 @@ object TickShapes {
             HookLog.skip("TickShapes/chatList", "chat list receipt drawables unresolved")
             return
         }
-        if (!Deobfuscator.ensureBridge(app)) {
-            HookLog.skip("TickShapes/chatList", "DexKit init failed")
-            return
-        }
+        // The resolver opens DexKit only on its own cache miss; a bridge that will not open lands in the skip below.
         val (tinted, cached) = Deobfuscator.loadChatListTickMethods(app, classLoader, serverReceiveId, clientId)
         if (tinted == null && cached == null) {
             HookLog.skip("TickShapes/chatList", "status drawable builders unresolved")

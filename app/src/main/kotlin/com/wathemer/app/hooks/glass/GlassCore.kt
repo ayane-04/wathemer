@@ -192,6 +192,7 @@ internal fun loadGlassPrefs(): Boolean {
         BackdropCapture.liveRim = p.getBoolean(k.KEY_GLASS_LIVE_CLARITY, GlassDefaults.LIVE_CLARITY)
         GlassNavDroplet.enabled = p.getBoolean(k.KEY_GLASS_NAV_DROPLET, GlassDefaults.NAV_DROPLET)
         GlassView.assembleOnAppear = p.getBoolean(k.KEY_GLASS_ASSEMBLE, GlassDefaults.ASSEMBLE)
+        GlassView.stillSkipsScroll = p.getBoolean(k.KEY_GLASS_STILL_SKIPS_SCROLL, GlassDefaults.STILL_SKIPS_SCROLL)
         GlassParams.defaultRimStrokeAngle = p.getInt(k.KEY_GLASS_RIM_ANGLE, GlassDefaults.RIM_ANGLE).toFloat()
         // A set pill colour wins over the frost, the fabColored stand-down pattern.
         tokenTabPillSet = p.getInt(k.OVR_TAB_ACTIVE_PILL, 0) != 0
@@ -353,7 +354,7 @@ internal var headerIdPin = 0
 /** The `toolbar` id, kept so the live one can be resolved rather than remembered. */
 internal var homeToolbarId = 0
 
-/** action_bar_root's id, pinned because the per-layout header checks would otherwise call getIdentifier. */
+/** action_bar_root's id, pinned so the per-layout header checks read an int rather than ask by name. */
 internal var actionBarRootId = 0
 
 internal var toolbarRef: WeakReference<View>? = null

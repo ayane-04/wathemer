@@ -27,10 +27,8 @@ object Deobfuscator {
 
     private fun dlog(m: String) { XposedBridge.log("$TAG: $m") }
 
-    init {
-        runCatching { System.loadLibrary("dexkit") }
-            .onFailure { dlog("failed to load libdexkit: $it") }
-    }
+    /** Loaded with the first bridge, so a warm cache never maps the library. */
+    private var libraryLoaded = false
 
     @Volatile private var cacheLoaded = false
 
@@ -43,11 +41,16 @@ object Deobfuscator {
         cache.load(application)
     }
 
-    /** Open the bridge at most once per process; idempotent so sibling features can each call it. */
+    /** Opens the bridge at most once per process; private, so only a resolver's own cache miss ever opens it. */
     @Synchronized
-    fun ensureBridge(application: Application): Boolean {
+    private fun ensureBridge(application: Application): Boolean {
         ensureCache(application)
         if (bridge != null) return true
+        if (!libraryLoaded) {
+            libraryLoaded = true
+            runCatching { System.loadLibrary("dexkit") }
+                .onFailure { dlog("failed to load libdexkit: $it") }
+        }
         val path = application.applicationInfo.sourceDir
         return runCatching {
             bridge = DexKitBridge.create(path)
@@ -91,9 +94,10 @@ object Deobfuscator {
 
     /** The reaction tray's class: the one LinearLayout whose code carries the tray's own id number. Idempotent. */
     @Synchronized
-    fun loadReactionsTrayClass(classLoader: ClassLoader, trayId: Int): Class<*>? {
+    fun loadReactionsTrayClass(application: Application, classLoader: ClassLoader, trayId: Int): Class<*>? {
         if (reactionsTrayResolved) return reactionsTrayClass
         reactionsTrayResolved = true
+        ensureCache(application)
         cache.getString("reactions_tray_class")?.let { name ->
             try {
                 val cls = Class.forName(name, false, classLoader)
@@ -104,7 +108,8 @@ object Deobfuscator {
                 cache.remove("reactions_tray_class")
             }
         }
-        val bridge = bridgeOrNull() ?: run {
+        // Only a cache miss opens DexKit, so a warm start never does.
+        val bridge = (if (ensureBridge(application)) bridgeOrNull() else null) ?: run {
             dlog("reactions tray UNRESOLVED; DexKit bridge not open")
             return null
         }
@@ -125,10 +130,11 @@ object Deobfuscator {
 
     /** Resolve the bubble provider class + 4 methods. Idempotent. */
     @Synchronized
-    fun loadBubbleProviderClass(classLoader: ClassLoader): Class<*>? {
+    fun loadBubbleProviderClass(application: Application, classLoader: ClassLoader): Class<*>? {
         if (bubbleProviderResolved) return bubbleProviderClass
         bubbleProviderResolved = true
 
+        ensureCache(application)
         // Self-healing: try cached name first.
         cache.getString("bubble_provider_class")?.let { name ->
             try {
@@ -142,7 +148,8 @@ object Deobfuscator {
             }
         }
 
-        val bridge = bridgeOrNull() ?: run {
+        // Only a cache miss opens DexKit, so a warm start never does.
+        val bridge = (if (ensureBridge(application)) bridgeOrNull() else null) ?: run {
             dlog("bubble provider UNRESOLVED; DexKit bridge not open")
             return null
         }
@@ -185,24 +192,24 @@ object Deobfuscator {
         return declaringClass
     }
 
-    fun loadBubbleDrawableMethod(classLoader: ClassLoader): Method? {
-        loadBubbleProviderClass(classLoader)
+    fun loadBubbleDrawableMethod(application: Application, classLoader: ClassLoader): Method? {
+        loadBubbleProviderClass(application, classLoader)
         return bubbleDrawableMethod
     }
 
-    fun loadBalloonDateDrawableMethod(classLoader: ClassLoader): Method? {
-        loadBubbleProviderClass(classLoader)
+    fun loadBalloonDateDrawableMethod(application: Application, classLoader: ClassLoader): Method? {
+        loadBubbleProviderClass(application, classLoader)
         return balloonDateDrawableMethod
     }
 
-    fun loadBalloonBorderDrawableMethod(classLoader: ClassLoader): Method? {
-        loadBubbleProviderClass(classLoader)
+    fun loadBalloonBorderDrawableMethod(application: Application, classLoader: ClassLoader): Method? {
+        loadBubbleProviderClass(application, classLoader)
         return balloonBorderDrawableMethod
     }
 
     /** The bubble content-inset method: WA reads text padding here, not from the drawable's getPadding. */
-    fun loadBalloonInsetMethod(classLoader: ClassLoader): Method? {
-        loadBubbleProviderClass(classLoader)
+    fun loadBalloonInsetMethod(application: Application, classLoader: ClassLoader): Method? {
+        loadBubbleProviderClass(application, classLoader)
         return balloonInsetMethod
     }
 

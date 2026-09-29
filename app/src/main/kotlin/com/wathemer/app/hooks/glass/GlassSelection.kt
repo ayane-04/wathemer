@@ -76,12 +76,12 @@ private fun popRow(v: View, up: Boolean) {
     anim.start()
 }
 
-private var quoteMaskHookInstalled = false
+private val quoteMaskIds = HashSet<Int>()
 
 /** Kills the quote's green corner mask per bind; abstains while a quote colour is set, QuoteAndLabelColors owns that case. */
 internal fun installQuoteMaskKill(frameId: Int) {
-    if (quoteMaskHookInstalled) return
-    quoteMaskHookInstalled = true
+    // Once per id: each quote frame carries two names in its life.
+    if (!quoteMaskIds.add(frameId)) return
     // One shared setForeground interceptor for every gate; the gate is evaluated per call, not at arming.
     ForegroundKillDispatcher.kill(frameId) { !quoteColored }
     logOnce("quote corner-mask kill armed")

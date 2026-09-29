@@ -621,9 +621,11 @@ internal fun syncConvFooter() {
         if (id == 0) continue
         val v = footer.rootView?.findViewById<View>(id) ?: continue
         if (v.isShown) {
-            collapseConvPanes(footer)
+            val draft = n == "voice_note_draft_layout_v2"
+            // The draft keeps its own pane: zeroing it here for composePane to re-size below is two writers a pass.
+            collapseConvPanes(footer, keep = if (draft) v else null)
             // The recorder's stock card was neutralised with the shell; give it back, sized to the layout, the footer is taller.
-            if (n == "voice_note_draft_layout_v2" && v.width > 0 && v.height > 0) {
+            if (draft && v.width > 0 && v.height > 0) {
                 convRect.set(0, 0, v.width, v.height)
                 runCatching { footer.offsetDescendantRectToMyCoords(v, convRect) }
                 composePane(
@@ -725,10 +727,11 @@ private fun goneAbove(v: View?, stop: View): Boolean {
 }
 
 /** Zero-size, never hide: composePane re-sizes a zeroed pane and nothing restores a hidden one; the map also holds the header capsule. */
-private fun collapseConvPanes(footer: ViewGroup) {
+private fun collapseConvPanes(footer: ViewGroup, keep: View? = null) {
+    val keepPane = keep?.let { convPanes[it]?.get() }
     for (ref in convPanes.values) {
         val glass = ref.get() ?: continue
-        if (glass.parent !== footer) continue
+        if (glass.parent !== footer || glass === keepPane) continue
         val lp = glass.layoutParams ?: continue
         if (lp.width != 0 || lp.height != 0) {
             lp.width = 0

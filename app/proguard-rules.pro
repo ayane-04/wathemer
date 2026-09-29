@@ -1,7 +1,15 @@
 # WaThemer: Xposed-safe ProGuard rules.
-# isMinifyEnabled is false; kept for the day R8 is turned on.
+# Release runs R8 to shrink: nothing renamed, the optimiser off, every module class kept.
 
--dontwarn *
+# Never obfuscate: a hook's Class.forName literal naming a host class would be rewritten to our renamed copy of it.
+-dontobfuscate
+# No optimiser: it has no shipping precedent over DexKit, FlatBuffers and Compose, and it blurs stack-trace lines.
+-dontoptimize
+-keepattributes SourceFile,LineNumberTable
+
+# UCrop's downloader, excluded in build.gradle.kts: the only classes R8 finds missing.
+-dontwarn okhttp3.**
+-dontwarn okio.**
 
 # A precaution: nothing reflects on R; the hooks look module resources up by name.
 -keep class com.wathemer.app.R { *; }

@@ -131,7 +131,8 @@ class GlassBubbleDrawable(
             radii = radii,
             sharp = rec?.src, sharpPlace = rec?.srcPlacement,
             sharpDim = if (rec != null && rec.bubbleDimFolded) rec.dimAlpha / 255f else 0f,
-            mask = maskAt(b),
+            // Rasterised on this thread, so built only where the fused path will read it.
+            mask = if (bmp != null && painter.shapesMasks) maskAt(b) else null,
         )
     }
 

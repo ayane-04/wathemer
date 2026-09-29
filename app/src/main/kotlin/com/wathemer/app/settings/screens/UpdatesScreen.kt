@@ -58,7 +58,7 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
     // Read from the process, not remembered here: a rotation rebuilds this screen while the copy is still running.
     val downloading = Updates.inFlight.value != null
     var auto by remember { mutableStateOf(prefs.updateAutoCheck) }
-    // Re-read per recomposition: the file is gone once the installer takes it or the cache is cleared.
+    // Re-read per recomposition: a cleared cache, or the next download, can take the file away.
     val ready = latest?.let { Updates.downloaded(context, it) }
 
     val newer = latest?.let { isNewerVersion(it.version, BuildConfig.VERSION_NAME) } == true

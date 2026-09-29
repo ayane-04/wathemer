@@ -83,6 +83,7 @@ object GlassHook {
                 "edge=${GlassParams.defaultEdgeShadow} hued=$HUED_TINT linear=$LINEAR_COPY clarity=${GlassParams.defaultDetail} " +
                 "liveClarity=${BackdropCapture.liveRim} " +
                 "droplet=${GlassNavDroplet.enabled} assemble=${GlassView.assembleOnAppear} " +
+                "stillSkips=${GlassView.stillSkipsScroll} " +
                 "oneBlur=$ONE_BLUR frostSigma=$frostSigmaScreen snapRadius=$snapRadius optics=$SMALL_OPTICS " +
                 "popupMorph=${GlassPopupMorph.enabled} rowOptics=$ROW_OPTICS " +
                 "rim=$RIM_ALPHA/${RIM_WIDTH_DP}dp " +
@@ -419,8 +420,13 @@ object GlassHook {
         // Target the frame, not the holder (that paints over the accent bar); stands down when QUOTE_BG_COLOR is set.
         // ── And the four green triangles at its corners ───────────────────────────────
         // The frame's foreground nine-patch is a corner mask in stock green, so it is nulled; see installQuoteMaskKill.
-        val quoteFrameId = res.waId("quoted_message_frame", pkg)
-        if (quoteFrameId != 0) {
+        // WhatsApp renames the frame in each quote it builds (row, composer, voice draft), so every name is matched.
+        for (frameName in listOf(
+            "quoted_message_frame", "bubble_quoted_message_frame",
+            "composer_quoted_message_frame", "voice_note_draft_quoted_message_frame",
+        )) {
+            val quoteFrameId = res.waId(frameName, pkg)
+            if (quoteFrameId == 0) continue
             installQuoteMaskKill(quoteFrameId)
             ViewThemeDispatcher.onId(quoteFrameId) { v ->
                 if (!quoteColored) {
@@ -1327,12 +1333,7 @@ object GlassHook {
         for (sn in listOf("search_view", "search_bar_layout")) {
             val searchViewId = res.waId(sn, pkg)
             if (searchViewId != 0) ViewThemeDispatcher.onId(searchViewId) { v ->
-                if (v.getTag(wdsBarTag) == null) {
-                    v.setTag(wdsBarTag, true)
-                    v.viewTreeObserver.addOnGlobalLayoutListener {
-                        runCatching { syncSearchViewGlass(v) }
-                    }
-                }
+                armSearchLayoutDriver(v) { syncSearchViewGlass(v) }
                 runCatching { syncSearchViewGlass(v) }
                     .onFailure { logOnce("search view glass threw on $sn: $it") }
             }
@@ -1683,6 +1684,17 @@ object GlassHook {
         if (!armed) return
         markWallpaperGeometryDirty()
         invalidateFrosts(decor)
+        // A swap can add or remove the dim view, and each pane took its wallpaper views when it was built.
+        reresolveUnderlays(decor)
+    }
+
+    /** Every pane under [decor] takes the window's wallpaper views again: the list a freshly opened chat would give it. */
+    private fun reresolveUnderlays(decor: View) {
+        fun walk(v: View) {
+            if (v is GlassView) v.underlay = wallpaperUnderlayOf(v)
+            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i) ?: continue)
+        }
+        runCatching { walk(decor) }
     }
 
 

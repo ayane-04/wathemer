@@ -232,6 +232,7 @@ object ThemeLibrary {
             values[Prefs.KEY_GLASS_POPUP_MORPH] = g.popupMorph
             values[Prefs.KEY_GLASS_ROW_OPTICS] = g.rowOptics
             values[Prefs.KEY_GLASS_SHAPED_BUBBLES] = g.shapedBubbles
+            values[Prefs.KEY_GLASS_STILL_SKIPS_SCROLL] = g.stillSkipsScroll
         }
 
         doc.font?.let { f -> applyFont(context, prefs, f, clear, values, problems) }
@@ -348,6 +349,7 @@ object ThemeLibrary {
                 popupMorph = prefs.glassPopupMorph,
                 rowOptics = prefs.glassRowOptics,
                 shapedBubbles = prefs.glassShapedBubbles,
+                stillSkipsScroll = prefs.glassStillSkipsScroll,
             ),
         )
     }

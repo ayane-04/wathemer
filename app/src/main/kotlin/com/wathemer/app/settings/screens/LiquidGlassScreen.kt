@@ -58,6 +58,7 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
     var popupMorph by remember { mutableStateOf(prefs.glassPopupMorph) }
     var rowOptics by remember { mutableStateOf(prefs.glassRowOptics) }
     var shapedBubbles by remember { mutableStateOf(prefs.glassShapedBubbles) }
+    var stillSkipsScroll by remember { mutableStateOf(prefs.glassStillSkipsScroll) }
     var rim by remember { mutableIntStateOf(prefs.glassRim) }
     var rimWidth by remember { mutableIntStateOf(prefs.glassRimWidth) }
     var rimAngle by remember { mutableIntStateOf(prefs.glassRimAngle) }
@@ -88,6 +89,7 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
         popupMorph = GlassDefaults.POPUP_MORPH; prefs.glassPopupMorph = popupMorph
         rowOptics = GlassDefaults.ROW_OPTICS; prefs.glassRowOptics = rowOptics
         shapedBubbles = GlassDefaults.SHAPED_BUBBLES; prefs.glassShapedBubbles = shapedBubbles
+        stillSkipsScroll = GlassDefaults.STILL_SKIPS_SCROLL; prefs.glassStillSkipsScroll = stillSkipsScroll
     }
 
     fun offOr(v: Float, unit: String) = if (v.toInt() == 0) "Off" else "${v.toInt()}$unit"
@@ -290,6 +292,11 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                         title = "Optics on the selected chat",
                         checked = rowOptics,
                         onCheckedChange = { rowOptics = it; prefs.glassRowOptics = it },
+                    )
+                    ToggleItem(
+                        title = "Still glass skips scroll redraws",
+                        checked = stillSkipsScroll,
+                        onCheckedChange = { stillSkipsScroll = it; prefs.glassStillSkipsScroll = it },
                     )
                 }
 

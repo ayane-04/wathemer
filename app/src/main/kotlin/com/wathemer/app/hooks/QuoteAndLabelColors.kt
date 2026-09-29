@@ -90,10 +90,13 @@ object QuoteAndLabelColors {
     }
 
     private fun installFrameForegroundKill(pkg: String, res: android.content.res.Resources) {
-        val frameId = res.waId("quoted_message_frame", pkg)
-        if (frameId == 0) return
-        // Shared dispatcher: GlassHook and BubbleColors also claim quoted_message_frame.
-        ForegroundKillDispatcher.kill(frameId)
+        // The second name is the same frame: WhatsApp renames it partway through building a row.
+        for (n in listOf("quoted_message_frame", "bubble_quoted_message_frame")) {
+            val frameId = res.waId(n, pkg)
+            if (frameId == 0) continue
+            // Shared dispatcher: GlassHook and BubbleColors also claim this frame.
+            ForegroundKillDispatcher.kill(frameId)
+        }
     }
 
     /** Replace the 3 link_preview_background variants with a GradientDrawable, keeping WA's corner radii. */

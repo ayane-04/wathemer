@@ -74,4 +74,7 @@ object GlassDefaults {
 
     /** A mask bubble pack shapes the glass; colour artwork packs draw as themselves either way. */
     const val SHAPED_BUBBLES = true
+
+    /** Glass with only the wallpaper behind it redraws when that wallpaper changes, not whenever something else scrolls. */
+    const val STILL_SKIPS_SCROLL = true
 }

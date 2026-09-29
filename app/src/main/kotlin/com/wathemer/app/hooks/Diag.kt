@@ -23,7 +23,7 @@ object Diag {
 
     private const val TAG = "WaThemerDiag"
 
-    /** False in release and every entry point returns on it; the code itself ships, since release is not minified. */
+    /** False in release and every entry point returns on it; the code itself ships, since every module class is kept. */
     @JvmField val enabled = BuildConfig.DEBUG
 
     /** Screens are numbered so a screenshot's timestamp can be tied to one dump without reading bounds. */
