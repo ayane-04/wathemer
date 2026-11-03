@@ -59,7 +59,8 @@ internal fun syncPaneVisibility() {
             val g = pane as? GlassView
             if (g != null) {
                 if (g.materialized < 1f || pane.alpha < 1f) {
-                    pane.animate().cancel()
+                    // cancel() stops every property, so only undo an alpha fade; a hand-off slide must survive the restore.
+                    if (pane.alpha < 1f) pane.animate().cancel()
                     pane.alpha = 1f
                     g.materializeIn(SEARCH_FADE_MS)
                 }

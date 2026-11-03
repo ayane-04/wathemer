@@ -8,6 +8,7 @@ import android.os.Environment
 import android.provider.OpenableColumns
 import android.util.Log
 import com.wathemer.app.util.FontNames
+import java.io.DataInputStream
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
@@ -71,6 +72,12 @@ object FontLibrary {
         return outcome?.let { ImportResult.Done(it) } ?: ImportResult.Unreadable
     }
 
+    /** A font that arrived inside a theme, checked and deduplicated exactly as a pick is; null when it cannot be added. */
+    fun importFrom(context: Context, prefs: Prefs, src: File, fallbackName: String?): ImportOutcome? {
+        if (src.length() > MAX_FONT_BYTES) return null
+        return importFile(context, prefs, src, fallbackName)
+    }
+
     /** Remove an entry and its file; a selected entry also resets the font choice to stock. */
     fun remove(context: Context, prefs: Prefs, entry: Entry): Boolean {
         val rest = parse(prefs.fontUserLibrary).filter { it.stamp != entry.stamp }
@@ -119,7 +126,7 @@ object FontLibrary {
         val name = FontNames.familyName(src)
             ?: fallbackName
             ?: "Font ${prefs.fontUserSeq + 1}"
-        entries.firstOrNull { it.name == name && fileOf(context, it).length() == src.length() }?.let {
+        entries.firstOrNull { it.name == name && sameBytes(fileOf(context, it), src) }?.let {
             return ImportOutcome(it, duplicate = true)
         }
         val stamp = prefs.fontUserSeq + 1
@@ -139,6 +146,28 @@ object FontLibrary {
         prefs.fontUserLibrary = serialize(entries + entry)
         Log.i(TAG, "imported '$name' as ${entry.file} (${target.length()} bytes)")
         return ImportOutcome(entry, duplicate = false)
+    }
+
+    /** A theme can carry another font under a name and size already here, so a duplicate is the same bytes. */
+    private fun sameBytes(a: File, b: File): Boolean {
+        if (a.length() != b.length()) return false
+        return runCatching {
+            DataInputStream(a.inputStream()).use { x ->
+                DataInputStream(b.inputStream()).use { y ->
+                    val p = ByteArray(64 * 1024)
+                    val q = ByteArray(64 * 1024)
+                    var left = a.length()
+                    while (left > 0) {
+                        val n = minOf(left, p.size.toLong()).toInt()
+                        x.readFully(p, 0, n)
+                        y.readFully(q, 0, n)
+                        for (i in 0 until n) if (p[i] != q[i]) return false
+                        left -= n
+                    }
+                    true
+                }
+            }
+        }.getOrDefault(false)
     }
 
     private fun displayNameStem(context: Context, uri: Uri): String? = runCatching {

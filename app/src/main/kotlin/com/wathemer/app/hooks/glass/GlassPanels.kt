@@ -39,6 +39,16 @@ private const val PANEL_RADIUS_MAX_DP = 48f
 /** Panels stack over content that already carries a pane, so their own blur composes with it. */
 private const val PANEL_BLUR_SCALE = 0.7f
 
+/** A pane over content that already carries one, which has blurred, lifted, graded, tinted and lit it once. */
+internal fun GlassParams.overGlass(host: View) {
+    blurRadius = host.dp(BLUR_DP * PANEL_BLUR_SCALE)
+    fresnelStrength = 0.25f
+    transGamma = 1f
+    saturation = 1f
+    bloom = 0f
+    tintColor = glassTint((TINT_ALPHA / 2).coerceAtLeast(0))
+}
+
 internal var menuRowId = 0
 
 internal var menuTitleId = 0
@@ -105,21 +115,12 @@ internal fun panelGlass(panel: View, what: String) {
             underlay = under
             params.apply {
                 downsample = DOWNSAMPLE
-                blurRadius = host.dp(BLUR_DP * PANEL_BLUR_SCALE)
                 cornerRadius = own ?: host.dp(CARD_RADIUS_DP)
                 refractionEnabled = true
                 bevelFraction = BEVEL_FRACTION
                 depthRatio = DEPTH_RATIO
                 maxDisplacePx = host.dp(DISPLACE_DP)
-                // Halved; the content underneath already carries a lit pane.
-                fresnelStrength = 0.25f
-                // Off; the pane underneath already lifted this content.
-                transGamma = 1f
-                // Off for the same reason: the content captured here carries graded glass already.
-                saturation = 1f
-                bloom = 0f
-                // Half a pane's tint; the content underneath already carries one.
-                tintColor = glassTint((TINT_ALPHA / 2).coerceAtLeast(0))
+                overGlass(host)
             }
         }
         // MarginLayoutParams: addView converts them, avoiding a compile-time coordinatorlayout dependency.
@@ -172,7 +173,7 @@ private fun syncPanelGlass(panel: View) {
     if (want != View.VISIBLE) return
     val r = panelScratchRect
     r.set(0, 0, panel.width, panel.height)
-    if (!runCatching { host.offsetDescendantRectToMyCoords(panel, r) }.isSuccess) return
+    if (!host.offsetDescendantRect(panel, r)) return
     val lp = glass.layoutParams as? ViewGroup.MarginLayoutParams ?: return
     if (lp.width != r.width() || lp.height != r.height() ||
         lp.leftMargin != r.left || lp.topMargin != r.top
@@ -191,7 +192,9 @@ private fun syncPanelGlass(panel: View) {
     }
 }
 
-private var popupHooked = false
+/** Set once popup glass is armed; from then on the glass owns every popup's fill. */
+internal var popupHooked = false
+    private set
 
 private val popupGlassTag = tagKey("wathemer-popup-glass")
 
@@ -358,7 +361,7 @@ private fun popupRowGlass(content: View, radiusPx: Float?, anchor: View?, pw: Po
     val syncPane = Runnable {
         if (content.width <= 0 || content.height <= 0) return@Runnable
         paneRect.set(0, 0, content.width, content.height)
-        if (!runCatching { paneHost.offsetDescendantRectToMyCoords(content, paneRect) }.isSuccess) {
+        if (!paneHost.offsetDescendantRect(content, paneRect)) {
             return@Runnable
         }
         val lp = pane.layoutParams as? FrameLayout.LayoutParams ?: return@Runnable

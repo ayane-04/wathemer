@@ -6,7 +6,7 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 
-/** Four programs from shared fragments: the panes split refraction and light around their blur, a bubble's blur is baked into its bitmap so it runs both in one pass, and a rim program gives a pane its sharp edge. */
+/** Five programs from shared fragments: the panes split refraction and light around their blur, a bubble's blur is baked into its bitmap so it runs both in one pass, a rim program gives a pane its sharp edge, and a cap program serves the flat stamps. */
 object GlassShader {
 
     private const val TAG = "WaThemer.Shader"
@@ -137,6 +137,8 @@ object GlassShader {
         uniform float bloom;          // lift of what is already bright; 0 is off
         uniform float bloomThreshold; // level the lift starts above, in the grade's space; set from the dim so it stays reachable
         uniform float dim;            // the wallpaper dim, applied before the gamma; 0 when the capture or copy already carries it
+        uniform float capKnee;        // where the brightness cap starts easing, in the grade's space
+        uniform float capCeil;        // the brightness it eases toward; 0 is off
     """.trimIndent()
 
     /** The light pass's uniforms, one text for the pane and the bubble programs. */
@@ -271,6 +273,20 @@ object GlassShader {
                 float aa = float(outc.a) * float(outc.a);
                 lin = clamp(lin, float3(0.0), float3(aa));
                 outc = half4(half3(sqrt(lin)), outc.a);
+            }
+    """.trimIndent()
+
+    /** Bright backdrop eased toward a ceiling in the grade's squared space; under the knee nothing moves, so dark backdrops keep their look. */
+    private val TRANSMIT_CAP = """
+            // Opaque pixels only, like the grade; the scale only lowers, so the pixel stays premultiplied.
+            if (capCeil > 0.0 && outc.a > 0.99) {
+                float3 capLin = float3(outc.rgb) * float3(outc.rgb);
+                float  capL   = dot(capLin, float3(0.2126, 0.7152, 0.0722));
+                if (capL > capKnee) {
+                    float capSpan = max(capCeil - capKnee, 0.001);
+                    float capTo   = capKnee + capSpan * (1.0 - exp(-(capL - capKnee) / capSpan));
+                    outc = half4(half3(sqrt(capLin * (capTo / capL))), outc.a);
+                }
             }
     """.trimIndent()
 
@@ -416,6 +432,7 @@ object GlassShader {
             $TRANSMIT_DIM
             $TRANSMIT_GAMMA
             $TRANSMIT_GRADE
+            $TRANSMIT_CAP
             // Premultiplied, so one multiply fades colour and alpha together and correctly.
             return outc * half(fadeAt(fragCoord));
         }
@@ -440,6 +457,7 @@ object GlassShader {
             $TRANSMIT_DIM
             $TRANSMIT_GAMMA
             $TRANSMIT_GRADE
+            $TRANSMIT_CAP
             // Crisp at the rim, gone by the plateau; the square keeps the mix soft where it meets the frost.
             float u = 1.0 - t;
             float da = detail * u * u;
@@ -524,6 +542,7 @@ object GlassShader {
             $TRANSMIT_DIM
             $TRANSMIT_GAMMA
             $TRANSMIT_GRADE
+            $TRANSMIT_CAP
             // Float from here: the composite mixes half and float, which AGSL need not accept.
             float4 tr = float4(outc);
 
@@ -539,11 +558,25 @@ object GlassShader {
         }
     """.trimIndent()
 
+    /** The cap alone over a flat stamp's copy, so a frost that bends nothing still matches the glass beside it. */
+    val CAP_AGSL: String = """
+        uniform shader content;
+        uniform float capKnee;
+        uniform float capCeil;
+
+        half4 main(float2 fragCoord) {
+            half4 outc = content.eval(fragCoord);
+            $TRANSMIT_CAP
+            return outc;
+        }
+    """.trimIndent()
+
     /** Latched once a program fails to compile, so the failure is not retried per surface. */
     private var refractFailed = false
     private var lightFailed = false
     private var bubbleFailed = false
     private var rimFailed = false
+    private var capFailed = false
 
     /** The hook's ledger hears a compile failure; logcat alone is invisible from the module log. */
     var onCompileFailure: ((what: String, t: Throwable) -> Unit)? = null
@@ -597,6 +630,15 @@ object GlassShader {
         if (rimFailed) return null
         val rs = compile(RIM_AGSL, "rim")
         if (rs == null) rimFailed = true
+        return rs
+    }
+
+    /** A fresh cap shader for the flat stamps; null leaves them drawing their bitmap plain. */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    fun newCapShader(): RuntimeShader? {
+        if (capFailed) return null
+        val rs = compile(CAP_AGSL, "cap")
+        if (rs == null) capFailed = true
         return rs
     }
 
@@ -686,6 +728,21 @@ object GlassShader {
         rs.setFloatUniform("saturation", params.saturation)
         rs.setFloatUniform("bloom", params.bloom)
         rs.setFloatUniform("bloomThreshold", params.bloomThreshold)
+        setCapUniforms(rs, params.brightCap)
+    }
+
+    // The ceiling at full strength and how far it rises as the strength falls; the knee is a fixed share of the ceiling.
+    private const val CAP_CEIL_STRONG = 0.10f
+    private const val CAP_CEIL_RANGE = 0.30f
+    private const val CAP_KNEE_SHARE = 0.45f
+
+    /** One curve for every program: 0 is off, and the ceiling falls as the strength rises. */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    fun setCapUniforms(rs: RuntimeShader, strength: Float) {
+        val s = strength.coerceIn(0f, 1f)
+        val ceil = if (s > 0f) CAP_CEIL_STRONG + CAP_CEIL_RANGE * (1f - s) else 0f
+        rs.setFloatUniform("capCeil", ceil)
+        rs.setFloatUniform("capKnee", ceil * CAP_KNEE_SHARE)
     }
 
     /** Push one surface's light uniforms; the gains arrive as parameters because writing them into params would rebuild the refraction chain per frame, and flatInteriorColor must read the same fresnelStrength. */

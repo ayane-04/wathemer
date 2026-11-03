@@ -48,14 +48,23 @@ object GlassDefaults {
     /** How strongly bright backdrop detail glows through the glass, as a percent; 0 is off. */
     const val GLOW = 50
 
+    /** How far the glass pulls the bright parts of what it shows toward a ceiling, as a percent; 0 is off. */
+    const val BRIGHT_CAP = 60
+
     /** How much sharp, bent backdrop shows at the very edge of a surface over the frost, as a percent; 0 is off. */
     const val EDGE_CLARITY = 25
 
     /** Edge clarity on the panes that show live content too; it costs a pass per pane, so it is asked for. */
     const val LIVE_CLARITY = false
 
+    /** The photo viewer's top strip and footer as live glass over the picture. */
+    const val MEDIA_VIEWER = true
+
     /** The active tab's pill flows between tabs instead of blinking across. */
     const val NAV_DROPLET = true
+
+    /** The tab pages' cards run on under the tab bar, which shows the list through its glass. */
+    const val IMMERSIVE_NAV = false
 
     /** Surfaces assemble their lens as they appear. */
     const val ASSEMBLE = true

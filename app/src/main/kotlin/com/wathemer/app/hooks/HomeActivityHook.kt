@@ -31,6 +31,9 @@ import com.wathemer.app.hooks.dispatch.TextColorDispatcher
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
 import com.wathemer.app.hooks.glass.GlassHook
 import com.wathemer.app.hooks.glass.activityOf
+import com.wathemer.app.hooks.glass.armed
+import com.wathemer.app.hooks.glass.insideId
+import com.wathemer.app.hooks.glass.watchActionBar
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
 import com.wathemer.app.settings.prefs.Prefs
 import de.robv.android.xposed.XC_MethodHook
@@ -193,9 +196,21 @@ object HomeActivityHook {
                         installWallpaperToolbarWatcher(v, icons, overflowId)
                     }
                 }
+                // The wallpaper clears the selection bar's fill, so with glass off the toolbar under it must hide.
+                val actionBarId = res.waId("action_mode_bar", pkg)
+                if (wallpaperEnabled && actionBarId != 0) {
+                    ViewThemeDispatcher.onId(actionBarId) { bar ->
+                        if (armed) return@onId
+                        runCatching { watchActionBar(bar, toolbarId, glass = false) }
+                            .onFailure { XposedBridge.log("[$TAG] watchActionBar threw: $it") }
+                    }
+                }
             }
-            // toolbar_container is the outer wrapper (Home only). Wallpaper-aware variant.
-            hookBgWallpaperAware("toolbar_container", toolbarBg, wallpaperEnabled, pkg, res)
+            // Home's outer toolbar wrapper; the media viewer reuses the id and keeps its own strip.
+            val mediaViewLayoutId = res.waId("media_view_layout", pkg)
+            hookBgWallpaperAware("toolbar_container", toolbarBg, wallpaperEnabled, pkg, res) { v ->
+                mediaViewLayoutId != 0 && insideId(v, mediaViewLayoutId, 2)
+            }
         }
         hookIcon("toolbar_logo", whatsappLogo, pkg, res)
 
@@ -238,11 +253,12 @@ object HomeActivityHook {
         wallpaperEnabled: Boolean,
         pkg: String,
         res: Resources,
+        skip: ((View) -> Boolean)? = null,
     ) {
         if (userColor == 0 && !wallpaperEnabled) return
         val id = res.waId(name, pkg)
         if (id == 0) return
-        hookBgWallpaperAwareById(id, userColor, wallpaperEnabled)
+        hookBgWallpaperAwareById(id, userColor, wallpaperEnabled, skip)
     }
 
     /** Raw-id variant of [hookBgWallpaperAware]; framework ids do not resolve via getIdentifier in WA's namespace. */
@@ -250,10 +266,12 @@ object HomeActivityHook {
         id: Int,
         userColor: Int,
         wallpaperEnabled: Boolean,
+        skip: ((View) -> Boolean)? = null,
     ) {
         if (userColor == 0 && !wallpaperEnabled) return
         if (id == 0 || id == -1) return
         ViewThemeDispatcher.onId(id) { v ->
+            if (skip?.invoke(v) == true) return@onId
             val effective = when {
                 userColor != 0 -> userColor
                 WallpaperImage.INSTANCE?.isWallpaperActive() == true -> 0
@@ -570,7 +588,7 @@ object HomeActivityHook {
     private fun installChatRowBgHook(pkg: String, res: Resources, color: Int) {
         val id = res.waId("contact_row_container", pkg)
         if (id == 0) return
-        val rippleTint = ColorStateList.valueOf(0x33FFFFFF.toInt())
+        val rippleTint = ColorStateList.valueOf(0x33FFFFFF)
         ViewThemeDispatcher.onId(id) { v ->
             val apply = {
                 runCatching {

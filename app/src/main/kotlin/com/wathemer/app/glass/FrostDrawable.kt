@@ -1,6 +1,7 @@
 package com.wathemer.app.glass
 
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Matrix
@@ -8,7 +9,10 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
+import android.graphics.RuntimeShader
+import android.graphics.Shader
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.util.Log
 import android.view.View
 import java.lang.ref.WeakReference
@@ -110,7 +114,8 @@ class FrostDrawable(
         path.addRoundRect(clip, r, r, Path.Direction.CW)
         val save = canvas.save()
         canvas.clipPath(path)
-        if (small != null) canvas.drawBitmap(small, matrix, paint)
+        // The flat stamp bends nothing but still takes the cap, or it stays brighter than the glass beside it.
+        if (small != null && !drawCapped(canvas, small, matrix, clip)) canvas.drawBitmap(small, matrix, paint)
         if (tint ushr 24 != 0) canvas.drawRoundRect(clip, r, r, tintPaint)
         canvas.restoreToCount(save)
         // Outside the clip, inset by half the stroke, so the rim is not sliced in half by the edge.
@@ -172,6 +177,45 @@ class FrostDrawable(
         /** Main thread only, like every draw; built on the first pill that asks, so an off build never compiles it. */
         fun opticsPainter(density: Float): BubbleGlassPainter =
             opticsPainters.getOrPut(density) { BubbleGlassPainter(density) }
+
+        /** One cap program for every flat stamp, built on first use so a cap at 0 never compiles it. */
+        private var capShader: RuntimeShader? = null
+        private var capTried = false
+        private var capStrength = -1f
+        private val capPaint = Paint()
+        private var capContent: BitmapShader? = null
+        private var capContentOf: Bitmap? = null
+
+        /** A wallpaper copy through the brightness cap into [box]; false when the cap is off or missing, so the caller draws it plain. */
+        fun drawCapped(canvas: Canvas, bmp: Bitmap, place: Matrix, box: RectF): Boolean {
+            val strength = GlassParams.defaultBrightCap
+            if (strength <= 0f || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || !canvas.isHardwareAccelerated) {
+                return false
+            }
+            if (!capTried) {
+                capTried = true
+                capShader = GlassShader.newCapShader()
+            }
+            val rs = capShader ?: return false
+            if (strength != capStrength) {
+                GlassShader.setCapUniforms(rs, strength)
+                capStrength = strength
+            }
+            var cs = capContent
+            if (cs == null || capContentOf !== bmp) {
+                cs = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+                // Linear, or the child samples nearest whatever the paint says.
+                cs.filterMode = BitmapShader.FILTER_MODE_LINEAR
+                capContent = cs
+                capContentOf = bmp
+            }
+            cs.setLocalMatrix(place)
+            // Rebound every draw, after the matrix: setting it discards the native instance the binding stored.
+            rs.setInputShader("content", cs)
+            capPaint.shader = rs
+            canvas.drawRect(box, capPaint)
+            return true
+        }
 
         /** Build the shared blurred copy: halve to a quarter, then a real blur at [radius]; a stretched shrink shows its grid. */
         fun shrinkOf(source: Bitmap, linear: Boolean = false, radius: Int = FROST_RADIUS): Bitmap? = runCatching {

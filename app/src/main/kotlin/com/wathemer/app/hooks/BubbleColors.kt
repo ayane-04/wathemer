@@ -318,7 +318,7 @@ object BubbleColors {
         val id = app.resources.waId(idName, app.packageName)
         if (id == 0) return
         val density = app.resources.displayMetrics.density
-        val cornerRadius = 12f * density   // ≈ WA's bubble corner radius
+        val cornerRadius = 12f * density   // about WA's bubble corner radius
         ViewThemeDispatcher.onId(id) { v ->
             // WDSRoundedFrameLayout self-clips; adding our outline would double-clip.
             if (v.javaClass.name.endsWith(".WDSRoundedFrameLayout")) return@onId

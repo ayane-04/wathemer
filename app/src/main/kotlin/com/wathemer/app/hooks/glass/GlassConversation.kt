@@ -36,6 +36,8 @@ private val convFloatTag = tagKey("wathemer-conv-float")
 
 private val convBannerTag = tagKey("wathemer-conv-banner")
 
+private val convDateTag = tagKey("wathemer-conv-date")
+
 /** Where the header capsule ends inside the holder; the strip hangs off this, not off the holder's full height. */
 private var convCapsuleBottom = -1
 
@@ -453,7 +455,7 @@ internal fun syncConvToolbar() {
 /** [convRect] = [child]'s bounds mapped into [holder]'s coordinates. */
 private fun rectInHolder(holder: ViewGroup, child: View) {
     convRect.set(0, 0, child.width, child.height)
-    runCatching { holder.offsetDescendantRectToMyCoords(child, convRect) }
+    holder.offsetDescendantRect(child, convRect)
 }
 
 /** Padding parks the messages clear of the chrome; clipToPadding = false lets them scroll behind it. */
@@ -477,6 +479,28 @@ private fun padConvList(listHost: ViewGroup, footerHeight: Int) {
     list.clipToPadding = false
     list.setPadding(list.paddingLeft, top, list.paddingRight, bottom)
     XposedBridge.log("[$TAG] conversation list padded (top=$top bottom=$bottom)")
+}
+
+/** WhatsApp parks the scroll date on the list's padded top only when the list clips its padding, and this one does not. */
+internal fun pinConvDate(date: View) {
+    syncConvDate(date)
+    if (date.getTag(convDateTag) != null) return
+    date.setTag(convDateTag, true)
+    // Each show and each new date lays the pill out, so this runs before it draws.
+    date.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> runCatching { syncConvDate(v) } }
+}
+
+/** Layout positions only: a measure that included the pill's own translation would chase itself. */
+private fun syncConvDate(date: View) {
+    val parent = date.parent as? ViewGroup ?: return
+    val host = convListHost(parent) ?: return
+    val list = (0 until host.childCount)
+        .mapNotNull { host.getChildAt(it) as? AbsListView }
+        .firstOrNull() ?: return
+    // A clipping list gets WhatsApp's own setY, which this must not fight.
+    if (list.clipToPadding) return
+    val want = (host.top + list.top + list.paddingTop - date.top).toFloat()
+    if (date.translationY != want) date.translationY = want
 }
 
 /** Where the list stood before a chrome change; the correction tells its own shift from a scroll made meanwhile. */
@@ -627,7 +651,7 @@ internal fun syncConvFooter() {
             // The recorder's stock card was neutralised with the shell; give it back, sized to the layout, the footer is taller.
             if (draft && v.width > 0 && v.height > 0) {
                 convRect.set(0, 0, v.width, v.height)
-                runCatching { footer.offsetDescendantRectToMyCoords(v, convRect) }
+                footer.offsetDescendantRect(v, convRect)
                 composePane(
                     footer, v,
                     convRect.left, convRect.top, convRect.right, convRect.bottom,
@@ -681,12 +705,12 @@ internal fun syncConvFooter() {
         var sideFloor = 0
         if (send != null && send.width > 0) {
             val sr = Rect(0, 0, send.width, send.height)
-            if (runCatching { footer.offsetDescendantRectToMyCoords(send, sr) }.isSuccess) {
+            if (footer.offsetDescendantRect(send, sr)) {
                 sideFloor = (footer.width - sr.right).coerceAtLeast(0)
             }
         }
         convRect.set(0, 0, input.width, input.height)
-        runCatching { footer.offsetDescendantRectToMyCoords(input, convRect) }
+        footer.offsetDescendantRect(input, convRect)
         // Grown so the icons can breathe, clamped because the footer is a ClippingLayout and shaves the overflow.
         val pad = footer.dp(COMPOSE_PILL_PAD_DP).toInt()
         composePane(
@@ -700,7 +724,7 @@ internal fun syncConvFooter() {
     }
     if (send != null && send.width > 0) {
         convRect.set(0, 0, send.width, send.height)
-        runCatching { footer.offsetDescendantRectToMyCoords(send, convRect) }
+        footer.offsetDescendantRect(send, convRect)
         composePane(footer, send, convRect.left, convRect.top, convRect.right, convRect.bottom, listHost)
     }
 }

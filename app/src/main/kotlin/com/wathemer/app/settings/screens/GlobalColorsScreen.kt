@@ -242,12 +242,11 @@ private fun ToolbarRow(
     if (showPicker) {
         ColorPickerSheet(
             title = name,
-            initialColor = if (value != 0) value else fallback,
+            initialColor = Prefs.pickerStart(value, fallback),
             recents = recents,
             onDismiss = { showPicker = false },
             onApply = { picked ->
-                onChange(picked)
-                prefs.setOverride(prefKey, picked)
+                onChange(prefs.applyOverride(prefKey, picked))
                 prefs.pushRecent(picked)
                 snapshot.value = snapshotFromPrefs(prefs)
                 showPicker = false

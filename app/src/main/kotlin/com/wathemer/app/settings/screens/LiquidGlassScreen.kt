@@ -49,9 +49,11 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
     var linearCopy by remember { mutableStateOf(prefs.glassLinearCopy) }
     var edgeShadow by remember { mutableIntStateOf(prefs.glassEdgeShadow) }
     var glow by remember { mutableIntStateOf(prefs.glassGlow) }
+    var brightCap by remember { mutableIntStateOf(prefs.glassBrightCap) }
     var clarity by remember { mutableIntStateOf(prefs.glassEdgeClarity) }
     var liveClarity by remember { mutableStateOf(prefs.glassLiveClarity) }
     var navDroplet by remember { mutableStateOf(prefs.glassNavDroplet) }
+    var immersiveNav by remember { mutableStateOf(prefs.glassImmersiveNav) }
     var assemble by remember { mutableStateOf(prefs.glassAssemble) }
     var oneBlur by remember { mutableStateOf(prefs.glassOneBlur) }
     var smallOptics by remember { mutableStateOf(prefs.glassSmallOptics) }
@@ -59,6 +61,7 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
     var rowOptics by remember { mutableStateOf(prefs.glassRowOptics) }
     var shapedBubbles by remember { mutableStateOf(prefs.glassShapedBubbles) }
     var stillSkipsScroll by remember { mutableStateOf(prefs.glassStillSkipsScroll) }
+    var mediaViewer by remember { mutableStateOf(prefs.glassMediaViewer) }
     var rim by remember { mutableIntStateOf(prefs.glassRim) }
     var rimWidth by remember { mutableIntStateOf(prefs.glassRimWidth) }
     var rimAngle by remember { mutableIntStateOf(prefs.glassRimAngle) }
@@ -80,9 +83,11 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
         linearCopy = GlassDefaults.LINEAR_COPY; prefs.glassLinearCopy = linearCopy
         edgeShadow = GlassDefaults.EDGE_SHADOW; prefs.glassEdgeShadow = edgeShadow
         glow = GlassDefaults.GLOW; prefs.glassGlow = glow
+        brightCap = GlassDefaults.BRIGHT_CAP; prefs.glassBrightCap = brightCap
         clarity = GlassDefaults.EDGE_CLARITY; prefs.glassEdgeClarity = clarity
         liveClarity = GlassDefaults.LIVE_CLARITY; prefs.glassLiveClarity = liveClarity
         navDroplet = GlassDefaults.NAV_DROPLET; prefs.glassNavDroplet = navDroplet
+        immersiveNav = GlassDefaults.IMMERSIVE_NAV; prefs.glassImmersiveNav = immersiveNav
         assemble = GlassDefaults.ASSEMBLE; prefs.glassAssemble = assemble
         oneBlur = GlassDefaults.ONE_BLUR; prefs.glassOneBlur = oneBlur
         smallOptics = GlassDefaults.SMALL_OPTICS; prefs.glassSmallOptics = smallOptics
@@ -90,6 +95,7 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
         rowOptics = GlassDefaults.ROW_OPTICS; prefs.glassRowOptics = rowOptics
         shapedBubbles = GlassDefaults.SHAPED_BUBBLES; prefs.glassShapedBubbles = shapedBubbles
         stillSkipsScroll = GlassDefaults.STILL_SKIPS_SCROLL; prefs.glassStillSkipsScroll = stillSkipsScroll
+        mediaViewer = GlassDefaults.MEDIA_VIEWER; prefs.glassMediaViewer = mediaViewer
     }
 
     fun offOr(v: Float, unit: String) = if (v.toInt() == 0) "Off" else "${v.toInt()}$unit"
@@ -121,6 +127,11 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                         prefs.glassEnabled = want
                     },
                 )
+                ToggleItem(
+                    title = "Immersive Navbar",
+                    checked = immersiveNav,
+                    onCheckedChange = { immersiveNav = it; prefs.glassImmersiveNav = it },
+                )
 
                 ExpandGroup("Surface") {
                     SliderItem(
@@ -145,6 +156,14 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                         title = "Tint follows the wallpaper's colour",
                         checked = hued,
                         onCheckedChange = { hued = it; prefs.glassHuedTint = it },
+                    )
+                    SliderItem(
+                        title = "Dim bright areas",
+                        value = brightCap.toFloat(),
+                        range = 0f..100f,
+                        steps = 99,
+                        onValueChange = { brightCap = it.roundToInt().also { v -> prefs.glassBrightCap = v } },
+                        valueLabel = { offOr(it, "%") },
                     )
                     SliderItem(
                         title = "Corner radius",
@@ -183,7 +202,7 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                     )
                 }
 
-                ExpandGroup("Advanced", trailingText = "17") {
+                ExpandGroup("Advanced", trailingText = "19") {
                     SliderItem(
                         title = "Bevel width",
                         value = bevel.toFloat(),
@@ -247,7 +266,6 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                     )
                     ToggleItem(
                         title = "Edge clarity on live panels",
-                        subtitle = "Costs more to draw",
                         checked = liveClarity,
                         onCheckedChange = { liveClarity = it; prefs.glassLiveClarity = it },
                     )
@@ -263,7 +281,6 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                     )
                     ToggleItem(
                         title = "Glass fills shaped bubbles",
-                        subtitle = "Off, a mask shape gets the plain rounded glass",
                         checked = shapedBubbles,
                         onCheckedChange = { shapedBubbles = it; prefs.glassShapedBubbles = it },
                     )
@@ -298,10 +315,15 @@ fun LiquidGlassScreen(nav: NavController, prefs: Prefs) {
                         checked = stillSkipsScroll,
                         onCheckedChange = { stillSkipsScroll = it; prefs.glassStillSkipsScroll = it },
                     )
+                    ToggleItem(
+                        title = "Glass on the photo viewer",
+                        checked = mediaViewer,
+                        onCheckedChange = { mediaViewer = it; prefs.glassMediaViewer = it },
+                    )
                 }
 
                 // Warning only: tokens still save, glass-owned surfaces ignore them.
-                NoteText("Glass surfaces keep their own look; your colours do not reach them.")
+                NoteText("Your colours don't apply to glass surfaces.")
             }
         }
     }

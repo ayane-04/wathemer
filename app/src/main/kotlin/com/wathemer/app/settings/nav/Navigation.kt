@@ -29,6 +29,7 @@ enum class Screen {
 
     Extras,
     Themes,
+    ThemeStore,
     Updates,
 }
 
@@ -53,7 +54,7 @@ class NavController(initial: List<Screen> = listOf(Screen.CategoryList)) {
         return true
     }
 
-    /** Replaces the whole stack: a hand-off from WhatsApp must not land on top of wherever the user last was. */
+    /** Replaces the whole stack: a hand-off from another app must not land on top of wherever the user last was. */
     fun replaceAll(screens: List<Screen>) {
         val next = screens.ifEmpty { listOf(Screen.CategoryList) }
         _stack.clear()

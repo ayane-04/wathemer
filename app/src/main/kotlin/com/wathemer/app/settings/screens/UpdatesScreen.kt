@@ -75,7 +75,7 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
             val found = withContext(Dispatchers.IO) { Updates.latest() }
             checking = false
             if (found == null) {
-                if (manual) onMessage("Could not reach GitHub.")
+                if (manual) onMessage("Couldn't reach GitHub.")
                 return@launch
             }
             prefs.updateLastCheck = System.currentTimeMillis()
@@ -86,7 +86,7 @@ fun UpdatesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit)
             prefs.updateSize = found.size.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
             latest = found
             if (manual && !isNewerVersion(found.version, BuildConfig.VERSION_NAME)) {
-                onMessage("You are on the newest build.")
+                onMessage("You're up to date.")
             }
         }
     }
@@ -181,7 +181,7 @@ private fun openLink(context: Context, url: String, onMessage: (String) -> Unit)
         context.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
-    }.onFailure { onMessage("Nothing on this device opens links.") }
+    }.onFailure { onMessage("No app can open links.") }
 }
 
 private const val DAY_MS = 24L * 60 * 60 * 1000

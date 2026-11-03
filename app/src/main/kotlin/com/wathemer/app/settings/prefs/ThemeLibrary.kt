@@ -9,12 +9,14 @@ import com.wathemer.app.BuildConfig
 import com.wathemer.app.hooks.ColorSeeds
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.OutputStream
 
 object ThemeLibrary {
 
     private const val TAG = "WaThemer.Themes"
     private const val UNDO_FILE = "undo_theme.wathemer"
+    private const val KEEP_SHARED = 5
 
     /** [stamp] is the filename, one past the highest slot present, so a new slot always sorts newest. Deleting the top one frees its number, which nothing keys on. */
     data class Slot(val file: File, val stamp: Int, val doc: ThemeDoc)
@@ -31,6 +33,9 @@ object ThemeLibrary {
         data class Failed(val reason: String) : Import
     }
 
+    // One writer at a time: a store download finishing in the background must not meet a rename or a save.
+    private val lock = Any()
+
     /** For these three a stored 0 is a real colour; every other key uses 0 to mean "not overridden". */
     private val ZERO_IS_A_COLOUR = setOf(Prefs.KEY_PRIMARY, Prefs.KEY_BACKGROUND, Prefs.KEY_TEXT)
 
@@ -46,24 +51,33 @@ object ThemeLibrary {
         .sortedByDescending { it.stamp }
 
     /** Capture the store into a new slot. Null when the file could not be written. */
-    fun saveCurrent(context: Context, prefs: Prefs, name: String): Slot? {
+    fun saveCurrent(context: Context, prefs: Prefs, name: String): Slot? = synchronized(lock) { saveLocked(context, prefs, name) }
+
+    private fun saveLocked(context: Context, prefs: Prefs, name: String): Slot? {
         val source = wallpaperSource(context, prefs)
         val doc = capture(prefs, ThemeFile.sanitizeName(name), source != null)
         val stamp = nextStamp(context)
         val dest = File(dir(context), "$stamp${ThemeFile.EXTENSION}")
-        if (!writeTo(dest, doc, source)) return null
+        if (!writeTo(dest, doc, source, fontSource(context, prefs))) return null
         Log.i(TAG, "saved '${doc.name}' as ${dest.name} (${dest.length()} bytes)")
         return Slot(dest, stamp, doc)
     }
 
     /** Copy a picked file into the library once it parses. The archive is rebuilt, so only what this version understands is kept. */
-    fun importFile(context: Context, uri: Uri): Import {
+    fun importFile(context: Context, uri: Uri): Import = importFrom(context, null) { context.contentResolver.openInputStream(uri) }
+
+    /** Copy a theme into the library from [open]; [store] records the store entry it came from, and whatever a file claims is dropped. */
+    fun importFrom(context: Context, store: ThemeStoreRef?, open: () -> InputStream?): Import = synchronized(lock) {
+        importLocked(context, store, open)
+    }
+
+    private fun importLocked(context: Context, store: ThemeStoreRef?, open: () -> InputStream?): Import {
         val stage = File(context.cacheDir, "theme_import.png")
         val loaded = runCatching {
-            context.contentResolver.openInputStream(uri)?.let { ThemeFile.load(it, stage) }
+            open()?.let { ThemeFile.load(it, stage) }
         }.getOrNull() ?: run {
             stage.delete()
-            return Import.Failed("That file could not be opened.")
+            return Import.Failed("Couldn't open that file.")
         }
         val ok = loaded as? ThemeFile.Load.Ok ?: run {
             stage.delete()
@@ -71,25 +85,30 @@ object ThemeLibrary {
         }
         val stamp = nextStamp(context)
         val dest = File(dir(context), "$stamp${ThemeFile.EXTENSION}")
-        val written = writeTo(dest, ok.doc, ok.wallpaper)
+        val doc = ok.doc.copy(store = store)
+        val written = writeTo(dest, doc, ok.wallpaper, ok.font)
         stage.delete()
-        if (!written) return Import.Failed("Could not save that theme to your list.")
-        Log.i(TAG, "imported '${ok.doc.name}' as ${dest.name}")
-        return Import.Added(Slot(dest, stamp, ok.doc), ok.problems)
+        ok.font?.delete()
+        if (!written) return Import.Failed("Couldn't save that theme.")
+        Log.i(TAG, "imported '${doc.name}' as ${dest.name}")
+        return Import.Added(Slot(dest, stamp, doc), ok.problems)
     }
 
     /** Rename by rewriting the archive: the name travels inside the file, so renaming the file would not carry. */
-    fun rename(context: Context, slot: Slot, name: String): Boolean {
+    fun rename(context: Context, slot: Slot, name: String): Boolean = synchronized(lock) { renameLocked(context, slot, name) }
+
+    private fun renameLocked(context: Context, slot: Slot, name: String): Boolean {
         val stage = File(context.cacheDir, "theme_rename.png")
         val loaded = runCatching { ThemeFile.load(slot.file.inputStream(), stage) }.getOrNull()
         val ok = loaded as? ThemeFile.Load.Ok ?: run { stage.delete(); return false }
         val part = File(slot.file.parentFile, "${slot.file.name}.part")
         val written = runCatching {
             FileOutputStream(part).use {
-                ThemeFile.write(it, ok.doc.copy(name = ThemeFile.sanitizeName(name)), ok.wallpaper)
+                ThemeFile.write(it, ok.doc.copy(name = ThemeFile.sanitizeName(name)), ok.wallpaper, ok.font)
             }
         }.getOrDefault(false)
         stage.delete()
+        ok.font?.delete()
         if (!written) { part.delete(); return false }
         // Keep the original until the replacement is in place, or a failed rename loses the slot.
         val backup = File(slot.file.parentFile, "${slot.file.name}.bak")
@@ -101,7 +120,34 @@ object ThemeLibrary {
     }
 
     fun delete(slot: Slot) {
-        slot.file.delete()
+        synchronized(lock) { slot.file.delete() }
+    }
+
+    /** The highest version saved of each store entry, by store id. */
+    fun storeVersions(context: Context): Map<String, Int> =
+        list(context).mapNotNull { it.doc.store }.groupBy { it.id }.mapValues { e -> e.value.maxOf { it.version } }
+
+    /** Removes the saved copies of store entry [id] older than [version]; the newest stays. */
+    fun removeOlder(context: Context, id: String, version: Int): Int = synchronized(lock) {
+        val older = list(context).filter { it.doc.store?.id == id && it.doc.store.version < version }
+        older.forEach { it.file.delete() }
+        older.size
+    }
+
+    /** Puts back a slot a rename left aside, and clears half-written files; nothing else touches the library meanwhile. */
+    fun recover(context: Context): Int = synchronized(lock) {
+        var fixed = 0
+        for (f in dir(context).listFiles().orEmpty()) {
+            when {
+                f.name.endsWith(".part") -> if (f.delete()) fixed++
+                f.name.endsWith("${ThemeFile.EXTENSION}.bak") -> {
+                    val original = File(f.parentFile, f.name.removeSuffix(".bak"))
+                    if (original.exists()) f.delete() else f.renameTo(original)
+                    fixed++
+                }
+            }
+        }
+        fixed
     }
 
     /** Copy a slot out to wherever the picker chose. */
@@ -110,10 +156,17 @@ object ThemeLibrary {
     }.onFailure { Log.w(TAG, "export failed: $it") }.isSuccess
 
     /** A copy under a name a person would recognise; the slot itself is filed under a number. */
-    fun stageForShare(context: Context, slot: Slot): File? = runCatching {
+    fun stageForShare(context: Context, slot: Slot): File? = synchronized(lock) { shareLocked(context, slot) }
+
+    private fun shareLocked(context: Context, slot: Slot): File? = runCatching {
         val shareDir = File(context.cacheDir, "share").apply { mkdirs() }
-        shareDir.listFiles()?.forEach { it.delete() }
-        val dest = File(shareDir, ThemeFile.suggestedFileName(slot.doc.name))
+        // An app can read a shared file long after the sheet closes, so the last few stay, each in its own folder.
+        shareDir.listFiles().orEmpty().sortedByDescending { it.lastModified() }
+            .drop(KEEP_SHARED - 1).forEach { it.deleteRecursively() }
+        val stamp = System.currentTimeMillis()
+        val dir = generateSequence(stamp) { it + 1 }.map { File(shareDir, it.toString()) }.first { !it.exists() }
+        dir.mkdirs()
+        val dest = File(dir, ThemeFile.suggestedFileName(slot.doc.name))
         slot.file.inputStream().use { input -> FileOutputStream(dest).use { input.copyTo(it) } }
         dest
     }.getOrNull()
@@ -127,19 +180,30 @@ object ThemeLibrary {
         undoFile(context).takeIf { it.canRead() }?.let { ThemeFile.peek(it) }
 
     fun clearUndo(context: Context) {
-        undoFile(context).delete()
+        synchronized(lock) { undoFile(context).delete() }
     }
 
     // ── Apply ─────────────────────────────────────────────────────────────
 
     /** Apply a theme file. No setting is written until the whole archive has been read and the wallpaper is on disk. */
-    fun apply(context: Context, prefs: Prefs, file: File, keepUndo: Boolean): Outcome {
+    fun apply(context: Context, prefs: Prefs, file: File, keepUndo: Boolean): Outcome =
+        synchronized(lock) { applyLocked(context, prefs, file, keepUndo) }
+
+    private fun applyLocked(context: Context, prefs: Prefs, file: File, keepUndo: Boolean): Outcome {
         val stage = File(context.cacheDir, "theme_apply.png")
         val loaded = runCatching { ThemeFile.load(file.inputStream(), stage) }.getOrNull()
-            ?: run { stage.delete(); return Outcome.Failed("That theme file could not be opened.") }
+            ?: run { stage.delete(); return Outcome.Failed("Couldn't open that theme file.") }
         val ok = loaded as? ThemeFile.Load.Ok
             ?: return Outcome.Failed((loaded as ThemeFile.Load.Failed).reason)
+        // The staged font is copied into the library or dropped; either way it never outlives this call.
+        try {
+            return applyLoaded(context, prefs, ok, keepUndo)
+        } finally {
+            ok.font?.delete()
+        }
+    }
 
+    private fun applyLoaded(context: Context, prefs: Prefs, ok: ThemeFile.Load.Ok, keepUndo: Boolean): Outcome {
         val doc = ok.doc
         val image = ok.wallpaper
         // Asked before anything is touched: the public copy WhatsApp reads cannot be written without it.
@@ -152,8 +216,8 @@ object ThemeLibrary {
         if (keepUndo) {
             val source = wallpaperSource(context, prefs)
             val before = capture(prefs, "Before ${doc.name}", source != null)
-            if (!writeTo(undoFile(context), before, source)) {
-                problems += "Could not save a copy of your current theme, so this cannot be undone."
+            if (!writeTo(undoFile(context), before, source, fontSource(context, prefs))) {
+                problems += "Couldn't back up your current look, so this can't be undone."
             }
         }
 
@@ -162,12 +226,32 @@ object ThemeLibrary {
             val dest = WallpaperAsset.persist(context) { staged.inputStream() }
             staged.delete()
             dest?.absolutePath
-                ?: return Outcome.Failed("Could not save that theme's wallpaper. Storage may be full.")
+                ?: return Outcome.Failed("Couldn't save the theme's wallpaper. Storage may be full.")
         }
 
         val clear = ArrayList<String>()
         val values = HashMap<String, Any>()
 
+        planInto(doc, prefs, wallpaperPath, clear, values, problems)
+
+        doc.font?.let { f -> applyFont(context, prefs, f, ok.font, clear, values, problems) }
+
+        if (!prefs.applyThemeWrite(clear, values)) {
+            return Outcome.Failed("Couldn't save your settings (LSPosed didn't take the change).")
+        }
+        Log.i(TAG, "applied '${doc.name}': ${values.size} keys, ${problems.size} problem(s)")
+        return Outcome.Applied(doc.name, problems.distinct())
+    }
+
+    /** What applying [doc] writes over [prefs]; files and fonts stay with the caller, so Apply and the preview share one plan. */
+    private fun planInto(
+        doc: ThemeDoc,
+        prefs: Prefs,
+        wallpaperPath: String?,
+        clear: MutableList<String>,
+        values: MutableMap<String, Any>,
+        problems: MutableList<String>,
+    ) {
         doc.colors?.let { colors ->
             // Clear then set in one commit: a colour the theme does not carry has to go, or two themes mix.
             clear += Prefs.THEME_COLOR_KEYS
@@ -193,20 +277,28 @@ object ThemeLibrary {
             if (v == 0) clear += Prefs.TICK_STYLE else values[Prefs.TICK_STYLE] = v
         }
 
+        // Glass has nothing to refract without a live wallpaper, and the settings gate cannot see an import.
+        val wallpaperLive = doc.wallpaper?.let { wallpaperPath != null && it.enabled }
+            ?: (prefs.wallpaperEnabled && !prefs.wallpaperPath.isNullOrBlank())
         doc.wallpaper?.let { w ->
-            val on = wallpaperPath != null && w.enabled
             if (wallpaperPath != null) values[Prefs.KEY_WALLPAPER_PATH] = wallpaperPath else clear += Prefs.KEY_WALLPAPER_PATH
-            values[Prefs.KEY_WALLPAPER_ENABLED] = on
+            values[Prefs.KEY_WALLPAPER_ENABLED] = wallpaperLive
             values[Prefs.KEY_WALLPAPER_DIM] = w.dim
             values[Prefs.KEY_WALLPAPER_BLUR] = w.blur
-            // Glass has nothing to refract without a live wallpaper, and the settings gate cannot see an import.
-            if (!on && prefs.glassEnabled) {
-                values[Prefs.KEY_GLASS_ENABLED] = false
-                problems += "Liquid Glass was switched off; it needs a wallpaper."
-            }
+        }
+        // A theme that names the switch sets it; one from before themes carried it only loses glass with its wallpaper.
+        val glassWas = prefs.glassEnabled
+        val glassWanted = doc.glass?.enabled ?: glassWas
+        val glassOn = glassWanted && wallpaperLive
+        if (doc.glass?.enabled != null || glassOn != glassWas) values[Prefs.KEY_GLASS_ENABLED] = glassOn
+        if (glassWas && !glassOn) {
+            problems += if (glassWanted) "Liquid Glass turned off: no wallpaper."
+            else "Liquid Glass turned off: this theme doesn't use it."
+        } else if (glassWanted && !glassOn) {
+            problems += "Liquid Glass stays off: this theme has no wallpaper."
         }
 
-        // Tuning only; whether glass is on stays with the wallpaper gate above.
+        // Tuning only; the switch is settled above.
         doc.glass?.let { g ->
             values[Prefs.KEY_GLASS_BLUR] = g.blur
             values[Prefs.KEY_GLASS_TINT] = g.tint
@@ -233,21 +325,25 @@ object ThemeLibrary {
             values[Prefs.KEY_GLASS_ROW_OPTICS] = g.rowOptics
             values[Prefs.KEY_GLASS_SHAPED_BUBBLES] = g.shapedBubbles
             values[Prefs.KEY_GLASS_STILL_SKIPS_SCROLL] = g.stillSkipsScroll
+            values[Prefs.KEY_GLASS_MEDIA_VIEWER] = g.mediaViewer
+            values[Prefs.KEY_GLASS_BRIGHT_CAP] = g.brightCap
+            values[Prefs.KEY_GLASS_IMMERSIVE_NAV] = g.immersiveNav
         }
+    }
 
-        doc.font?.let { f -> applyFont(context, prefs, f, clear, values, problems) }
-
-        if (!prefs.applyThemeWrite(clear, values)) {
-            return Outcome.Failed("Your settings could not be saved. The settings file is not writable.")
-        }
-        Log.i(TAG, "applied '${doc.name}': ${values.size} keys, ${problems.size} problem(s)")
-        return Outcome.Applied(doc.name, problems.distinct())
+    /** [prefs] as it would read after applying [doc], built in memory; nothing real is written and no restart is owed. */
+    fun previewPrefs(prefs: Prefs, doc: ThemeDoc, wallpaperPath: String?): Prefs? {
+        val clear = ArrayList<String>()
+        val values = HashMap<String, Any>()
+        planInto(doc, prefs, wallpaperPath, clear, values, mutableListOf())
+        return prefs.previewWith(clear, values)
     }
 
     private fun applyFont(
         context: Context,
         prefs: Prefs,
         font: ThemeFont,
+        file: File?,
         clear: MutableList<String>,
         values: MutableMap<String, Any>,
         problems: MutableList<String>,
@@ -259,10 +355,12 @@ object ThemeLibrary {
                     values[Prefs.KEY_CUSTOM_FONT] = font.id
                 } else {
                     clear += Prefs.KEY_CUSTOM_FONT
-                    problems += "This version has no font called \"${font.id}\", so the system one is used."
+                    problems += "Font \"${font.id}\" isn't in this version; using the system font."
                 }
             ThemeFontKind.USER -> {
-                val match = FontLibrary.list(context, prefs).firstOrNull { it.name.equals(font.name, true) }
+                // The theme's own file first; a theme from before fonts travelled can only match one already here.
+                val match = file?.let { FontLibrary.importFrom(context, prefs, it, font.name.ifBlank { null })?.entry }
+                    ?: FontLibrary.list(context, prefs).firstOrNull { it.name.equals(font.name, true) }
                 if (match != null) {
                     values[Prefs.KEY_CUSTOM_FONT] = "user"
                     values[Prefs.KEY_FONT_USER_FILE] = match.file
@@ -270,7 +368,8 @@ object ThemeLibrary {
                     values[Prefs.KEY_FONT_USER_STAMP] = match.stamp
                 } else {
                     clear += Prefs.KEY_CUSTOM_FONT
-                    problems += "This theme uses \"${font.name}\", which a theme file cannot carry. Add that font under Extras for the same look."
+                    problems += if (file != null) "Couldn't read the theme's font; using the system font."
+                    else "This theme uses \"${font.name}\" but doesn't include it. Add it in Extras > Fonts."
                 }
             }
         }
@@ -323,8 +422,8 @@ object ThemeLibrary {
             ticks = ThemeTicks(style = TickStyles.assetPrefix(prefs.getOverride(Prefs.TICK_STYLE))),
             flags = flags,
             font = font,
-            // Only once a glass key has been set, or every theme would stamp defaults on its importer.
-            glass = if (Prefs.THEME_GLASS_KEYS.none { prefs.isSet(it) }) null else ThemeGlass(
+            // The whole look travels, so an untouched slider exports its default and the switch its state.
+            glass = ThemeGlass(
                 blur = prefs.glassBlur,
                 tint = prefs.glassTint,
                 displace = prefs.glassDisplace,
@@ -350,6 +449,10 @@ object ThemeLibrary {
                 rowOptics = prefs.glassRowOptics,
                 shapedBubbles = prefs.glassShapedBubbles,
                 stillSkipsScroll = prefs.glassStillSkipsScroll,
+                mediaViewer = prefs.glassMediaViewer,
+                brightCap = prefs.glassBrightCap,
+                immersiveNav = prefs.glassImmersiveNav,
+                enabled = prefs.glassEnabled,
             ),
         )
     }
@@ -363,12 +466,19 @@ object ThemeLibrary {
         return WallpaperAsset.masterFile(context).takeIf { it.canRead() }
     }
 
+    /** The selected imported font's file, which a theme carries inside it; null for stock or a bundled face. */
+    private fun fontSource(context: Context, prefs: Prefs): File? {
+        if (prefs.customFont != "user" || prefs.fontUserFile.isBlank()) return null
+        // The name only: the pref is a file in the fonts dir, never a path.
+        return File(FontLibrary.dir(context), File(prefs.fontUserFile).name).takeIf { it.canRead() }
+    }
+
     /** Asset name back to the stored 1-based index; a name this version does not have falls back to stock and says so. */
     private fun resolveShape(asset: String?, problems: MutableList<String>): Int {
         if (asset.isNullOrBlank()) return 0
         val i = BubbleStyles.ALL.indexOfFirst { it.asset == asset }
         if (i < 0) {
-            problems += "This version has no bubble shape from that theme, so those bubbles stay stock."
+            problems += "The theme's bubble shape isn't in this version; using stock."
             return 0
         }
         return i + 1
@@ -378,7 +488,7 @@ object ThemeLibrary {
     private fun resolveTick(prefix: String?, problems: MutableList<String>): Int {
         if (prefix.isNullOrBlank()) return 0
         val v = TickStyles.styleOf(prefix)
-        if (v == 0) problems += "This version has no tick style from that theme, so the ticks stay stock."
+        if (v == 0) problems += "The theme's tick style isn't in this version; using stock."
         return v
     }
 
@@ -389,10 +499,10 @@ object ThemeLibrary {
     }
 
     /** Stage through a .part so a half-written slot is never left where the list will read it. */
-    private fun writeTo(dest: File, doc: ThemeDoc, wallpaper: File?): Boolean {
+    private fun writeTo(dest: File, doc: ThemeDoc, wallpaper: File?, font: File?): Boolean {
         dest.parentFile?.mkdirs()
         val part = File(dest.parentFile, "${dest.name}.part")
-        val ok = runCatching { FileOutputStream(part).use { ThemeFile.write(it, doc, wallpaper) } }
+        val ok = runCatching { FileOutputStream(part).use { ThemeFile.write(it, doc, wallpaper, font) } }
             .getOrDefault(false)
         if (!ok) { part.delete(); return false }
         dest.delete()

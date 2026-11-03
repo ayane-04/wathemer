@@ -10,6 +10,9 @@ object ColorMap {
     /** 24-bit RGB key -> 24-bit RGB value substitution. */
     @Volatile private var rgbMap: Map<Int, Int> = emptyMap()
 
+    /** The token colours as 24-bit RGB: what every rewritten seed comes out as. */
+    @Volatile private var tokenRgb: Set<Int> = emptySet()
+
     /** A token of 0 contributes nothing; that per-token opt-in is what lets one element be themed without repainting the app. */
     fun rebuild(primaryArgb: Int, backgroundArgb: Int, textArgb: Int) {
         // Dodge before seeding: a stale store can still carry a colliding token until the settings app migrates it.
@@ -23,6 +26,7 @@ object ColorMap {
         if (b != 0) ColorSeeds.BACKGROUND.forEach { m[it] = b and 0xFFFFFF }
         if (t != 0) ColorSeeds.TEXT.forEach { m[it] = t and 0xFFFFFF }
         rgbMap = m
+        tokenRgb = m.values.toHashSet()
 
         XposedBridge.log(
             "[$TAG] ColorMap rebuilt: primary=%s bg=%s text=%s -> size=${m.size}".format(
@@ -45,6 +49,9 @@ object ColorMap {
                 "WhatsApp colour for one of them (pure white and pure black are both seeds)."
         )
     }
+
+    /** True when [argb]'s RGB is a token colour, so it may be a stock seed the substitution rewrote. */
+    fun isTokenColour(argb: Int): Boolean = (argb and 0xFFFFFF) in tokenRgb
 
     /** True when no global token is set, i.e. nothing should be substituted at all. */
     fun isEmpty(): Boolean = rgbMap.isEmpty()

@@ -490,7 +490,7 @@ private fun HexEntryDialog(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text("Hex colour", color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Text("Eight digits, alpha first", color = fgMuted, fontSize = 13.sp)
+            Text("AARRGGBB", color = fgMuted, fontSize = 13.sp)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

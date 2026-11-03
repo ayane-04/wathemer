@@ -111,7 +111,7 @@ internal fun syncAltToolbarGlass() {
         if (a.width <= 0 || a.height <= 0 || !a.isShown) continue
         val rect = altRect
         rect.set(0, 0, a.width, a.height)
-        if (!runCatching { holder.offsetDescendantRectToMyCoords(a, rect) }.isSuccess) continue
+        if (!holder.offsetDescendantRect(a, rect)) continue
         l = minOf(l, rect.left); t = minOf(t, rect.top)
         r = maxOf(r, rect.right); b = maxOf(b, rect.bottom)
         n++
@@ -243,7 +243,7 @@ private fun syncAltLeadingGlass(
         if (a.width <= 0 || a.height <= 0 || a.visibility != View.VISIBLE) continue
         val rect = altRect
         rect.set(0, 0, a.width, a.height)
-        if (!runCatching { holder.offsetDescendantRectToMyCoords(a, rect) }.isSuccess) continue
+        if (!holder.offsetDescendantRect(a, rect)) continue
         if (rect.left < backLeft) {
             backLeft = rect.left
             backRight = rect.right
@@ -403,8 +403,8 @@ private fun syncActionsGlass() {
         whitenActionIcons(a)
         for (icon in iconTargets(a)) {
             val rect = Rect(0, 0, icon.width, icon.height)
-            if (!runCatching { content.offsetDescendantRectToMyCoords(icon, rect) }.isSuccess) {
-                // The contextual action bar is not under id/content, so the offset call throws; screen coordinates work whatever the hierarchy.
+            if (!content.offsetDescendantRect(icon, rect)) {
+                // The contextual action bar is not under id/content; screen coordinates work whatever the hierarchy.
                 val la = IntArray(2)
                 val lc = IntArray(2)
                 icon.getLocationOnScreen(la)
@@ -424,7 +424,7 @@ private fun syncActionsGlass() {
     // The profile photo is a plain action view or the stub after the toolbar, and the icon walk sees neither.
     if (!searchOverlay && !selectionMode) meTabPhoto(liveHeader)?.let { photo ->
         val rect = Rect(0, 0, photo.width, photo.height)
-        if (runCatching { content.offsetDescendantRectToMyCoords(photo, rect) }.isSuccess) {
+        if (content.offsetDescendantRect(photo, rect)) {
             l = minOf(l, rect.left)
             t = minOf(t, rect.top)
             r = maxOf(r, rect.right)
@@ -574,23 +574,23 @@ private val actionBarState = WeakHashMap<View, Boolean>()
 
 private val actionBarWatchTag = tagKey("wathemer-action-bar-watch")
 
-/** One layout watcher per window, driving [syncActionBarCover] whenever the mode flips. */
-internal fun watchActionBar(bar: View, toolbarId: Int) {
+/** One layout watcher per window, driving [syncActionBarCover] whenever the mode flips; without [glass] it only hides and restores. */
+internal fun watchActionBar(bar: View, toolbarId: Int, glass: Boolean = true) {
     val root = bar.rootView as? ViewGroup ?: return
     if (root.getTag(actionBarWatchTag) != null) return
     root.setTag(actionBarWatchTag, true)
     root.viewTreeObserver.addOnGlobalLayoutListener {
-        runCatching { syncActionBarCover(root, bar, toolbarId) }
+        runCatching { syncActionBarCover(root, bar, toolbarId, glass) }
     }
-    syncActionBarCover(root, bar, toolbarId)
+    syncActionBarCover(root, bar, toolbarId, glass)
 }
 
 /** The bar's own isShown IS the mode. Hide others INVISIBLE (GONE jumps the layout); steady state is one isShown call. */
-private fun syncActionBarCover(root: ViewGroup, bar: View, toolbarId: Int) {
+private fun syncActionBarCover(root: ViewGroup, bar: View, toolbarId: Int, glass: Boolean) {
     val active = bar.isShown && bar.height > 0
     if (actionBarState[root] == active) return
     actionBarState[root] = active
-    if (active) {
+    if (active && glass) {
         // Same family as the toolbar: glass owns the fill, and the band or the wallpaper behind is the material.
         if (bar.background != null) clearBg(bar, "action_mode_bar")
         if (WaeCompat.enabled) runCatching { dressActionModeClose(bar) }
@@ -719,7 +719,7 @@ internal fun syncToolbarTitle() {
     }
 }
 
-/** The big Chats title, child 0 of the vertical container so everything reflows; text read off the nav because string names are stripped. */
+/** The title's way in from the search bar: finds the container and the header clearance, then hands both to [insertBigTitle]. */
 internal fun injectBigTitle(bar: View) {
     val direct = bar.parent as? ViewGroup ?: return
     // Two layouts: the bar beside the list in the container, or seated inside the list as its header row.

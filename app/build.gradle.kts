@@ -22,8 +22,10 @@ android {
         minSdk = 31
         targetSdk = 36
         // Bump on every build that leaves this machine, or a log cannot be tied to a build.
-        versionCode = 241
-        versionName = "1.0.9"
+        versionCode = 271
+        versionName = "2.0.1-stable"
+        // The theme store a build reads: the real one, unless a test build is made with -PstoreStaging=true.
+        buildConfigField("boolean", "STORE_STAGING", (project.findProperty("storeStaging") == "true").toString())
 
         ndk {
             // arm64 only: 32-bit-only Android 12 phones effectively do not exist, and emulators are not a target.

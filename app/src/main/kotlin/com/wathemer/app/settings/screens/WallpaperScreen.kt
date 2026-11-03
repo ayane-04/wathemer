@@ -78,7 +78,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
         if (settled != snap.wallpaperPath) snapshot.updateWallpaperPath(prefs, settled)
         // The prune takes glass with it, so say so here; the toggle below announces the same thing.
         if (hadGlass && !prefs.glassEnabled) {
-            Toast.makeText(context, "Glass turned off too, it needs a wallpaper.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Liquid Glass turned off too.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -159,7 +159,7 @@ fun WallpaperScreen(nav: NavController, prefs: Prefs) {
                         if (!newChecked && prefs.glassEnabled) {
                             prefs.glassEnabled = false
                             // Two lines max, Android truncates anything longer.
-                            Toast.makeText(context, "Glass turned off too, it needs a wallpaper.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Liquid Glass turned off too.", Toast.LENGTH_LONG).show()
                         }
                     },
                 )
@@ -215,7 +215,7 @@ private fun WallpaperThumbnail(path: String?, stamp: Long, dim: Int, blur: Int) 
     }
     if (bitmap == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Could not decode the image", color = Palette.FgMuted, fontSize = 14.sp)
+            Text("Couldn't load the image", color = Palette.FgMuted, fontSize = 14.sp)
         }
         return
     }

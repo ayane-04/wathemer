@@ -80,12 +80,13 @@ object GlassHook {
             "[$TAG] blur=${BLUR_DP}dp tint=$TINT_ALPHA displace=${DISPLACE_DP}dp " +
                 "bevel=$BEVEL_FRACTION radius=${CARD_RADIUS_DP}dp " +
                 "gamma=${GlassParams.defaultTransGamma} sat=${GlassParams.defaultSaturation} glow=${GlassParams.defaultBloom} " +
+                "cap=${GlassParams.defaultBrightCap} " +
                 "edge=${GlassParams.defaultEdgeShadow} hued=$HUED_TINT linear=$LINEAR_COPY clarity=${GlassParams.defaultDetail} " +
                 "liveClarity=${BackdropCapture.liveRim} " +
                 "droplet=${GlassNavDroplet.enabled} assemble=${GlassView.assembleOnAppear} " +
-                "stillSkips=${GlassView.stillSkipsScroll} " +
+                "stillSkips=${GlassView.stillSkipsScroll} mediaViewer=$MEDIA_VIEWER " +
                 "oneBlur=$ONE_BLUR frostSigma=$frostSigmaScreen snapRadius=$snapRadius optics=$SMALL_OPTICS " +
-                "popupMorph=${GlassPopupMorph.enabled} rowOptics=$ROW_OPTICS " +
+                "popupMorph=${GlassPopupMorph.enabled} rowOptics=$ROW_OPTICS immersiveNav=$IMMERSIVE_NAV " +
                 "rim=$RIM_ALPHA/${RIM_WIDTH_DP}dp " +
                 "rimAngle=${GlassParams.defaultRimStrokeAngle}",
         )
@@ -98,6 +99,7 @@ object GlassHook {
         homeToolbarId = toolbarId
         actionBarRootId = res.waId("action_bar_root", pkg)
         val toolbarContainerId = res.waId("toolbar_container", pkg)
+        val mediaViewLayoutId = res.waId("media_view_layout", pkg)
         val searchBarId = res.waId("my_search_bar", pkg)
         val pagerHolderId = res.waId("pager_holder", pkg)
         val navContainerId = res.waId("bottom_nav_container", pkg)
@@ -277,7 +279,7 @@ object GlassHook {
                     val content = contentRef?.get() ?: return@addOnLayoutChangeListener
                     if (view.height <= 0) return@addOnLayoutChangeListener
                     val r = Rect(0, 0, view.width, view.height)
-                    if (runCatching { content.offsetDescendantRectToMyCoords(view, r) }.isSuccess) {
+                    if (content.offsetDescendantRect(view, r)) {
                         homeBarTop = r.top
                         homeBarHeight = r.height()
                     }
@@ -932,6 +934,11 @@ object GlassHook {
                 liquidFrostOnLayout(v, keepPadding = true, optics = true)
             }
         }
+        // Otherwise the scroll date shows behind the header capsule.
+        val dateHeaderId = res.waId("date_divider_header", pkg)
+        if (dateHeaderId != 0) ViewThemeDispatcher.onId(dateHeaderId) { v ->
+            if (v !is ViewStub) pinConvDate(v)
+        }
         val tiBubbleId = res.waId("ti_bubble", pkg)
         if (tiBubbleId != 0) ViewThemeDispatcher.onId(tiBubbleId) { v ->
             // Only the bubble; the dots are a sibling drawable and must keep animating.
@@ -1401,6 +1408,8 @@ object GlassHook {
             }
         }
         if (toolbarContainerId != 0) ViewThemeDispatcher.onId(toolbarContainerId) { v ->
+            // The media viewer reuses this id; its strip is left to the media viewer's own glass switch.
+            if (mediaViewLayoutId != 0 && insideId(v, mediaViewLayoutId, 2)) return@onId
             clearBg(v, "toolbar_container")
         }
         // Keeps the toolbar and nav see-through when WhatsApp re-applies fills; forcedBg decides which views, not id.
@@ -1449,6 +1458,7 @@ object GlassHook {
             .map { res.waId(it, pkg) }
             .filter { it != 0 }
             .toIntArray()
+        ensureFabSlideHook()
         runCatching {
             val p = ModulePrefs.open()
             p.reload()
@@ -1634,21 +1644,17 @@ object GlassHook {
             )
         }
 
+        if (MEDIA_VIEWER) installMediaViewerGlass(res, pkg)
+
         armed = true
         XposedBridge.log("[$TAG] armed (header=$headerId pagerHolder=$pagerHolderId)")
         HookLog.arm("glass/engine", "blur=${BLUR_DP}dp tint=$TINT_ALPHA radius=${CARD_RADIUS_DP}dp")
-        // A global wallpaper decoded before this point waited here; the wallpaper installer runs first.
-        pendingGlobal?.let { resolveGlassTintFrom(it, pendingGlobalDim) }
-        pendingGlobal = null
     }
-
-    private var pendingGlobal: Bitmap? = null
-    private var pendingGlobalDim = 0f
 
     /** The global wallpaper's bitmap as soon as the cache has it; any thread. Resolves the tint before any pane bakes it. */
     fun noteGlobalWallpaper(bitmap: Bitmap, dim: Float) {
         Handler(Looper.getMainLooper()).post {
-            if (armed) resolveGlassTintFrom(bitmap, dim) else { pendingGlobal = bitmap; pendingGlobalDim = dim }
+            if (armed) resolveGlassTintFrom(bitmap, dim)
         }
     }
 

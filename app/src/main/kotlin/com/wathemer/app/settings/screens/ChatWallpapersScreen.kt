@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -53,6 +52,7 @@ import com.wathemer.app.hooks.wallpaper.BitmapDecoder
 import com.wathemer.app.hooks.wallpaper.WallpaperImage
 import com.wathemer.app.settings.components.CategoryRow
 import com.wathemer.app.settings.components.ChevronIcon
+import com.wathemer.app.settings.components.ConfirmDialog
 import com.wathemer.app.settings.components.NavTopBar
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.SliderItem
@@ -121,9 +121,9 @@ fun ChatWallpapersScreen(nav: NavController, prefs: Prefs, onMessage: (String) -
                                 }
                                 ChatWallpaperLibrary.PutResult.Unreadable -> onMessage("Couldn't read that image.")
                                 ChatWallpaperLibrary.PutResult.TooLarge ->
-                                    onMessage("That image is over 24 MB, the limit for a chat wallpaper.")
+                                    onMessage("Image too big (24 MB max).")
                                 ChatWallpaperLibrary.PutResult.Full ->
-                                    onMessage("You have ${ChatWallpaperLibrary.MAX_ENTRIES} chat wallpapers already. Remove one first.")
+                                    onMessage("Max ${ChatWallpaperLibrary.MAX_ENTRIES} chat wallpapers. Remove one first.")
                             }
                         }
                     }
@@ -184,7 +184,7 @@ fun ChatWallpapersScreen(nav: NavController, prefs: Prefs, onMessage: (String) -
                 }
                 when {
                     saving -> NoteText("Saving")
-                    entries.isEmpty() -> NoteText("None yet. Open a chat in WhatsApp, tap its menu, then Chat wallpaper.")
+                    entries.isEmpty() -> NoteText("None yet. In a chat, open the menu, then Chat wallpaper.")
                     else -> entries.forEachIndexed { i, entry ->
                         ChatWallpaperRow(context, entry, divider = i < entries.lastIndex) { editing = entry }
                     }
@@ -213,8 +213,8 @@ fun ChatWallpapersScreen(nav: NavController, prefs: Prefs, onMessage: (String) -
 
     removing?.let { entry ->
         ConfirmDialog(
-            title = "Use the wallpaper for ${entry.name}?",
-            body = "The chat's own picture is deleted.",
+            title = "Remove ${entry.name}'s wallpaper?",
+            body = "",
             confirmLabel = "Remove",
             onConfirm = {
                 removing = null
@@ -222,7 +222,7 @@ fun ChatWallpapersScreen(nav: NavController, prefs: Prefs, onMessage: (String) -
                 scope.launch {
                     withContext(Dispatchers.IO) { ChatWallpaperLibrary.remove(context, prefs, entry) }
                     refresh()
-                    onMessage("${entry.name} shows the wallpaper again.")
+                    onMessage("Removed ${entry.name}'s wallpaper.")
                 }
             },
             onDismiss = { removing = null },
@@ -366,37 +366,5 @@ private fun ChatDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.(
             verticalArrangement = Arrangement.spacedBy(6.dp),
             content = content,
         )
-    }
-}
-
-@Composable
-private fun ConfirmDialog(
-    title: String,
-    body: String,
-    confirmLabel: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Palette.Surface, RoundedCornerShape(16.dp))
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(title, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Text(body, color = Palette.FgMuted, fontSize = 14.sp, lineHeight = 20.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(1.dp, Palette.RuleStrong),
-                ) { Text("Cancel", color = Palette.Fg) }
-                Button(onClick = onConfirm, modifier = Modifier.weight(1f)) {
-                    Text(confirmLabel, fontWeight = FontWeight.Medium)
-                }
-            }
-        }
     }
 }

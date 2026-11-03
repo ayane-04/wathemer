@@ -96,9 +96,9 @@ fun ExtrasScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
             importing = false
             when (result) {
                 is FontLibrary.ImportResult.Unreadable ->
-                    onMessage("Couldn't read that font file. TTF, OTF and TTC work.")
+                    onMessage("Couldn't read that font. Use TTF, OTF or TTC.")
                 is FontLibrary.ImportResult.TooLarge ->
-                    onMessage("That file is over 32 MB, the limit for a font here.")
+                    onMessage("Font too big (32 MB max).")
                 is FontLibrary.ImportResult.Done -> {
                     val outcome = result.outcome
                     if (outcome.duplicate) {
@@ -134,7 +134,6 @@ fun ExtrasScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                 ExpandGroup("Effects") {
                     ToggleItem(
                         title = "Snowfall",
-                        subtitle = "Uses battery while it shows",
                         checked = snow,
                         onCheckedChange = {
                             snow = it
@@ -287,7 +286,7 @@ private fun FontPickerDialog(
                     item(key = "stock") {
                         FontRow(
                             label = "System default",
-                            sample = "WhatsApp stock typeface",
+                            sample = "Stock font",
                             fontFamily = null,
                             selected = fontChoice.isBlank(),
                             onClick = { onPick("", null) },

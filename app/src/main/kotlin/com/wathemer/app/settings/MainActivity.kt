@@ -56,10 +56,13 @@ import com.wathemer.app.settings.screens.GlobalColorsUnreadScreen
 import com.wathemer.app.settings.screens.HomescreenScreen
 import com.wathemer.app.settings.screens.LiquidGlassScreen
 import com.wathemer.app.settings.screens.StatusBarScreen
+import com.wathemer.app.settings.screens.StoreScreen
 import com.wathemer.app.settings.screens.ThemesScreen
 import com.wathemer.app.settings.screens.UpdatesScreen
 import com.wathemer.app.settings.screens.WallpaperScreen
 import com.wathemer.app.settings.screens.pendingChatRequest
+import com.wathemer.app.settings.screens.pendingThemeFile
+import com.wathemer.app.store.StoreSession
 
 /** Hosts the settings UI over an in-memory nav stack; system back pops until the root, then Android closes the activity. */
 class MainActivity : ComponentActivity() {
@@ -93,10 +96,9 @@ class MainActivity : ComponentActivity() {
                 )
             } else if (r.cleared > 0) {
                 val msg = if (r.writeFailed) {
-                    "Found ${r.cleared} settings from a previous install but could NOT clear them " +
-                        "(prefs file not writable by this install)"
+                    "Couldn't clear ${r.cleared} settings from a previous install (LSPosed didn't take the change)."
                 } else {
-                    "Fresh install: cleared ${r.cleared} settings left by the previous one"
+                    "Cleared ${r.cleared} settings from the previous install."
                 }
                 Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                 Log.i(
@@ -129,7 +131,10 @@ class MainActivity : ComponentActivity() {
         runCatching { prefs.exportForMigration() }
             .onSuccess { n -> if (n != null) Log.i("WaThemer.Prefs", "migration snapshot: $n settings") }
         // Only a fresh Activity takes a hand-off: a recreation carries the same Intent and must not replay it.
-        if (savedInstanceState == null) takeChatRequest(intent)
+        if (savedInstanceState == null) {
+            takeChatRequest(intent)
+            takeThemeFile(intent)
+        }
         setContent {
             WaThemerTheme {
                 ThemeSnapshotHost(prefs) {
@@ -143,6 +148,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Back from elsewhere: a store download the system cut off while the app was away picks up where it stopped. */
+    override fun onResume() {
+        super.onResume()
+        StoreSession.resumePaused(this)
+    }
+
     /** Edits made this session postdate the launch snapshot, and leaving for the installer lands here. */
     override fun onStop() {
         super.onStop()
@@ -153,6 +164,17 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         takeChatRequest(intent)
+        takeThemeFile(intent)
+    }
+
+    /** A theme file opened from another app, taken once; the read grant lives only while this task does. */
+    private fun takeThemeFile(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        // Recents replays the task's root Intent long after the sender's grant is gone.
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        setIntent(Intent(intent).setAction(Intent.ACTION_MAIN).setData(null))
+        pendingThemeFile.value = uri
     }
 
     /** Reads and consumes the chat extras; aged out, or recents re-delivers a task root intent. */
@@ -211,13 +233,16 @@ private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Uni
             nav.replaceAll(listOf(Screen.CategoryList, Screen.Wallpaper, Screen.ChatWallpapers))
         }
     }
+    val pendingTheme by pendingThemeFile
+    LaunchedEffect(pendingTheme) {
+        if (pendingTheme != null && nav.current != Screen.Themes) nav.replaceAll(listOf(Screen.CategoryList, Screen.Themes))
+    }
     // Padded here, not on the banner: the screens' Scaffolds subtract an inset an ancestor took, so the banner clears the clock and the title follows it.
     Column(modifier = Modifier.fillMaxSize().then(if (banner) Modifier.statusBarsPadding() else Modifier)) {
         // Standing banner, never a toast: with the module inactive every control silently changes nothing.
         if (!prefs.moduleStoreActive) {
             Text(
-                text = "WaThemer is not active in your Xposed manager, so nothing here reaches WhatsApp. " +
-                    "Enable it, add WhatsApp or WhatsApp Business to its scope, then reopen this app.",
+                text = "WaThemer isn't active. Enable it in LSPosed with WhatsApp or WhatsApp Business in its scope, then reopen the app.",
                 color = Color(0xFF1A1207),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
@@ -229,8 +254,7 @@ private fun AppRoot(nav: NavController, prefs: Prefs, onMessage: (String) -> Uni
         // The one case the store starts over: an update skipped the export build, or the snapshot could not be read or written.
         if (importWarn && prefs.moduleStoreActive) {
             Text(
-                text = "Your settings could not be carried over. If this replaced version 0.9.4 or " +
-                    "later, install that version, open it once, then update again.",
+                text = "Settings couldn't be carried over. If you came from 0.9.4 or later, reinstall that version, open it once, then update again.",
                 color = Color(0xFF1A1207),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
@@ -276,6 +300,7 @@ private fun ScreenSwitch(nav: NavController, prefs: Prefs, onMessage: (String) -
 
         Screen.Extras              -> ExtrasScreen(nav, prefs, onMessage)
         Screen.Themes              -> ThemesScreen(nav, prefs, onMessage)
+        Screen.ThemeStore          -> StoreScreen(nav, prefs, onMessage)
         Screen.Updates             -> UpdatesScreen(nav, prefs, onMessage)
     }
 }

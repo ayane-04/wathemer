@@ -163,7 +163,11 @@ internal fun injectUpdatesCard(host: ViewGroup) {
     XposedBridge.log("[$TAG] updates card + title '${tv.text}' inserted")
 }
 
-/** Title clearance matches the Chats title's, the header's height plus its small gap, and every clip edge is the list's own padding box. */
+/** A tab page's card ends where its rows rest, or with Immersive Navbar runs on under the nav, inset like its sides. */
+private fun cardBottomFor(host: View, inset: Int, rest: Int, side: Int): Int =
+    if (IMMERSIVE_NAV && inset > 0) host.height - side else rest
+
+/** Title clearance matches the Chats title's, the header's height plus its small gap, and every clip edge comes from the list's own padding box. */
 internal fun syncUpdatesCard() {
     val host = updatesHostRef?.get() ?: return
     val glass = updatesPanelRef?.get() as? GlassView ?: return
@@ -196,6 +200,7 @@ internal fun syncUpdatesCard() {
     val bottom = host.height - inset - gap
     val right = host.width - side
     if (bottom - top < gap || right - side < gap) return
+    val cardBottom = cardBottomFor(host, inset, bottom, side)
 
     // Padding first, because the clip below reads it.
     val pad = (CARD_CONTENT_PAD_DP * d).toInt()
@@ -208,22 +213,22 @@ internal fun syncUpdatesCard() {
     }
 
     val lp = glass.layoutParams as? FrameLayout.LayoutParams ?: return
-    if (lp.width != right - side || lp.height != bottom - top ||
+    if (lp.width != right - side || lp.height != cardBottom - top ||
         lp.leftMargin != side || lp.topMargin != top
     ) {
         lp.width = right - side
-        lp.height = bottom - top
+        lp.height = cardBottom - top
         lp.leftMargin = side
         lp.topMargin = top
         glass.layoutParams = lp
-        XposedBridge.log("[$TAG] updates card $side,$top-$right,$bottom")
+        XposedBridge.log("[$TAG] updates card $side,$top-$right,$cardBottom")
     }
 
     // The pad comes back off so the clip lands on the border while the content sits inside it.
     val cl = list.paddingLeft - pad
     val ct = list.paddingTop - pad
     val cr = list.width - list.paddingRight + pad
-    val cb = list.height - list.paddingBottom + pad
+    val cb = list.height - list.paddingBottom + pad + (cardBottom - bottom)
     val provider = list.outlineProvider as? CardOutline
     if (provider == null) {
         list.outlineProvider = CardOutline(cl, ct, cr, cb, CARD_RADIUS_DP * d)
@@ -260,7 +265,7 @@ internal fun syncListCard(page: ChatsPage) {
     // The list's origin in its own page, so this never crosses the pager boundary that cut the avatars off.
     val r = cardRect
     r.set(0, 0, list.width, list.height)
-    if (!runCatching { host.offsetDescendantRectToMyCoords(list, r) }.isSuccess) return
+    if (!host.offsetDescendantRect(list, r)) return
     val listTop = r.top
 
     // bottomInset is measured in id/content; the page shares its bounds, and this logs once if that ever stops holding.
@@ -281,22 +286,23 @@ internal fun syncListCard(page: ChatsPage) {
     if (strip != null && strip.isShown && strip.height > 0) {
         seatWaeStatusStrip(strip, side + pad, gap + pad)
         r.set(0, 0, strip.width, strip.height)
-        if (runCatching { host.offsetDescendantRectToMyCoords(strip, r) }.isSuccess) top = minOf(top, r.top - pad)
+        if (host.offsetDescendantRect(strip, r)) top = minOf(top, r.top - pad)
     }
     val bottom = host.height - inset - gap
     val right = host.width - side
     if (bottom - top < gap || right - side < gap) return
+    val cardBottom = cardBottomFor(host, inset, bottom, side)
 
     val lp = glass.layoutParams as? ViewGroup.MarginLayoutParams ?: return
-    if (lp.width != right - side || lp.height != bottom - top ||
+    if (lp.width != right - side || lp.height != cardBottom - top ||
         lp.leftMargin != side || lp.topMargin != top
     ) {
         lp.width = right - side
-        lp.height = bottom - top
+        lp.height = cardBottom - top
         lp.leftMargin = side
         lp.topMargin = top
         glass.layoutParams = lp
-        XposedBridge.log("[$TAG] list card $side,$top-$right,$bottom (r=${(CARD_RADIUS_DP * d).toInt()})")
+        XposedBridge.log("[$TAG] list card $side,$top-$right,$cardBottom (r=${(CARD_RADIUS_DP * d).toInt()})")
     }
 
     // Inset the rows to the card; without the horizontal padding the clip slices the avatars.
@@ -311,7 +317,8 @@ internal fun syncListCard(page: ChatsPage) {
     val cl = list.paddingLeft - pad
     val ct = list.paddingTop - pad
     val cr = list.width - list.paddingRight + pad
-    val cb = list.height - list.paddingBottom + pad
+    // Under Immersive Navbar the bottom edge runs on with the card by a constant, so it never moves with the page.
+    val cb = list.height - list.paddingBottom + pad + (cardBottom - bottom)
     val provider = list.outlineProvider as? CardOutline
     if (provider == null) {
         list.outlineProvider = CardOutline(cl, ct, cr, cb, CARD_RADIUS_DP * d)
@@ -386,7 +393,8 @@ private fun syncFolderCard() {
 
     // Card edges in the list's own coordinates, then the content pad on top of each.
     val padL = (side - list.left).coerceAtLeast(0) + pad
-    val padT = (top - list.top).coerceAtLeast(0) + pad
+    // The top from the gap, never the hugged top: ink chased through padding is a runaway recurrence.
+    val padT = (gap - list.top).coerceAtLeast(0) + pad
     val padR = (list.left + list.width - right).coerceAtLeast(0) + pad
     if (list.paddingLeft != padL || list.paddingTop != padT || list.paddingRight != padR) {
         // Before the mutation: growing paddingTop leaves the list scrolled by what was added.
@@ -711,7 +719,7 @@ private fun syncContentCard(list: View, label: String, frameCard: Boolean) {
 
     val r = contentCardRect
     r.set(0, 0, list.width, list.height)
-    if (!runCatching { host.offsetDescendantRectToMyCoords(list, r) }.isSuccess) return
+    if (!host.offsetDescendantRect(list, r)) return
     // The mapping subtracts the view's OWN scroll, so a scrolled ScrollView lands the card off screen; child-scrolling lists keep scrollY 0.
     r.offset(list.scrollX, list.scrollY)
 
@@ -1149,6 +1157,7 @@ private fun syncPageCard(card: PageCard) {
     val bottom = host.height - inset - gap
     val right = host.width - side
     if (bottom - top < gap || right - side < gap) return
+    val cardBottom = cardBottomFor(host, inset, bottom, side)
 
     val pad = (CARD_CONTENT_PAD_DP * d).toInt()
     val wasAtTop = !list.canScrollVertically(-1)
@@ -1160,7 +1169,7 @@ private fun syncPageCard(card: PageCard) {
     }
 
     val lp = glass.layoutParams as? ViewGroup.MarginLayoutParams ?: return
-    val h = bottom - top
+    val h = cardBottom - top
     if (lp.width != right - side || lp.height != h ||
         lp.leftMargin != side || lp.topMargin != top || lp.bottomMargin != -(top + h)
     ) {
@@ -1170,14 +1179,14 @@ private fun syncPageCard(card: PageCard) {
         lp.topMargin = top
         lp.bottomMargin = -(top + h)               // net zero height in the LinearLayout
         glass.layoutParams = lp
-        XposedBridge.log("[$TAG] ${card.titleFallback} card $side,$top-$right,$bottom")
+        XposedBridge.log("[$TAG] ${card.titleFallback} card $side,$top-$right,$cardBottom")
     }
 
     // The pad comes back off so the clip lands on the border while the content sits inside it.
     val cl = list.paddingLeft - pad
     val ct = list.paddingTop - pad
     val cr = list.width - list.paddingRight + pad
-    val cb = list.height - list.paddingBottom + pad
+    val cb = list.height - list.paddingBottom + pad + (cardBottom - bottom)
     val provider = list.outlineProvider as? CardOutline
     if (provider == null) {
         list.outlineProvider = CardOutline(cl, ct, cr, cb, CARD_RADIUS_DP * d)

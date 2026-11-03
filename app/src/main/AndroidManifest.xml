@@ -12,7 +12,7 @@
          and later ignores this one for other apps, so the su force-stop is what actually works there. -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
-    <!-- The update check and its download; only the settings app reaches the network, never the code in WhatsApp. -->
+    <!-- The update check, the theme store and their downloads; only the settings app reaches the network, never the code in WhatsApp. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Tells you the download finished; best effort, since the Updates screen shows the same state and its own Install button. -->
@@ -46,6 +46,23 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- A .wathemer opened from another app, matched on the name: senders type it octet-stream or text. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathSuffix=".wathemer" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <!-- The same without a type: a filter that names one never matches an Intent that carries none. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathSuffix=".wathemer" />
             </intent-filter>
         </activity>
 

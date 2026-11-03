@@ -45,12 +45,11 @@ private fun PrefsOverrideRow(
     if (showPicker) {
         ColorPickerSheet(
             title = name,
-            initialColor = if (override != 0) override else globalValue,
+            initialColor = Prefs.pickerStart(override, globalValue),
             recents = recents,
             onDismiss = { showPicker = false },
             onApply = { picked ->
-                override = picked
-                prefs.setOverride(prefKey, picked)
+                override = prefs.applyOverride(prefKey, picked)
                 prefs.pushRecent(picked)
                 snapshot.value = snapshotFromPrefs(prefs)
                 showPicker = false

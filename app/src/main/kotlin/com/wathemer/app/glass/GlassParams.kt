@@ -218,6 +218,10 @@ class GlassParams(var density: Float) {
     var detail: Float = defaultDetail
         set(v) { set(field, v.coerceIn(0f, 1f)) { field = it } }
 
+    /** How far bright backdrop is pulled toward a ceiling, 0 off to 1 strongest. */
+    var brightCap: Float = defaultBrightCap
+        set(v) { set(field, v.coerceIn(0f, 1f)) { field = it } }
+
     // ── Rim stroke ─────────────────────────────────────────────────────────────────
     // A hard line on the silhouette. The light pass only ever makes a wide soft lobe.
 
@@ -246,6 +250,7 @@ class GlassParams(var density: Float) {
         @JvmStatic var defaultBloomThreshold: Float = 0.6f
         @JvmStatic var defaultEdgeShadow: Float = 0.15f
         @JvmStatic var defaultDetail: Float = 0.25f
+        @JvmStatic var defaultBrightCap: Float = 0.6f
         @JvmStatic var defaultRimStrokePx: Float = 0f
         @JvmStatic var defaultRimStrokeAngle: Float = 90f
         @JvmStatic var defaultRimStrokeColor: Int = Color.WHITE

@@ -1,4 +1,4 @@
-// Live-update state: picker writes go to the snapshot first (recomposes readers), then to prefs.
+// Live-update state: a pick writes the snapshot, which recomposes readers, and prefs.
 // Reading SharedPreferences straight from a composable does not update live; the snapshot does.
 package com.wathemer.app.settings.preview
 
@@ -309,12 +309,12 @@ fun SnapshotOverrideRow(
     if (showPicker) {
         ColorPickerSheet(
             title = name,
-            initialColor = if (current != 0) current else fallback,
+            initialColor = Prefs.pickerStart(current, fallback),
             recents = recents,
             onDismiss = { showPicker = false },
             onApply = { picked ->
-                snapshot.value = snapshot.value.copier(picked)
-                prefs.setOverride(prefKey, picked)
+                val stored = prefs.applyOverride(prefKey, picked)
+                snapshot.value = snapshot.value.copier(stored)
                 prefs.pushRecent(picked)
                 showPicker = false
             },

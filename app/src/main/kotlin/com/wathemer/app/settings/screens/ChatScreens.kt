@@ -139,7 +139,7 @@ fun ChatScreen(nav: NavController, prefs: Prefs) {
             row("Link colour", Prefs.LINK_COLOR,            prefs.primary, WaPreviewKind.ChatMisc, getter = { linkColor },           copier = { copy(linkColor = it) })
         }
         ExpandGroup("Emoji & sticker tray", onOpen = { kind = WaPreviewKind.ChatTray }) {
-            if (prefs.glassEnabled) NoteText("Liquid Glass is on; these colours wait until it is off.")
+            if (prefs.glassEnabled) NoteText("Not used while Liquid Glass is on.")
             row("Panel background", Prefs.TRAY_BG,        prefs.background, WaPreviewKind.ChatTray, getter = { trayBg },       copier = { copy(trayBg = it) })
             row("Tab bar",          Prefs.TRAY_HEADER_BG, prefs.background, WaPreviewKind.ChatTray, getter = { trayHeaderBg }, copier = { copy(trayHeaderBg = it) })
             row("Icons",            Prefs.TRAY_ICON_TINT, prefs.text,       WaPreviewKind.ChatTray, getter = { trayIconTint }, copier = { copy(trayIconTint = it) })
@@ -179,11 +179,11 @@ fun ChatBubbleShapesScreen(nav: NavController, prefs: Prefs) {
                     when {
                         // Mask shaping needs the fused program, which exists from Android 13 on.
                         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ->
-                            "Liquid Glass is on: colour artwork keeps its own look; mask shapes take the plain rounded glass before Android 13."
+                            "With Liquid Glass, colour styles keep their look; mask styles get plain rounded glass on Android 12."
                         prefs.glassShapedBubbles ->
-                            "Liquid Glass is on: a mask shape becomes the outline of the glass, colour artwork keeps its own look."
+                            "With Liquid Glass, mask styles shape the glass; colour styles keep their look."
                         else ->
-                            "Liquid Glass is on: colour artwork keeps its own look; mask shapes need \"Glass fills shaped bubbles\" on the Liquid Glass page."
+                            "With Liquid Glass, mask styles need \"Glass fills shaped bubbles\" on the Liquid Glass page."
                     },
                 )
             }
@@ -308,7 +308,7 @@ fun ChatTickStylesScreen(nav: NavController, prefs: Prefs) {
             PreviewPanel(modifier = Modifier.height(150.dp).fillMaxWidth()) {
                 TickStylePreview(style = current)
             }
-            NoteText("Your tick colours apply to the stock ticks only; a style brings its own colours.")
+            NoteText("Tick colours only apply to stock ticks.")
             val grid = rememberLazyGridState()
             LaunchedEffect(Unit) { grid.scrollToItem(gridStart(current)) }
             LazyVerticalGrid(

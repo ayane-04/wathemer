@@ -270,6 +270,11 @@ class Prefs(
         get() = sp.getInt(KEY_GLASS_GLOW, GlassDefaults.GLOW)
         set(value) { commitInt(KEY_GLASS_GLOW, value.coerceIn(0, 100)) }
 
+    /** How far bright backdrop is dimmed under glass, as a percent (0..100); 0 is off. */
+    var glassBrightCap: Int
+        get() = sp.getInt(KEY_GLASS_BRIGHT_CAP, GlassDefaults.BRIGHT_CAP)
+        set(value) { commitInt(KEY_GLASS_BRIGHT_CAP, value.coerceIn(0, 100)) }
+
     /** Sharp, bent wallpaper at the very edge of a pane, as a percent (0..100); 0 is off. */
     var glassEdgeClarity: Int
         get() = sp.getInt(KEY_GLASS_EDGE_CLARITY, GlassDefaults.EDGE_CLARITY)
@@ -280,10 +285,20 @@ class Prefs(
         get() = sp.getBoolean(KEY_GLASS_LIVE_CLARITY, GlassDefaults.LIVE_CLARITY)
         set(value) { commitBoolean(KEY_GLASS_LIVE_CLARITY, value) }
 
+    /** The photo viewer's strips as live glass. */
+    var glassMediaViewer: Boolean
+        get() = sp.getBoolean(KEY_GLASS_MEDIA_VIEWER, GlassDefaults.MEDIA_VIEWER)
+        set(value) { commitBoolean(KEY_GLASS_MEDIA_VIEWER, value) }
+
     /** The active tab's pill flows between tabs instead of blinking across. */
     var glassNavDroplet: Boolean
         get() = sp.getBoolean(KEY_GLASS_NAV_DROPLET, GlassDefaults.NAV_DROPLET)
         set(value) { commitBoolean(KEY_GLASS_NAV_DROPLET, value) }
+
+    /** The tab pages' cards run on under the tab bar, which shows the list through its glass. */
+    var glassImmersiveNav: Boolean
+        get() = sp.getBoolean(KEY_GLASS_IMMERSIVE_NAV, GlassDefaults.IMMERSIVE_NAV)
+        set(value) { commitBoolean(KEY_GLASS_IMMERSIVE_NAV, value) }
 
     /** Surfaces assemble their lens as they appear rather than arriving whole. */
     var glassAssemble: Boolean
@@ -394,6 +409,13 @@ class Prefs(
         commitInt(key, value)
     }
 
+    /** Stores a colour picked for an override and returns what was stored: 00000000 becomes [INVISIBLE_OVERRIDE]. */
+    fun applyOverride(key: String, picked: Int): Int {
+        val stored = if (picked == 0) INVISIBLE_OVERRIDE else picked
+        setOverride(key, stored)
+        return stored
+    }
+
     /** Comma-separated list of ARGB ints, most-recent first, capped at MAX_RECENTS. */
     var recents: List<Int>
         get() = sp.getString(KEY_RECENTS, null)
@@ -441,25 +463,30 @@ class Prefs(
 
     /** Write a whole theme in one commit: [clear] is removed, then [values] written. Keys outside [THEME_WRITABLE_KEYS] are refused, so a shared file cannot reach any other setting. */
     fun applyThemeWrite(clear: Collection<String>, values: Map<String, Any>): Boolean {
-        val rejected = (clear + values.keys).filterNot { it in THEME_WRITABLE_KEYS }
-        if (rejected.isNotEmpty()) Log.w(TAG, "applyThemeWrite: refused ${rejected.size} key(s) outside the theme set: $rejected")
+        val (removes, puts) = themeEdits(clear, values)
         val ok = sp.edit().apply {
-            // Skip a key that is also being written, so the outcome cannot depend on editor ordering.
-            clear.forEach { if (it in THEME_WRITABLE_KEYS && it !in values) remove(it) }
-            for ((k, v) in values) {
-                if (k !in THEME_WRITABLE_KEYS) continue
+            removes.forEach { remove(it) }
+            for ((k, v) in puts) {
                 when (v) {
                     is Int -> putInt(k, v)
                     is Boolean -> putBoolean(k, v)
                     is String -> putString(k, v)
-                    // Dropping an unexpected type beats writing a wrong one under a key a hook reads.
-                    else -> Log.w(TAG, "applyThemeWrite: $k carries ${v.javaClass.simpleName}, not a pref type")
                 }
             }
         }.commit()
         commitChecked("applyThemeWrite", ok)
         if (ok) Log.i(TAG, "applyThemeWrite: cleared ${clear.size}, wrote ${values.size}")
         return ok
+    }
+
+    /** A copy in memory with a theme's edits on it, for previews; never write through it, a setter still owes a restart. */
+    fun previewWith(clear: Collection<String>, values: Map<String, Any>): Prefs? {
+        val all = runCatching { sp.all }.getOrNull() ?: return null
+        val (removes, puts) = themeEdits(clear, values)
+        val map = HashMap<String, Any?>(all)
+        removes.forEach { map.remove(it) }
+        map.putAll(puts)
+        return Prefs(MemoryPrefs(map), context, moduleStoreActive = false)
     }
 
     /** Snapshots the store to filesDir, which no framework owns; a snapshot import is the recovery path for a framework swap. */
@@ -542,7 +569,7 @@ class Prefs(
 
     /** Logs a refused commit; a landed one reports to [onWrite] unless its key owes no restart. */
     private fun commitChecked(key: String, ok: Boolean) {
-        if (!ok) Log.w(TAG, "commit FAILED for $key: the settings file is not writable by this UID")
+        if (!ok) Log.w(TAG, "commit FAILED for $key: the framework service call failed")
         else if (key !in NO_RESTART_KEYS) onWrite?.invoke()
     }
 
@@ -735,9 +762,11 @@ class Prefs(
         const val KEY_GLASS_LINEAR_COPY = "glass_linear_copy"
         const val KEY_GLASS_EDGE_SHADOW = "glass_edge_shadow"
         const val KEY_GLASS_GLOW = "glass_glow"
+        const val KEY_GLASS_BRIGHT_CAP = "glass_bright_cap"
         const val KEY_GLASS_EDGE_CLARITY = "glass_edge_clarity"
         const val KEY_GLASS_LIVE_CLARITY = "glass_live_clarity"
         const val KEY_GLASS_NAV_DROPLET = "glass_nav_droplet"
+        const val KEY_GLASS_IMMERSIVE_NAV = "glass_immersive_nav"
         const val KEY_GLASS_ASSEMBLE = "glass_assemble"
         const val KEY_GLASS_ONE_BLUR = "glass_one_blur"
         const val KEY_GLASS_SMALL_OPTICS = "glass_small_optics"
@@ -745,6 +774,7 @@ class Prefs(
         const val KEY_GLASS_ROW_OPTICS = "glass_row_optics"
         const val KEY_GLASS_SHAPED_BUBBLES = "glass_shaped_bubbles"
         const val KEY_GLASS_STILL_SKIPS_SCROLL = "glass_still_skips_scroll"
+        const val KEY_GLASS_MEDIA_VIEWER = "glass_media_viewer"
 
         // ── Updates ───────────────────────────────────
         // Settings-app only; the hook never reads these and a theme file can never write them.
@@ -799,21 +829,21 @@ class Prefs(
             listOf(KEY_PRIMARY, KEY_BACKGROUND, KEY_TEXT, KEY_UNREAD_ACCENT, KEY_UNREAD_COUNT_TEXT) +
                 ALL_COLOR_OVERRIDE_KEYS
 
-        /** The on/off keys of a theme file's flags section; the glass switch stays out by choice, as does anything true of one device only. */
+        /** The on/off keys of a theme file's flags section; the glass switch travels in the glass section, and anything true of one device stays out. */
         val THEME_FLAG_KEYS: List<String> = listOf(
             KEY_IOS_ICON_PACK, KEY_CHATLIST_DIVIDER, KEY_EFFECT_SNOW,
             KEY_SYSTEM_BARS_ENABLED, KEY_SYSTEM_BAR_AUTO_ICONS, KEY_FONT_MAP_MONOSPACE,
         )
 
-        /** The glass tuning keys, switches and sliders alike, as one list, so the writable set and the exporter's guard cannot drift apart. */
+        /** The glass tuning keys, switches and sliders alike; the writable set takes them from this list. */
         val THEME_GLASS_KEYS: List<String> = listOf(
             KEY_GLASS_BLUR, KEY_GLASS_TINT, KEY_GLASS_DISPLACE, KEY_GLASS_BEVEL, KEY_GLASS_RADIUS,
             KEY_GLASS_GAMMA, KEY_GLASS_RIM, KEY_GLASS_RIM_WIDTH, KEY_GLASS_RIM_ANGLE,
             KEY_GLASS_BUBBLE_MERGE, KEY_GLASS_SATURATION,
-            KEY_GLASS_HUED_TINT, KEY_GLASS_LINEAR_COPY, KEY_GLASS_EDGE_SHADOW, KEY_GLASS_GLOW, KEY_GLASS_EDGE_CLARITY,
-            KEY_GLASS_LIVE_CLARITY, KEY_GLASS_NAV_DROPLET, KEY_GLASS_ASSEMBLE,
+            KEY_GLASS_HUED_TINT, KEY_GLASS_LINEAR_COPY, KEY_GLASS_EDGE_SHADOW, KEY_GLASS_GLOW, KEY_GLASS_BRIGHT_CAP, KEY_GLASS_EDGE_CLARITY,
+            KEY_GLASS_LIVE_CLARITY, KEY_GLASS_NAV_DROPLET, KEY_GLASS_IMMERSIVE_NAV, KEY_GLASS_ASSEMBLE,
             KEY_GLASS_ONE_BLUR, KEY_GLASS_SMALL_OPTICS, KEY_GLASS_POPUP_MORPH, KEY_GLASS_ROW_OPTICS,
-            KEY_GLASS_SHAPED_BUBBLES, KEY_GLASS_STILL_SKIPS_SCROLL,
+            KEY_GLASS_SHAPED_BUBBLES, KEY_GLASS_STILL_SKIPS_SCROLL, KEY_GLASS_MEDIA_VIEWER,
         )
 
         /** Every key an imported theme may touch. A key missing here is unreachable from a theme file, which is the whole guarantee. */
@@ -822,7 +852,7 @@ class Prefs(
                 BUBBLE_STYLE_INCOMING, BUBBLE_STYLE_OUTGOING, TICK_STYLE,
                 KEY_WALLPAPER_ENABLED, KEY_WALLPAPER_PATH, KEY_WALLPAPER_DIM, KEY_WALLPAPER_BLUR,
                 KEY_CUSTOM_FONT, KEY_FONT_USER_FILE, KEY_FONT_USER_NAME, KEY_FONT_USER_STAMP,
-                // Here only so a theme with no wallpaper can switch glass off; no theme file ever names it.
+                // Carried in the glass section; a theme with no live wallpaper writes it off.
                 KEY_GLASS_ENABLED,
             ) + THEME_GLASS_KEYS
             ).toSet()
@@ -833,6 +863,34 @@ class Prefs(
         const val DEFAULT_TEXT = 0xFFE9EDEF.toInt()         // WA primary text
 
         const val MAX_RECENTS = 12
+
+        /** A picked fully transparent override, kept apart from 0, which means not overridden; alpha 0 draws nothing either way. */
+        const val INVISIBLE_OVERRIDE = 0x00000001
+
+        /** The edits a theme write makes: refused keys dropped, a key both cleared and written left to the write. */
+        internal fun themeEdits(clear: Collection<String>, values: Map<String, Any>): Pair<List<String>, Map<String, Any>> {
+            val rejected = (clear + values.keys).filterNot { it in THEME_WRITABLE_KEYS }
+            if (rejected.isNotEmpty()) Log.w(TAG, "applyThemeWrite: refused ${rejected.size} key(s) outside the theme set: $rejected")
+            // Skip a key that is also being written, so the outcome cannot depend on editor ordering.
+            val removes = clear.filter { it in THEME_WRITABLE_KEYS && it !in values }
+            val puts = LinkedHashMap<String, Any>()
+            for ((k, v) in values) {
+                if (k !in THEME_WRITABLE_KEYS) continue
+                when (v) {
+                    is Int, is Boolean, is String -> puts[k] = v
+                    // Dropping an unexpected type beats writing a wrong one under a key a hook reads.
+                    else -> Log.w(TAG, "applyThemeWrite: $k carries ${v.javaClass.simpleName}, not a pref type")
+                }
+            }
+            return removes to puts
+        }
+
+        /** Where the picker opens for an override: the global when unset, and 00000000 for [INVISIBLE_OVERRIDE]. */
+        fun pickerStart(value: Int, fallback: Int): Int = when (value) {
+            0 -> fallback
+            INVISIBLE_OVERRIDE -> 0
+            else -> value
+        }
 
         /** [remote] is the framework's store; null means no framework answered and writes land where no hook reads. */
         fun open(context: Context, remote: SharedPreferences?): Prefs {

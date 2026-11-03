@@ -9,6 +9,8 @@ import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import com.wathemer.app.hooks.dispatch.ViewThemeDispatcher
+import com.wathemer.app.hooks.glass.MENU_SCRIM
+import com.wathemer.app.hooks.glass.popupHooked
 import com.wathemer.app.hooks.waId
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -47,6 +49,15 @@ object WallpaperShellClearer {
 
     private var pagerIdTried = false
 
+    /** The view a PopupWindow paints its background on. */
+    private const val POPUP_PANEL = "android.widget.PopupWindow\$PopupBackgroundView"
+
+    /** The floating message menu's list, which carries the menu's fill itself. */
+    private const val DROPDOWN_LIST = ".MessageSelectionDropDownRecyclerView"
+
+    /** The glass menus' scrim alpha, so a popup reads the same with glass off. */
+    private const val POPUP_FILL_ALPHA = MENU_SCRIM ushr 24
+
     @Volatile
     private var interceptorInstalled = false
 
@@ -68,7 +79,7 @@ object WallpaperShellClearer {
         // Two counts: one id can match several views, so a single N of M count can exceed its denominator.
         var clearedViews = 0
         var matchedIds = 0
-        for ((name, id) in ids) {
+        for ((_, id) in ids) {
             var hitThisId = false
             collectAllViewsWithId(decor, id).forEach { v ->
                 if (v.background != null) {
@@ -118,22 +129,20 @@ object WallpaperShellClearer {
         fun isOpaqueShellColor(c: Int): Boolean =
             ((c ushr 24) and 0xFF) == 0xFF && c in shellColors
 
-        // Wallpaper active, and not one of our own views.
+        // Wallpaper active, not one of our own views, and not a popup's fill.
         fun gate(view: View?): Boolean {
             if (WallpaperImage.INSTANCE?.isWallpaperActive() != true) return false
             val tag = view?.tag
             if (tag is String && tag.startsWith(WallpaperImage.TAG_PREFIX)) return false
+            if (view != null && isPopupFill(view)) return false
             return true
         }
 
-        fun shouldNeutralizeDrawable(view: View?, d: Drawable?): Boolean {
-            if (!gate(view)) return false
-            return when (d) {
-                is ColorDrawable -> isOpaqueShellColor(d.color)
-                is GradientDrawable ->
-                    runCatching { d.color?.defaultColor }.getOrNull()?.let { isOpaqueShellColor(it) } ?: false
-                else -> false
-            }
+        fun isShellFill(d: Drawable): Boolean = when (d) {
+            is ColorDrawable -> isOpaqueShellColor(d.color)
+            is GradientDrawable ->
+                runCatching { d.color?.defaultColor }.getOrNull()?.let { isOpaqueShellColor(it) } ?: false
+            else -> false
         }
 
         runCatching {
@@ -141,9 +150,14 @@ object WallpaperShellClearer {
                 View::class.java, "setBackground", Drawable::class.java,
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(p: MethodHookParam) {
-                        val v = p.thisObject as? View
-                        if (shouldNeutralizeDrawable(v, p.args[0] as? Drawable)) {
+                        val v = p.thisObject as? View ?: return
+                        val d = p.args[0] as? Drawable ?: return
+                        if (!isShellFill(d)) return
+                        if (gate(v)) {
                             p.args[0] = ColorDrawable(0)
+                        } else if (isPopupFill(v) && WallpaperImage.INSTANCE?.isWallpaperActive() == true) {
+                            // A popup keeps its dark panel, see-through like the glass menus.
+                            p.args[0] = seeThrough(d)
                         }
                     }
                 },
@@ -166,6 +180,18 @@ object WallpaperShellClearer {
             )
         }.onFailure { XposedBridge.log("$TAG: bg interceptor install failed: ${it.message}") }
     }
+
+    /** A popup floats over the wallpaper, so its fill is never a shell; with glass on, the glass replaces that fill. */
+    private fun isPopupFill(v: View): Boolean {
+        if (popupHooked) return false
+        val name = v.javaClass.name
+        return name == POPUP_PANEL || name.endsWith(DROPDOWN_LIST)
+    }
+
+    /** Mutated first, so other holders of the drawable keep its opaque state. */
+    private fun seeThrough(d: Drawable): Drawable =
+        if (d is ColorDrawable) ColorDrawable((d.color and 0xFFFFFF) or (POPUP_FILL_ALPHA shl 24))
+        else d.mutate().also { it.alpha = POPUP_FILL_ALPHA }
 
     /** Every view with the id; WA reuses ids at several depths and findViewById returns only the first. */
     private fun collectAllViewsWithId(root: View, id: Int): List<View> {

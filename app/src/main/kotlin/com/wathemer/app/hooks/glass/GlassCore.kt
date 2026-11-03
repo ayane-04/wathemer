@@ -9,6 +9,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
@@ -17,6 +18,7 @@ import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.ViewParent
 import android.view.animation.Interpolator
 import android.view.animation.PathInterpolator
 import android.widget.AbsListView
@@ -67,6 +69,9 @@ internal var SMALL_OPTICS = GlassDefaults.SMALL_OPTICS
 
 /** The selected chat row runs the bubble program over the selection copy. */
 internal var ROW_OPTICS = GlassDefaults.ROW_OPTICS
+
+/** The tab pages' cards run on under the floating nav, whose glass then shows the list beneath. */
+internal var IMMERSIVE_NAV = GlassDefaults.IMMERSIVE_NAV
 
 /** The glow threshold as a fraction of the brightest value the dim and the gamma leave, so bright wallpaper detail can always reach it. */
 internal const val BLOOM_THRESHOLD_FRACTION = 0.5f
@@ -182,17 +187,20 @@ internal fun loadGlassPrefs(): Boolean {
         GlassParams.defaultSaturation = p.getInt(k.KEY_GLASS_SATURATION, GlassDefaults.SATURATION).coerceIn(100, 200) / 100f
         GlassParams.defaultEdgeShadow = p.getInt(k.KEY_GLASS_EDGE_SHADOW, GlassDefaults.EDGE_SHADOW).coerceIn(0, 30) / 100f
         GlassParams.defaultBloom = p.getInt(k.KEY_GLASS_GLOW, GlassDefaults.GLOW).coerceIn(0, 100) / 100f
+        GlassParams.defaultBrightCap = p.getInt(k.KEY_GLASS_BRIGHT_CAP, GlassDefaults.BRIGHT_CAP).coerceIn(0, 100) / 100f
         HUED_TINT = p.getBoolean(k.KEY_GLASS_HUED_TINT, GlassDefaults.HUED_TINT)
         LINEAR_COPY = p.getBoolean(k.KEY_GLASS_LINEAR_COPY, GlassDefaults.LINEAR_COPY)
         ONE_BLUR = p.getBoolean(k.KEY_GLASS_ONE_BLUR, GlassDefaults.ONE_BLUR)
         SMALL_OPTICS = p.getBoolean(k.KEY_GLASS_SMALL_OPTICS, GlassDefaults.SMALL_OPTICS)
         ROW_OPTICS = p.getBoolean(k.KEY_GLASS_ROW_OPTICS, GlassDefaults.ROW_OPTICS)
+        IMMERSIVE_NAV = p.getBoolean(k.KEY_GLASS_IMMERSIVE_NAV, GlassDefaults.IMMERSIVE_NAV)
         GlassPopupMorph.enabled = p.getBoolean(k.KEY_GLASS_POPUP_MORPH, GlassDefaults.POPUP_MORPH)
         GlassParams.defaultDetail = p.getInt(k.KEY_GLASS_EDGE_CLARITY, GlassDefaults.EDGE_CLARITY).coerceIn(0, 100) / 100f
         BackdropCapture.liveRim = p.getBoolean(k.KEY_GLASS_LIVE_CLARITY, GlassDefaults.LIVE_CLARITY)
         GlassNavDroplet.enabled = p.getBoolean(k.KEY_GLASS_NAV_DROPLET, GlassDefaults.NAV_DROPLET)
         GlassView.assembleOnAppear = p.getBoolean(k.KEY_GLASS_ASSEMBLE, GlassDefaults.ASSEMBLE)
         GlassView.stillSkipsScroll = p.getBoolean(k.KEY_GLASS_STILL_SKIPS_SCROLL, GlassDefaults.STILL_SKIPS_SCROLL)
+        MEDIA_VIEWER = p.getBoolean(k.KEY_GLASS_MEDIA_VIEWER, GlassDefaults.MEDIA_VIEWER)
         GlassParams.defaultRimStrokeAngle = p.getInt(k.KEY_GLASS_RIM_ANGLE, GlassDefaults.RIM_ANGLE).toFloat()
         // A set pill colour wins over the frost, the fabColored stand-down pattern.
         tokenTabPillSet = p.getInt(k.OVR_TAB_ACTIVE_PILL, 0) != 0
@@ -452,6 +460,16 @@ internal fun isAncestorOf(maybeAncestor: View, v: View): Boolean {
         hops++
     }
     return false
+}
+
+/** offsetDescendantRectToMyCoords that never throws: some ROMs dump the whole view tree before throwing, and the frame stalls. */
+internal fun ViewGroup.offsetDescendantRect(descendant: View, rect: Rect): Boolean {
+    if (descendant !== this) {
+        var p: ViewParent? = descendant.parent
+        while (p is View && p !== this) p = p.parent
+        if (p !== this) return false
+    }
+    return runCatching { offsetDescendantRectToMyCoords(descendant, rect) }.isSuccess
 }
 
 /** Corner radius of the background about to be replaced; must be called before that background is cleared. */

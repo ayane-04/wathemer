@@ -139,7 +139,7 @@ internal class SelectionPane(
             host.getLocationOnScreen(at)
             m.set(place)
             m.postTranslate(-at[0].toFloat(), -at[1].toFloat())
-            canvas.drawBitmap(bmp, m, bmpPaint)
+            if (!FrostDrawable.drawCapped(canvas, bmp, m, box)) canvas.drawBitmap(bmp, m, bmpPaint)
         }
         paint.style = Paint.Style.FILL
         if (lift ushr 24 != 0) {

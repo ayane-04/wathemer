@@ -7,11 +7,14 @@ import android.graphics.Color
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewPropertyAnimator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import com.wathemer.app.glass.GlassView
 import com.wathemer.app.hooks.WaIds
+import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
 import java.lang.reflect.Field
 import java.util.WeakHashMap
@@ -148,6 +151,8 @@ internal fun injectNavGlass() {
             maxDisplacePx = parent.dp(DISPLACE_DP)
             fresnelStrength = 0.5f
             tintColor = glassTintColor
+            // Under Immersive Navbar it sits over the card as a dialog sits over content, so it takes the dialogs' recipe.
+            if (IMMERSIVE_NAV) overGlass(parent)
         }
     }
     val lp = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, h).apply {
@@ -181,10 +186,33 @@ internal fun applyLifts() {
     for (id in fabIds) {
         val v = content.findViewById<View>(id) ?: continue
         if (v.parent !== content || v.height <= 0) continue
+        fabLift[v.animate()] = want
         if (v.translationY != want) v.translationY = want
         runCatching { glassFab(v) }
             .onFailure { XposedBridge.log("[$TAG] glassFab threw: $it") }
     }
+}
+
+/** Each lifted button's lift, keyed by its own animator; the value never points back at it, so a dead button's entry clears. */
+private val fabLift = WeakHashMap<ViewPropertyAnimator, Float>()
+
+private var fabSlideHooked = false
+
+/** WhatsApp's snackbars slide the buttons to an absolute translationY; the lifted ones are held on their lift instead. */
+internal fun ensureFabSlideHook() {
+    if (fabSlideHooked) return
+    fabSlideHooked = true
+    runCatching {
+        XposedHelpers.findAndHookMethod(
+            ViewPropertyAnimator::class.java, "translationY", Float::class.javaPrimitiveType,
+            object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    fabLift[param.thisObject as? ViewPropertyAnimator ?: return]?.let { param.args[0] = it }
+                }
+            },
+        )
+        XposedBridge.log("[$TAG] fab slide hook armed")
+    }.onFailure { XposedBridge.log("[$TAG] fab slide hook FAILED: $it") }
 }
 
 /** Fully transparent: the pane behind it is the button, not a tint on top of it. */

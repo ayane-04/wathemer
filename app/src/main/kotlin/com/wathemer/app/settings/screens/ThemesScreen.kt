@@ -2,19 +2,19 @@
 // The heavy file work runs off the main thread; a theme carrying a wallpaper is megabytes, not bytes.
 package com.wathemer.app.settings.screens
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,21 +45,26 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
 import com.wathemer.app.settings.components.CategoryRow
+import com.wathemer.app.settings.components.ConfirmDialog
+import com.wathemer.app.settings.components.DialogAction
+import com.wathemer.app.settings.components.DialogDismiss
 import com.wathemer.app.settings.components.NavTopBar
+import com.wathemer.app.settings.components.NoticeDialog
 import com.wathemer.app.settings.components.Palette
 import com.wathemer.app.settings.components.SectionHeader
 import com.wathemer.app.settings.components.NoteText
+import com.wathemer.app.settings.components.ThemeDialog
 import com.wathemer.app.settings.nav.NavController
+import com.wathemer.app.settings.nav.Screen
 import com.wathemer.app.settings.prefs.Prefs
 import com.wathemer.app.settings.prefs.ThemeDoc
 import com.wathemer.app.settings.prefs.ThemeFile
 import com.wathemer.app.settings.prefs.ThemeLibrary
-import com.wathemer.app.settings.prefs.WallpaperAsset
 import com.wathemer.app.settings.preview.LocalThemeSnapshot
-import com.wathemer.app.settings.preview.snapshotFromPrefs
+import com.wathemer.app.store.StoreConfig
+import com.wathemer.app.store.StoreFiles
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,7 +72,10 @@ import kotlinx.coroutines.withContext
 
 private const val MAX_THEME_NAME = 48
 
-/** The themes list, and everything you can do to one. A theme carries the glass tuning, never whether glass is on. */
+/** Set by MainActivity from a VIEW Intent, taken once by Saved themes; process-level, like the chat hand-off. */
+internal val pendingThemeFile = mutableStateOf<Uri?>(null)
+
+/** The themes list, and everything you can do to one. A theme carries the whole look, glass and font included. */
 @Composable
 fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) {
     val context = LocalContext.current
@@ -76,6 +84,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
 
     var slots by remember { mutableStateOf<List<ThemeLibrary.Slot>>(emptyList()) }
     var undo by remember { mutableStateOf<ThemeDoc?>(null) }
+    var latest by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var reload by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
 
@@ -87,14 +96,23 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
     var undoing by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<List<String>>(emptyList()) }
     var exporting by remember { mutableStateOf<ThemeLibrary.Slot?>(null) }
+    var submitting by remember { mutableStateOf<ThemeLibrary.Slot?>(null) }
 
     LaunchedEffect(reload) {
         val loaded = withContext(Dispatchers.IO) {
-            ThemeLibrary.list(context) to ThemeLibrary.undoable(context)
+            Triple(
+                ThemeLibrary.list(context),
+                ThemeLibrary.undoable(context),
+                // The summary the last store visit left; this screen never goes to the network.
+                StoreFiles.readSummary(context, StoreConfig.TARGET.storeId)?.latest.orEmpty(),
+            )
         }
         slots = loaded.first
         undo = loaded.second
+        latest = loaded.third
     }
+
+    fun newer(slot: ThemeLibrary.Slot): Boolean = slot.doc.store?.let { (latest[it.id] ?: 0) > it.version } ?: false
 
     // One gate for every file action: nothing overlaps, and the list is re-read when it is done.
     fun work(block: suspend () -> Unit) {
@@ -107,23 +125,20 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
     }
 
     fun applyTheme(slot: ThemeLibrary.Slot, keepUndo: Boolean) = work {
-        val outcome = withContext(Dispatchers.IO) {
-            ThemeLibrary.apply(context, prefs, slot.file, keepUndo)
-        }
-        when (outcome) {
-            is ThemeLibrary.Outcome.Applied -> {
-                // Bump the stamp by hand as well: the wallpaper path can be unchanged while the bytes behind it are not.
-                snapshot.value = snapshotFromPrefs(prefs)
-                    .copy(wallpaperStamp = snapshot.value.wallpaperStamp + 1)
-                if (!keepUndo) ThemeLibrary.clearUndo(context)
-                onMessage("${outcome.name} applied.")
-                if (outcome.problems.isNotEmpty()) notice = outcome.problems
+        val report = applyThemeFile(context, prefs, snapshot, slot.file, keepUndo)
+        onMessage(report.message)
+        if (report.notes.isNotEmpty()) notice = report.notes
+    }
+
+    // One import for the picker and for a file opened from another app, so the two can never say different things.
+    fun importUri(uri: Uri) = work {
+        when (val result = withContext(Dispatchers.IO) { ThemeLibrary.importFile(context, uri) }) {
+            is ThemeLibrary.Import.Added -> {
+                onMessage("${result.slot.doc.name} added to your themes.")
+                // Two dialogs at once reads as a mess; when there is something to say, say it and let them tap the row.
+                if (result.problems.isNotEmpty()) notice = result.problems else applying = result.slot
             }
-            is ThemeLibrary.Outcome.Failed -> onMessage(outcome.reason)
-            ThemeLibrary.Outcome.NeedsStorageAccess -> {
-                onMessage("That theme has a wallpaper, so it needs all-files access.")
-                WallpaperAsset.requestAllFilesAccess(context)
-            }
+            is ThemeLibrary.Import.Failed -> onMessage(result.reason)
         }
     }
 
@@ -131,16 +146,15 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        work {
-            when (val result = withContext(Dispatchers.IO) { ThemeLibrary.importFile(context, uri) }) {
-                is ThemeLibrary.Import.Added -> {
-                    onMessage("${result.slot.doc.name} added to your themes.")
-                    // Two dialogs at once reads as a mess; when there is something to say, say it and let them tap the row.
-                    if (result.problems.isNotEmpty()) notice = result.problems else applying = result.slot
-                }
-                is ThemeLibrary.Import.Failed -> onMessage(result.reason)
-            }
-        }
+        importUri(uri)
+    }
+
+    // A file opened from another app waits while another action finishes, then takes the same road.
+    LaunchedEffect(pendingThemeFile.value, busy) {
+        val uri = pendingThemeFile.value ?: return@LaunchedEffect
+        if (busy) return@LaunchedEffect
+        pendingThemeFile.value = null
+        importUri(uri)
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -160,27 +174,29 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                     context.contentResolver.openOutputStream(uri)?.use { ThemeLibrary.exportTo(slot, it) } ?: false
                 }.getOrDefault(false)
             }
-            onMessage(if (ok) "${slot.doc.name} saved." else "That file could not be written.")
+            onMessage(if (ok) "${slot.doc.name} saved." else "Couldn't write that file.")
         }
     }
 
-    fun share(slot: ThemeLibrary.Slot) = work {
+    fun share(slot: ThemeLibrary.Slot, toStore: Boolean) = work {
         val staged = withContext(Dispatchers.IO) { ThemeLibrary.stageForShare(context, slot) }
         val uri = staged?.let {
             runCatching { FileProvider.getUriForFile(context, "${context.packageName}.files", it) }.getOrNull()
         }
         if (uri == null) {
-            onMessage("Could not prepare that theme for sharing.")
+            onMessage("Couldn't share that theme.")
             return@work
         }
         val send = Intent(Intent.ACTION_SEND).apply {
             type = ThemeFile.MIME
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, slot.doc.name)
+            putExtra(Intent.EXTRA_SUBJECT, if (toStore) "Theme submission: ${slot.doc.name}" else slot.doc.name)
+            // The share sheet itself reads the file through clipData, and the grant stays explicit.
+            clipData = ClipData.newRawUri(slot.doc.name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        runCatching { context.startActivity(Intent.createChooser(send, "Share theme")) }
-            .onFailure { onMessage("Nothing on this phone can share a file.") }
+        runCatching { context.startActivity(Intent.createChooser(send, if (toStore) "Send to the theme store" else "Share theme")) }
+            .onFailure { onMessage("No app to share with.") }
     }
 
     Scaffold(containerColor = Palette.Bg) { inner ->
@@ -195,12 +211,16 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                 CategoryRow(label = "Save the current look", onClick = { naming = true })
                 CategoryRow(
                     label = "Open a theme file",
-                    divider = undo != null,
                     onClick = {
                         // Any type: most phones have no idea what a .wathemer file is, and a filter would hide it.
                         runCatching { importLauncher.launch(arrayOf("*/*")) }
                             .onFailure { onMessage("No file picker on this phone.") }
                     },
+                )
+                CategoryRow(
+                    label = "Theme store",
+                    divider = undo != null,
+                    onClick = { nav.push(Screen.ThemeStore) },
                 )
                 undo?.let { doc ->
                     CategoryRow(
@@ -216,7 +236,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                     NoteText(if (busy) "Working" else "Nothing saved yet.")
                 } else {
                     slots.forEachIndexed { i, slot ->
-                        ThemeSlotRow(context, slot, divider = i < slots.lastIndex) { acting = slot }
+                        ThemeSlotRow(context, slot, newer(slot), divider = i < slots.lastIndex) { acting = slot }
                     }
                 }
             }
@@ -232,7 +252,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                 naming = false
                 work {
                     val saved = withContext(Dispatchers.IO) { ThemeLibrary.saveCurrent(context, prefs, name) }
-                    onMessage(if (saved != null) "Saved as ${saved.doc.name}." else "Could not save that theme.")
+                    onMessage(if (saved != null) "Saved as ${saved.doc.name}." else "Couldn't save that theme.")
                 }
             },
             onDismiss = { naming = false },
@@ -248,7 +268,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
                 renaming = null
                 work {
                     val ok = withContext(Dispatchers.IO) { ThemeLibrary.rename(context, slot, name) }
-                    if (!ok) onMessage("Could not rename that theme.")
+                    if (!ok) onMessage("Couldn't rename that theme.")
                 }
             },
             onDismiss = { renaming = null },
@@ -259,8 +279,10 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
         ActionsDialog(
             context = context,
             slot = slot,
+            newer = newer(slot),
             onApply = { acting = null; applying = slot },
-            onShare = { acting = null; share(slot) },
+            onShare = { acting = null; share(slot, toStore = false) },
+            onSubmit = { acting = null; submitting = slot },
             onExport = {
                 acting = null
                 exporting = slot
@@ -274,26 +296,29 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
     }
 
     applying?.let { slot ->
-        val carriesWallpaper = slot.doc.wallpaper?.hasImage == true
-        val carriesGlass = slot.doc.glass != null
         ConfirmDialog(
             title = "Apply ${slot.doc.name}?",
-            body = buildString {
-                append("Replaces your colours, bubble shapes, icons and font.")
-                if (carriesGlass) append(" Its glass settings replace yours.")
-                if (carriesWallpaper) append(" Your wallpaper is replaced too.")
-                append(" You can undo it.")
-            },
+            body = applyBody(slot.doc),
             confirmLabel = "Apply",
             onConfirm = { applying = null; applyTheme(slot, keepUndo = true) },
             onDismiss = { applying = null },
         )
     }
 
+    submitting?.let { slot ->
+        ConfirmDialog(
+            title = "Send to the theme store?",
+            body = "Choose Telegram, then the @wathemer_chat group. Only send themes you made or are allowed to share.",
+            confirmLabel = "Send",
+            onConfirm = { submitting = null; share(slot, toStore = true) },
+            onDismiss = { submitting = null },
+        )
+    }
+
     deleting?.let { slot ->
         ConfirmDialog(
             title = "Delete ${slot.doc.name}?",
-            body = "It leaves your list. WhatsApp stays as it is.",
+            body = "",
             confirmLabel = "Delete",
             onConfirm = {
                 deleting = null
@@ -307,7 +332,7 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
         val previous = undo
         ConfirmDialog(
             title = "Undo the last change?",
-            body = "Your colours and wallpaper go back to how they were before the last theme. Once only.",
+            body = "Goes back to before the last theme. Works once.",
             confirmLabel = "Undo",
             onConfirm = {
                 undoing = false
@@ -328,11 +353,11 @@ fun ThemesScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> Unit) 
 // ── Rows ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ThemeSlotRow(context: Context, slot: ThemeLibrary.Slot, divider: Boolean, onClick: () -> Unit) {
+private fun ThemeSlotRow(context: Context, slot: ThemeLibrary.Slot, newer: Boolean, divider: Boolean, onClick: () -> Unit) {
     val doc = slot.doc
     CategoryRow(
         label = doc.name,
-        description = describe(context, doc),
+        description = describe(context, doc, newer),
         leading = {
             ThemeBadge(
                 primary = doc.colors?.get(Prefs.KEY_PRIMARY) ?: Prefs.DEFAULT_PRIMARY,
@@ -362,25 +387,13 @@ private fun ThemeBadge(primary: Int, background: Int, text: Int) {
 // ── Dialogs ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun ThemeDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Palette.Surface, RoundedCornerShape(16.dp))
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            content = content,
-        )
-    }
-}
-
-@Composable
 private fun ActionsDialog(
     context: Context,
     slot: ThemeLibrary.Slot,
+    newer: Boolean,
     onApply: () -> Unit,
     onShare: () -> Unit,
+    onSubmit: () -> Unit,
     onExport: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -388,7 +401,7 @@ private fun ActionsDialog(
 ) {
     ThemeDialog(onDismiss) {
         Text(slot.doc.name, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        Text(describe(context, slot.doc), color = Palette.FgMuted, fontSize = 14.sp)
+        Text(describe(context, slot.doc, newer), color = Palette.FgMuted, fontSize = 14.sp)
         // Body scrolls and the dismiss stays outside it, or a tall font scale pushes the last row off the window.
         Column(
             modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
@@ -398,45 +411,12 @@ private fun ActionsDialog(
                 Text("Apply", fontWeight = FontWeight.Medium)
             }
             DialogAction("Share", onShare)
+            DialogAction("Send to the theme store", onSubmit)
             DialogAction("Save to a file", onExport)
             DialogAction("Rename", onRename)
             DialogAction("Delete", onDelete)
         }
         DialogDismiss("Close", onDismiss)
-    }
-}
-
-@Composable
-private fun DialogAction(label: String, onClick: () -> Unit) {
-    Text(
-        label,
-        color = Palette.Fg,
-        fontSize = 16.sp,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
-    )
-}
-
-@Composable
-private fun ConfirmDialog(
-    title: String,
-    body: String,
-    confirmLabel: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ThemeDialog(onDismiss) {
-        Text(title, color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        Text(body, color = Palette.FgMuted, fontSize = 14.sp, lineHeight = 20.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
-                onClick = onDismiss,
-                modifier = Modifier.weight(1f),
-                border = BorderStroke(1.dp, Palette.RuleStrong),
-            ) { Text("Cancel", color = Palette.Fg) }
-            Button(onClick = onConfirm, modifier = Modifier.weight(1f)) {
-                Text(confirmLabel, fontWeight = FontWeight.Medium)
-            }
-        }
     }
 }
 
@@ -489,36 +469,12 @@ private fun NameDialog(
     }
 }
 
-@Composable
-private fun NoticeDialog(lines: List<String>, onDismiss: () -> Unit) {
-    ThemeDialog(onDismiss) {
-        Text("Notes", color = Palette.Fg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        Column(
-            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            lines.forEach { Text(it, color = Palette.FgMuted, fontSize = 14.sp, lineHeight = 20.sp) }
-        }
-        DialogDismiss("OK", onDismiss)
-    }
-}
-
-@Composable
-private fun DialogDismiss(label: String, onClick: () -> Unit) {
-    Text(
-        label,
-        color = Palette.FgMuted,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
-    )
-}
-
 // ── Text ─────────────────────────────────────────────────────────────────
 
-/** One line under the name: whether it carries a wallpaper, how many colours, and when it was made. */
-private fun describe(context: Context, doc: ThemeDoc): String {
+/** One line under the name: where it came from, whether it carries a wallpaper, how many colours, and when it was made. */
+private fun describe(context: Context, doc: ThemeDoc, newer: Boolean): String {
     val parts = mutableListOf<String>()
+    if (doc.store != null) parts += if (newer) "Update available" else "From the store"
     if (doc.wallpaper?.hasImage == true) parts += "Wallpaper"
     when (val n = doc.colors?.size ?: 0) {
         0 -> parts += "Stock colours"

@@ -151,9 +151,9 @@ fun SingleBubblePreview(isOutgoing: Boolean, style: Int, tint: Color, modifier: 
             horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start,
         ) {
             if (isOutgoing) {
-                OutgoingBubble(tint, onTint, dateColor, "This is your outgoing bubble", "10:14", shape = shape, tintable = tintable)
+                OutgoingBubble(tint, onTint, dateColor, "Sounds good!", "10:14", shape = shape, tintable = tintable)
             } else {
-                IncomingBubble(tint, onTint, dateColor, "This is an incoming bubble", "10:14", shape = shape, tintable = tintable)
+                IncomingBubble(tint, onTint, dateColor, "Hey, are you home?", "10:14", shape = shape, tintable = tintable)
             }
         }
     }

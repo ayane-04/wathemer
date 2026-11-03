@@ -9,7 +9,6 @@ import com.wathemer.app.hooks.BubbleColors
 import com.wathemer.app.hooks.BubbleShapes
 import com.wathemer.app.hooks.ChatHeaderColors
 import com.wathemer.app.hooks.ChatWallpaperMenu
-import com.wathemer.app.hooks.Diag
 import com.wathemer.app.hooks.HookLog
 import com.wathemer.app.hooks.ComposeBarColors
 import com.wathemer.app.hooks.EffectsOverlays
@@ -74,9 +73,6 @@ class ModernEntry : XposedModule() {
             // Registers the one Activity callback set; every lifecycle client rides it, whenever it registered.
             try { ActivityLifecycle.attach(app) }
             catch (t: Throwable) { HookLog.fail("lifecycle/activity", t) }
-            // Debug builds only; its dumps are posted after each resume, so they see what the installers below paint.
-            try { Diag.attach(app) }
-            catch (t: Throwable) { HookLog.fail("diag/attach", t) }
             // Read before the installers below; the ones covering WaEnhancer's surfaces consult it as they register.
             try { WaeCompat.load() }
             catch (t: Throwable) { HookLog.fail("compat/waenhancer", t) }

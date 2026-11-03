@@ -1,4 +1,4 @@
-// The .wathemer file: a zip holding theme.json first and, when the theme has one, wallpaper.png.
+// The .wathemer file: a zip holding theme.json first, then wallpaper.png and font.ttf when the theme has them.
 // Read it defensively. These files arrive from strangers, so everything is capped, checked and whitelisted.
 package com.wathemer.app.settings.prefs
 
@@ -29,12 +29,13 @@ data class ThemeDoc(
     val glass: ThemeGlass?,
     // Defaulted: the harness builds documents by hand without it.
     val ticks: ThemeTicks? = null,
+    val store: ThemeStoreRef? = null,
 )
 
 /** [hasImage] says whether wallpaper.png is in the archive; without it there is nothing to point the store at. */
 data class ThemeWallpaper(val hasImage: Boolean, val enabled: Boolean, val dim: Int, val blur: Int)
 
-/** The glass sliders and switches. Carries the look, never [Prefs.KEY_GLASS_ENABLED], which stays with the wallpaper gate. */
+/** The glass sliders and switches, and whether glass is on, which apply holds off while no wallpaper is live. */
 data class ThemeGlass(
     val blur: Int,
     val tint: Int,
@@ -62,6 +63,11 @@ data class ThemeGlass(
     val rowOptics: Boolean = GlassDefaults.ROW_OPTICS,
     val shapedBubbles: Boolean = GlassDefaults.SHAPED_BUBBLES,
     val stillSkipsScroll: Boolean = GlassDefaults.STILL_SKIPS_SCROLL,
+    val mediaViewer: Boolean = GlassDefaults.MEDIA_VIEWER,
+    val brightCap: Int = GlassDefaults.BRIGHT_CAP,
+    val immersiveNav: Boolean = GlassDefaults.IMMERSIVE_NAV,
+    /** Whether Liquid Glass is on; null in a file from before themes carried it, which leaves the switch alone. */
+    val enabled: Boolean? = null,
 )
 
 /** Shapes travel as asset names, never as the stored index: the registry is ordered and a removal renumbers it. */
@@ -70,8 +76,11 @@ data class ThemeBubbles(val incoming: String?, val outgoing: String?)
 /** The tick style travels as its asset prefix, never the index, for the same reason. */
 data class ThemeTicks(val style: String?)
 
-/** [id] is a bundled font id, [name] the display name of an imported one; both blank for stock. */
-data class ThemeFont(val kind: ThemeFontKind, val id: String, val name: String)
+/** The store entry a saved theme came from; only a store install writes it, and an import from a file drops it. */
+data class ThemeStoreRef(val id: String, val version: Int)
+
+/** [id] is a bundled font id, [name] an imported one's display name, both blank for stock; [hasFile] says font.ttf is in the archive. */
+data class ThemeFont(val kind: ThemeFontKind, val id: String, val name: String, val hasFile: Boolean = false)
 
 enum class ThemeFontKind { STOCK, BUILTIN, USER }
 
@@ -84,31 +93,46 @@ object ThemeFile {
     /** Sent as a zip so receiving apps treat it as a document rather than refusing an unknown type. */
     const val MIME = "application/zip"
 
-    /** Raise only for a change an older reader could not survive; a reader refuses anything above its own. */
-    const val FORMAT = 1
+    /** The highest format this reader takes; a reader refuses anything above its own, so raise it only for what an older one cannot survive. */
+    const val FORMAT = 2
+
+    /** A file without a font is written as 1, which every older reader opens. */
+    private const val FORMAT_PLAIN = 1
 
     private const val ENTRY_JSON = "theme.json"
     private const val ENTRY_WALLPAPER = "wallpaper.png"
+    private const val ENTRY_FONT = "font.ttf"
 
     private const val MAX_JSON_BYTES = 256 * 1024
     private const val MAX_WALLPAPER_BYTES = 32L * 1024 * 1024
     private const val MAX_NAME_CHARS = 48
 
+    // A wallpaper is one screen; past these its decode can outgrow what a canvas will draw, which crashes WhatsApp.
+    private const val MAX_WALLPAPER_SIDE = 8192
+    private const val MAX_WALLPAPER_PIXELS = 8L * 1024 * 1024
+
     // Skipping an entry decompresses it, so an entry nobody reads is still a bomb. Both caps exist for that.
     private const val MAX_ENTRIES = 32
     private const val MAX_SKIPPED_BYTES = 1024 * 1024
 
+    /** The store's id rule, the same the catalogue enforces. */
+    val STORE_ID = Regex("^[a-z0-9][a-z0-9-]{0,39}$")
+
     /** [problems] are things the reader coped with; the theme is still usable. */
     sealed interface Load {
-        data class Ok(val doc: ThemeDoc, val wallpaper: File?, val problems: List<String>) : Load
+        data class Ok(val doc: ThemeDoc, val wallpaper: File?, val problems: List<String>, val font: File? = null) : Load
         data class Failed(val reason: String) : Load
     }
 
-    /** Write the archive. theme.json goes first so a list screen reads a header without touching the image. */
-    fun write(out: OutputStream, doc: ThemeDoc, wallpaper: File?): Boolean {
+    /** Write the archive. theme.json goes first so a list screen reads a header without touching the image or the font. */
+    fun write(out: OutputStream, doc: ThemeDoc, wallpaper: File?, font: File? = null): Boolean {
         val image = wallpaper?.takeIf { it.canRead() && it.length() > 0 }
-        // The header follows the file on disk, never the caller's claim, so the two can never disagree.
-        val header = doc.copy(wallpaper = doc.wallpaper?.copy(hasImage = image != null))
+        val fontFile = font?.takeIf { doc.font?.kind == ThemeFontKind.USER && it.canRead() && it.length() > 0 }
+        // The header follows the files on disk, never the caller's claim, so the two can never disagree.
+        val header = doc.copy(
+            wallpaper = doc.wallpaper?.copy(hasImage = image != null),
+            font = doc.font?.copy(hasFile = fontFile != null),
+        )
         return runCatching {
             ZipOutputStream(out.buffered()).use { zos ->
                 zos.putNextEntry(ZipEntry(ENTRY_JSON))
@@ -119,35 +143,52 @@ object ThemeFile {
                     image.inputStream().use { it.copyTo(zos) }
                     zos.closeEntry()
                 }
+                if (fontFile != null) {
+                    zos.putNextEntry(ZipEntry(ENTRY_FONT))
+                    fontFile.inputStream().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                }
             }
         }.onFailure { Log.w(TAG, "write failed: $it") }.isSuccess
     }
 
-    /** Read a whole archive, staging the wallpaper into [stage]. Takes ownership of [input] and closes it. */
+    /** Read a whole archive, staging the wallpaper into [stage] and the font beside it. Takes ownership of [input] and closes it. */
     fun load(input: InputStream, stage: File): Load {
-        var json: String? = null
+        var header: JSONObject? = null
         var image: File? = null
+        var font: File? = null
         try {
             ZipInputStream(input.buffered()).use { zis ->
                 var seen = 0
                 while (true) {
                     val entry = zis.nextEntry ?: break
                     if (++seen > MAX_ENTRIES) {
-                        return failStaged(stage, "That file holds far more than a theme does.")
+                        return failStaged(stage, "That file is too big to be a theme.")
                     }
                     // Entry names are compared, never joined onto a path, so a crafted name has nowhere to escape to.
                     when (entry.name) {
-                        ENTRY_JSON ->
-                            json = (readCapped(zis, MAX_JSON_BYTES)
-                                ?: return failStaged(stage, "That theme's description is too large to be genuine."))
+                        ENTRY_JSON -> {
+                            val text = (readCapped(zis, MAX_JSON_BYTES)
+                                ?: return failStaged(stage, "That theme file is too big."))
                                 .toString(Charsets.UTF_8)
+                            val parsed = runCatching { JSONObject(text) }.getOrNull()
+                                ?: return failStaged(stage, "That theme file is damaged.")
+                            // Judged before the entries after it, which only a reader of that format knows how to size.
+                            if (parsed.optInt("format", 0) > FORMAT) {
+                                return failStaged(stage, "Made with a newer WaThemer. Update the app first.")
+                            }
+                            header = parsed
+                        }
                         ENTRY_WALLPAPER ->
                             image = copyCapped(zis, stage, MAX_WALLPAPER_BYTES)
-                                ?: return failStaged(stage, "That theme's wallpaper is too large to import.")
+                                ?: return failStaged(stage, "The theme's wallpaper file is too big.")
+                        ENTRY_FONT ->
+                            font = copyCapped(zis, fontStageOf(stage), FontLibrary.MAX_FONT_BYTES)
+                                ?: return failStaged(stage, "The theme's font file is too big.")
                         // Read the rest by hand rather than letting closeEntry do it, so the cap applies to them too.
                         else ->
                             if (readCapped(zis, MAX_SKIPPED_BYTES) == null) {
-                                return failStaged(stage, "That file carries something far too large to be part of a theme.")
+                                return failStaged(stage, "That file is too big to be a theme.")
                             }
                     }
                     zis.closeEntry()
@@ -155,33 +196,39 @@ object ThemeFile {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "load: unreadable archive: $t")
-            return failStaged(stage, "That file is not a WaThemer theme, or it arrived damaged.")
+            return failStaged(stage, "Not a WaThemer theme, or the file is damaged.")
         }
 
-        val text = json ?: return failStaged(stage, "That file is not a WaThemer theme.")
-        val root = runCatching { JSONObject(text) }.getOrNull()
-            ?: return failStaged(stage, "That theme's description could not be read.")
-        val format = root.optInt("format", 0)
-        if (format <= 0) return failStaged(stage, "That file is not a WaThemer theme.")
-        if (format > FORMAT) {
-            return failStaged(stage, "That theme was made by a newer WaThemer. Update the app and try again.")
-        }
+        val root = header ?: return failStaged(stage, "Not a WaThemer theme.")
+        if (root.optInt("format", 0) <= 0) return failStaged(stage, "Not a WaThemer theme.")
 
         val problems = mutableListOf<String>()
         val doc = parse(root, problems)
-        val staged = image
-        // A header promising an image with nothing behind it would apply as a theme nobody exported.
-        if (doc.wallpaper?.hasImage == true && staged == null) {
-            return failStaged(stage, "That theme says it has a wallpaper but the file does not carry one.")
+        // A header promising a file with nothing behind it would apply as a theme nobody exported.
+        if (doc.wallpaper?.hasImage == true && image == null) {
+            return failStaged(stage, "The theme's wallpaper is missing from the file.")
         }
-        if (staged != null && doc.wallpaper?.hasImage != true) {
-            staged.delete()
-            return Load.Ok(doc, null, problems.distinct())
+        if (doc.font?.hasFile == true && font == null) {
+            return failStaged(stage, "The theme's font is missing from the file.")
         }
-        if (staged != null && !decodes(staged)) {
-            return failStaged(stage, "That theme's wallpaper is not an image this phone can read.")
+        var wallpaper = image
+        if (wallpaper != null && doc.wallpaper?.hasImage != true) {
+            wallpaper.delete()
+            wallpaper = null
         }
-        return Load.Ok(doc, staged, problems.distinct())
+        var fontFile = font
+        if (fontFile != null && doc.font?.hasFile != true) {
+            fontFile.delete()
+            fontFile = null
+        }
+        if (wallpaper != null) {
+            val (w, h) = bounds(wallpaper)
+                ?: return failStaged(stage, "Can't read the theme's wallpaper.")
+            if (maxOf(w, h) > MAX_WALLPAPER_SIDE || w.toLong() * h > MAX_WALLPAPER_PIXELS) {
+                return failStaged(stage, "The theme's wallpaper is too big.")
+            }
+        }
+        return Load.Ok(doc, wallpaper, problems.distinct(), fontFile)
     }
 
     /** Header only. Reads up to theme.json, which is why write puts it first. */
@@ -204,6 +251,14 @@ object ThemeFile {
             }
             null
         }
+    }.getOrNull()
+
+    /** A bare theme.json, as the store publishes it for previews; the same caps and format check as a full read. */
+    fun parseHeader(bytes: ByteArray): ThemeDoc? = runCatching {
+        if (bytes.size > MAX_JSON_BYTES) return@runCatching null
+        val root = JSONObject(bytes.toString(Charsets.UTF_8))
+        if (root.optInt("format", 0) !in 1..FORMAT) return@runCatching null
+        parse(root, mutableListOf())
     }.getOrNull()
 
     /** Trim to one printable line and cap it. The name is display text; a slot's filename is its stamp. */
@@ -234,7 +289,8 @@ object ThemeFile {
 
     private fun toJson(doc: ThemeDoc): String {
         val root = JSONObject()
-        root.put("format", FORMAT)
+        // Only a file carrying a font is 2, so an older reader refuses it rather than apply the look without its font.
+        root.put("format", if (doc.font?.hasFile == true) FORMAT else FORMAT_PLAIN)
         root.put("app", "WaThemer")
         root.put("appVersion", doc.appVersion)
         root.put("name", doc.name)
@@ -277,14 +333,18 @@ object ThemeFile {
                 JSONObject()
                     .put("kind", f.kind.name.lowercase())
                     .put("id", f.id)
-                    .put("name", f.name),
+                    .put("name", f.name)
+                    .put("file", f.hasFile),
             )
         }
+        doc.store?.let { s -> root.put("store", JSONObject().put("id", s.id).put("version", s.version)) }
         // A new section rather than a format bump: an older reader skips what it does not know.
         doc.glass?.let { g ->
+            val o = JSONObject()
+            g.enabled?.let { o.put("enabled", it) }
             root.put(
                 "glass",
-                JSONObject()
+                o
                     .put("blur", g.blur)
                     .put("tint", g.tint)
                     .put("displace", g.displace)
@@ -309,7 +369,10 @@ object ThemeFile {
                     .put("popupMorph", g.popupMorph)
                     .put("rowOptics", g.rowOptics)
                     .put("shapedBubbles", g.shapedBubbles)
-                    .put("stillSkipsScroll", g.stillSkipsScroll),
+                    .put("stillSkipsScroll", g.stillSkipsScroll)
+                    .put("mediaViewer", g.mediaViewer)
+                    .put("brightCap", g.brightCap)
+                    .put("immersiveNav", g.immersiveNav),
             )
         }
         return root.toString(2)
@@ -326,8 +389,8 @@ object ThemeFile {
                 if (argb == null) { unreadable++; continue }
                 out[key] = argb
             }
-            if (unknown > 0) problems += "$unknown colour setting(s) this version does not know were skipped."
-            if (unreadable > 0) problems += "$unreadable colour value(s) could not be read and were skipped."
+            if (unknown > 0) problems += "Skipped $unknown colour setting(s) this version doesn't have."
+            if (unreadable > 0) problems += "Skipped $unreadable colour value(s) that couldn't be read."
             out
         }
 
@@ -352,6 +415,13 @@ object ThemeFile {
             ThemeTicks(style = o.optString("style").trim().take(64).takeIf { it.isNotBlank() })
         }
 
+        val store = root.optJSONObject("store")?.let { o ->
+            // Typed, not coerced: org.json would read the text "3" as the number 3.
+            val id = o.opt("id") as? String ?: ""
+            val version = o.opt("version") as? Int ?: 0
+            if (STORE_ID.matches(id) && version in 1..1_000_000) ThemeStoreRef(id, version) else null
+        }
+
         val flags = LinkedHashMap<String, Boolean>()
         root.optJSONObject("flags")?.let { o ->
             for (key in o.keys()) {
@@ -369,6 +439,7 @@ object ThemeFile {
                 kind = kind,
                 id = o.optString("id").trim().filter { it in 'a'..'z' || it in '0'..'9' || it == '_' }.take(32),
                 name = if (kind == ThemeFontKind.USER) oneLine(o.optString("name")) else "",
+                hasFile = kind == ThemeFontKind.USER && o.optBoolean("file", false),
             )
         }
 
@@ -400,6 +471,11 @@ object ThemeFile {
                 rowOptics = o.optBoolean("rowOptics", GlassDefaults.ROW_OPTICS),
                 shapedBubbles = o.optBoolean("shapedBubbles", GlassDefaults.SHAPED_BUBBLES),
                 stillSkipsScroll = o.optBoolean("stillSkipsScroll", GlassDefaults.STILL_SKIPS_SCROLL),
+                mediaViewer = o.optBoolean("mediaViewer", GlassDefaults.MEDIA_VIEWER),
+                brightCap = o.optInt("brightCap", GlassDefaults.BRIGHT_CAP).coerceIn(0, 100),
+                immersiveNav = o.optBoolean("immersiveNav", GlassDefaults.IMMERSIVE_NAV),
+                // A real boolean or nothing: junk must leave the switch alone, not turn glass off.
+                enabled = o.opt("enabled") as? Boolean,
             )
         }
 
@@ -414,6 +490,7 @@ object ThemeFile {
             font = font,
             glass = glass,
             ticks = ticks,
+            store = store,
         )
     }
 
@@ -461,15 +538,19 @@ object ThemeFile {
         return dest
     }
 
-    /** Bounds-only decode; a file that is not an image must never become what the wallpaper pref points at. */
-    private fun decodes(f: File): Boolean {
+    /** Bounds-only decode, width then height; null for a file that is not an image, which must never become what the wallpaper pref points at. */
+    private fun bounds(f: File): Pair<Int, Int>? {
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         runCatching { BitmapFactory.decodeFile(f.absolutePath, opts) }
-        return opts.outWidth > 0 && opts.outHeight > 0
+        return if (opts.outWidth > 0 && opts.outHeight > 0) opts.outWidth to opts.outHeight else null
     }
+
+    /** Where a theme's font stages: beside its wallpaper, so one failure path clears both. */
+    private fun fontStageOf(stage: File): File = File(stage.path + ".font")
 
     private fun failStaged(stage: File, reason: String): Load.Failed {
         stage.delete()
+        fontStageOf(stage).delete()
         return Load.Failed(reason)
     }
 }

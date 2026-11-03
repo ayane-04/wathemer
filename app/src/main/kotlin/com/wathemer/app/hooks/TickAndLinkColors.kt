@@ -26,8 +26,9 @@ private fun isBlueish(color: Int): Boolean {
     return b > 150 && b > r * 1.3 && b > g
 }
 
-/** Whether a tint WhatsApp hands a tick means read; TickShapes keys its read art on the same test. */
-internal fun isTickReadColour(color: Int): Boolean = KNOWN_BLUES.contains(color) || isBlueish(color)
+/** Whether a tint WhatsApp hands a tick means read, for TickShapes too; a token colour never does, as no seed is blue. */
+internal fun isTickReadColour(color: Int): Boolean =
+    KNOWN_BLUES.contains(color) || (!ColorMap.isTokenColour(color) && isBlueish(color))
 
 object TickAndLinkColors {
 

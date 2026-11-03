@@ -121,7 +121,7 @@ object ActionModeColors {
                     intArrayOf(android.R.attr.state_checked),
                     intArrayOf(),
                 ),
-                intArrayOf(closeRipple, 0x33FFFFFF.toInt()),
+                intArrayOf(closeRipple, 0x33FFFFFF),
             )
             view.background = RippleDrawable(rippleCsl, null, null)
         }

@@ -579,7 +579,7 @@ fun restartWhatsApp(context: Context, onMessage: (String) -> Unit) {
                 "Restarting WhatsApp"
             }
             RestartWhatsApp.Result.NOT_INSTALLED -> "WhatsApp is not installed."
-            RestartWhatsApp.Result.LAUNCH_FAILED -> "Could not launch WhatsApp."
+            RestartWhatsApp.Result.LAUNCH_FAILED -> "Couldn't start WhatsApp."
         }
         onMessage(msg)
     }
@@ -606,7 +606,7 @@ fun RestartBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Changes apply the next time WhatsApp starts.",
+                "Restart WhatsApp to apply.",
                 color = Palette.FgMuted,
                 fontSize = 14.sp,
                 modifier = Modifier.weight(1f),

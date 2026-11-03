@@ -1,5 +1,6 @@
 package com.wathemer.app.settings.screens
 
+import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +36,8 @@ import com.wathemer.app.settings.preview.LocalThemeSnapshot
 import com.wathemer.app.settings.preview.WaPreview
 import com.wathemer.app.settings.preview.WaPreviewKind
 import com.wathemer.app.settings.preview.snapshotFromPrefs
+import com.wathemer.app.store.StoreConfig
+import com.wathemer.app.store.StoreFiles
 import com.wathemer.app.update.isNewerVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -47,8 +50,14 @@ fun CategoryListScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> 
     val snap by snapshot
     var themed by remember { mutableStateOf(prefs.hasGlobalTheme()) }
     var themeCount by remember { mutableIntStateOf(-1) }
+    var storeHint by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
-        themeCount = withContext(Dispatchers.IO) { runCatching { ThemeLibrary.list(context).size }.getOrDefault(0) }
+        val (count, hint) = withContext(Dispatchers.IO) {
+            val slots = runCatching { ThemeLibrary.list(context) }.getOrDefault(emptyList())
+            slots.size to storeHintOf(context, slots)
+        }
+        themeCount = count
+        storeHint = hint
     }
     val presetName = detectPresetName(snap.primary, snap.background, snap.text)
     val hasImage = !snap.wallpaperPath.isNullOrBlank()
@@ -138,8 +147,14 @@ fun CategoryListScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> 
                         themeCount == 0 -> "None"
                         else -> "$themeCount"
                     },
-                    divider = newer,
                     onClick = { nav.push(Screen.Themes) },
+                )
+                CategoryRow(
+                    label = "Theme store",
+                    leading = { RowIcon(R.drawable.ic_row_themes) },
+                    trailingHint = storeHint,
+                    divider = newer,
+                    onClick = { nav.push(Screen.ThemeStore) },
                 )
                 if (newer) {
                     CategoryRow(
@@ -152,6 +167,20 @@ fun CategoryListScreen(nav: NavController, prefs: Prefs, onMessage: (String) -> 
                 }
             }
         }
+    }
+}
+
+/** From the summary the last store visit left, never the network: updates waiting for saved themes, else the store's size. */
+private fun storeHintOf(context: Context, slots: List<ThemeLibrary.Slot>): String? {
+    val summary = StoreFiles.readSummary(context, StoreConfig.TARGET.storeId) ?: return null
+    val held = HashMap<String, Int>()
+    for (slot in slots) slot.doc.store?.let { ref -> held[ref.id] = maxOf(ref.version, held[ref.id] ?: 0) }
+    val updates = held.count { (id, version) -> (summary.latest[id] ?: 0) > version }
+    return when {
+        updates == 1 -> "1 update"
+        updates > 1 -> "$updates updates"
+        summary.themes > 0 -> "${summary.themes}"
+        else -> null
     }
 }
 

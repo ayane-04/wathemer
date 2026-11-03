@@ -361,7 +361,7 @@ private fun animateSearchEntry(toolbar: View, root: ViewGroup) {
     val content = contentRef?.get() ?: return
     // Both sides layout-relative and blind to translation, so the delta is between resting positions, not animation frames.
     val tb = Rect(0, 0, toolbar.width, toolbar.height)
-    if (!runCatching { content.offsetDescendantRectToMyCoords(toolbar, tb) }.isSuccess) return
+    if (!content.offsetDescendantRect(toolbar, tb)) return
     val delta = (homeBarTop + homeBarHeight / 2f) - (tb.top + tb.height() / 2f)
     if (abs(delta) < 1f) return
     // More than half the screen means a wrong reading; refuse with a log rather than slide in from off-screen.
@@ -453,7 +453,7 @@ private fun syncSearchPanel() {
     val toolbar = searchToolbarRef?.get() ?: return
     if (toolbar.width <= 0 || toolbar.height <= 0) return
     val rect = Rect(0, 0, toolbar.width, toolbar.height)
-    if (!runCatching { content.offsetDescendantRectToMyCoords(toolbar, rect) }.isSuccess) return
+    if (!content.offsetDescendantRect(toolbar, rect)) return
     // The resting place for the return trip; layout coordinates stay truthful mid-glide.
     searchFieldRestTop = rect.top
     searchFieldRestH = rect.height()

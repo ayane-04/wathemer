@@ -71,6 +71,11 @@ class GlassView @JvmOverloads constructor(
                     lastScreenY = screenLoc[1]
                     lastActivityMs = now
                 }
+                if (sourceChanged?.invoke() == true) lastActivityMs = now
+                // A pager keeps its neighbour pages attached; their panes show nothing, so they capture nothing.
+                if (skipOffscreen && (screenLoc[0] >= resources.displayMetrics.widthPixels || screenLoc[0] + width <= 0)) {
+                    return@OnPreDrawListener true
+                }
                 // Nothing live behind it: only the wallpaper views, or a dropped display list, change what it shows.
                 if (stillSkipsScroll && backdrop == null) {
                     val fresh = capture.needsFreshCapture
@@ -99,6 +104,12 @@ class GlassView @JvmOverloads constructor(
     }
 
     private var loggedPreDrawThrow = false
+
+    /** Asked each pre-draw; a source that changes without scrolling, a photo's zoom, counts as activity. */
+    var sourceChanged: (() -> Boolean)? = null
+
+    /** Opt-in: no capture while the pane is wholly off-screen sideways. */
+    var skipOffscreen = false
 
     private var lastCaptureMs = 0L
 
@@ -625,7 +636,6 @@ class GlassView @JvmOverloads constructor(
         /** Glass with nothing live behind it ignores other views' scrolling and watches its wallpaper views instead; set at install. */
         @JvmStatic var stillSkipsScroll: Boolean = false
 
-        /** Ints per wallpaper view in the signature [underlayChanged] keeps. */
         private const val SIG_FIELDS = 8
 
         const val APPEAR_MS = 220L
